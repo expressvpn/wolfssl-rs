@@ -4,7 +4,8 @@
 #![warn(missing_docs)]
 
 mod errors;
-use errors::{WolfCleanupError, WolfInitError};
+
+use errors::{LoadRootCertificateError, WolfCleanupError, WolfInitError};
 
 /// Wraps [`wolfSSL_Init`][0]
 ///
@@ -80,6 +81,13 @@ impl WolfMethod {
 }
 
 #[allow(missing_docs)]
+pub enum RootCertificate<'a> {
+    PemBuffer(&'a [u8]),
+    Asn1Buffer(&'a [u8]),
+    PemFileOrDirectory(&'a std::path::Path),
+}
+
+#[allow(missing_docs)]
 pub struct WolfContextBuilder(*mut wolfssl_sys::WOLFSSL_CTX);
 
 impl WolfContextBuilder {
@@ -95,6 +103,68 @@ impl WolfContextBuilder {
             Some(Self(ctx))
         } else {
             None
+        }
+    }
+
+    /// Wraps [`wolfSSL_CTX_load_verify_buffer`][0] and [`wolfSSL_CTX_load_verify_locations`][1]
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_load_verify_buffer
+    /// [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_load_verify_locations
+    pub fn with_root_certificate(
+        self,
+        root: RootCertificate,
+    ) -> Result<Self, LoadRootCertificateError> {
+        use wolfssl_sys::{
+            wolfSSL_CTX_load_verify_buffer, wolfSSL_CTX_load_verify_locations,
+            WOLFSSL_FILETYPE_ASN1, WOLFSSL_FILETYPE_PEM, WOLFSSL_SUCCESS,
+        };
+
+        let result = match root {
+            RootCertificate::Asn1Buffer(buf) => unsafe {
+                wolfSSL_CTX_load_verify_buffer(
+                    self.0,
+                    buf.as_ptr(),
+                    buf.len() as i64,
+                    WOLFSSL_FILETYPE_ASN1,
+                )
+            },
+            RootCertificate::PemBuffer(buf) => unsafe {
+                wolfSSL_CTX_load_verify_buffer(
+                    self.0,
+                    buf.as_ptr(),
+                    buf.len() as i64,
+                    WOLFSSL_FILETYPE_PEM,
+                )
+            },
+            RootCertificate::PemFileOrDirectory(path) => {
+                let is_dir = path.is_dir();
+                let path =
+                    std::ffi::CString::new(path.to_str().ok_or(LoadRootCertificateError::Path)?)
+                        .map_err(|_| LoadRootCertificateError::Path)?;
+                if is_dir {
+                    unsafe {
+                        wolfSSL_CTX_load_verify_locations(
+                            self.0,
+                            std::ptr::null(),
+                            path.as_c_str().as_ptr(),
+                        )
+                    }
+                } else {
+                    unsafe {
+                        wolfSSL_CTX_load_verify_locations(
+                            self.0,
+                            path.as_c_str().as_ptr(),
+                            std::ptr::null(),
+                        )
+                    }
+                }
+            }
+        };
+
+        if result == WOLFSSL_SUCCESS {
+            Ok(self)
+        } else {
+            Err(LoadRootCertificateError::from(result))
         }
     }
 }
@@ -133,6 +203,23 @@ mod tests {
     #[test]
     fn wolf_context_new() {
         WolfContextBuilder::new(WolfMethod::DtlsClient).unwrap();
+        wolf_cleanup().unwrap();
+    }
+
+    #[test]
+    fn wolf_context_root_certificate_buffer() {
+        const CA_CERT: &[u8] = &include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/test_data/ca_cert_der_2048"
+        ));
+
+        let cert = RootCertificate::Asn1Buffer(CA_CERT);
+
+        let _ = WolfContextBuilder::new(WolfMethod::TlsClient)
+            .unwrap()
+            .with_root_certificate(cert)
+            .unwrap();
+
         wolf_cleanup().unwrap();
     }
 }
