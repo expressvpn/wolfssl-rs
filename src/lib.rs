@@ -294,6 +294,22 @@ impl WolfContextBuilder {
             None
         }
     }
+
+    /// Wraps `wolfSSL_CTX_UseSecureRenegotiation`
+    ///
+    // TODO (pangt): I can't seem to find documentation online for this.
+    // this might also prompt a more general review of how we should
+    // be checking for and handling errors (i.e; should we just
+    // collect all error codes and throw it back up instead of
+    // wrapping it in an enum?)
+    pub fn with_secure_renegotiation(self) -> Option<Self> {
+        let result = unsafe { wolfssl_sys::wolfSSL_CTX_UseSecureRenegotiation(self.0) };
+        if result == wolfssl_sys::WOLFSSL_SUCCESS {
+            Some(self)
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -391,6 +407,16 @@ mod tests {
         let _ = WolfContextBuilder::new(WolfMethod::TlsClient)
             .unwrap()
             .with_private_key(key)
+            .unwrap();
+
+        wolf_cleanup().unwrap();
+    }
+
+    #[test]
+    fn wolf_context_set_secure_renegotiation() {
+        let _ = WolfContextBuilder::new(WolfMethod::TlsClient)
+            .unwrap()
+            .with_secure_renegotiation()
             .unwrap();
 
         wolf_cleanup().unwrap();
