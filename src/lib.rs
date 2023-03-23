@@ -357,6 +357,23 @@ impl Drop for WolfContext {
 #[allow(missing_docs)]
 pub struct WolfSession(*mut wolfssl_sys::WOLFSSL);
 
+impl WolfSession {
+    /// Gets the current cipher of the session.
+    /// If there is no cipher, returns `Some("NONE")`.
+    pub fn get_current_cipher_name(&self) -> Option<String> {
+        let cipher = unsafe { wolfssl_sys::wolfSSL_get_current_cipher(self.0) };
+        if !cipher.is_null() {
+            let name = unsafe {
+                let name = wolfssl_sys::wolfSSL_CIPHER_get_name(cipher);
+                std::ffi::CStr::from_ptr(name).to_str().ok()?.to_string()
+            };
+            Some(name)
+        } else {
+            None
+        }
+    }
+}
+
 impl Drop for WolfSession {
     /// Invokes [`wolfSSL_free`][0]
     ///
