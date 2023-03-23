@@ -227,6 +227,58 @@ impl WolfContextBuilder {
             None
         }
     }
+
+    /// Wraps [`wolfSSL_CTX_use_PrivateKey_file`][0] and [`wolfSSL_CTX_use_PrivateKey_buffer`][1]
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_privatekey_file
+    /// [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_privatekey_buffer
+    pub fn with_private_key(self, secret: Secret) -> Option<Self> {
+        use wolfssl_sys::{
+            wolfSSL_CTX_use_PrivateKey_buffer, wolfSSL_CTX_use_PrivateKey_file,
+            WOLFSSL_FILETYPE_ASN1, WOLFSSL_FILETYPE_PEM, WOLFSSL_SUCCESS,
+        };
+
+        let result = match secret {
+            Secret::Asn1Buffer(buf) => unsafe {
+                wolfSSL_CTX_use_PrivateKey_buffer(
+                    self.0,
+                    buf.as_ptr(),
+                    buf.len() as i64,
+                    WOLFSSL_FILETYPE_ASN1,
+                )
+            },
+            Secret::Asn1File(path) => unsafe {
+                let path = std::ffi::CString::new(path.to_str()?).ok()?;
+                wolfSSL_CTX_use_PrivateKey_file(
+                    self.0,
+                    path.as_c_str().as_ptr(),
+                    WOLFSSL_FILETYPE_ASN1,
+                )
+            },
+            Secret::PemBuffer(buf) => unsafe {
+                wolfSSL_CTX_use_PrivateKey_buffer(
+                    self.0,
+                    buf.as_ptr(),
+                    buf.len() as i64,
+                    WOLFSSL_FILETYPE_PEM,
+                )
+            },
+            Secret::PemFile(path) => unsafe {
+                let path = std::ffi::CString::new(path.to_str()?).ok()?;
+                wolfSSL_CTX_use_PrivateKey_file(
+                    self.0,
+                    path.as_c_str().as_ptr(),
+                    WOLFSSL_FILETYPE_PEM,
+                )
+            },
+        };
+
+        if result == WOLFSSL_SUCCESS {
+            Some(self)
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -295,6 +347,23 @@ mod tests {
         let _ = WolfContextBuilder::new(WolfMethod::TlsClient)
             .unwrap()
             .with_certificate(cert)
+            .unwrap();
+
+        wolf_cleanup().unwrap();
+    }
+
+    #[test]
+    fn wolf_context_set_private_key_buffer() {
+        const SERVER_KEY: &[u8] = &include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/test_data/server_key_der_2048"
+        ));
+
+        let key = Secret::Asn1Buffer(SERVER_KEY);
+
+        let _ = WolfContextBuilder::new(WolfMethod::TlsClient)
+            .unwrap()
+            .with_private_key(key)
             .unwrap();
 
         wolf_cleanup().unwrap();
