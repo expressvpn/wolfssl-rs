@@ -1,0 +1,12 @@
+[package]
+name = "wolfssl"
+version = "0.1.0"
+edition = "2021"
+authors = ["pete.m@expressvpn.com", "pang.t@expressvpn.com"]
+license = "GPL-2.0"
+description = "High-level bindings for WolfSSL"
+repository = "https://github.com/expressvpn/wolfssl"
+keywords = ["wolfssl", "vpn", "lightway", "post-quantum", "cryptography"]
+
+[dependencies]
+wolfssl-sys = { git = "https://github.com/expressvpn/wolfssl-sys", features = ["postquantum"] }
