@@ -310,8 +310,61 @@ impl WolfContextBuilder {
             None
         }
     }
+
+    /// Finalizes a `WolfContext`.
+    pub fn build(self) -> WolfContext {
+        WolfContext(self.0)
+    }
 }
 
+#[allow(missing_docs)]
+pub struct WolfContext(*mut wolfssl_sys::WOLFSSL_CTX);
+
+/// This is necessary because `WolfContext` will need to cross
+/// `.await` boundaries, which means it must be safe to transfer
+/// across threads.
+///
+/// We cannot specify just `wolfssl_sys::WOLFSSL_CTX` because of
+/// orphan rules.
+///
+// TODO (pangt): Perhaps store the pointer inside something `Send`
+// instead
+unsafe impl Send for WolfContext {}
+
+impl WolfContext {
+    /// Invokes [`wolfSSL_new`][0]
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
+    pub fn new_session(&self) -> Option<WolfSession> {
+        let ptr = unsafe { wolfssl_sys::wolfSSL_new(self.0) };
+        if !ptr.is_null() {
+            Some(WolfSession(ptr))
+        } else {
+            None
+        }
+    }
+}
+
+impl Drop for WolfContext {
+    /// Invokes [`wolfSSL_CTX_free`][0]
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_free
+    fn drop(&mut self) {
+        unsafe { wolfssl_sys::wolfSSL_CTX_free(self.0) }
+    }
+}
+
+#[allow(missing_docs)]
+pub struct WolfSession(*mut wolfssl_sys::WOLFSSL);
+
+impl Drop for WolfSession {
+    /// Invokes [`wolfSSL_free`][0]
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_free
+    fn drop(&mut self) {
+        unsafe { wolfssl_sys::wolfSSL_free(self.0) }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
