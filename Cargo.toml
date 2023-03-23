@@ -10,3 +10,6 @@ keywords = ["wolfssl", "vpn", "lightway", "post-quantum", "cryptography"]
 
 [dependencies]
 wolfssl-sys = { git = "https://github.com/expressvpn/wolfssl-sys", features = ["postquantum"] }
+
+[dev-dependencies]
+test-case = "3.0"
