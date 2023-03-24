@@ -1,3 +1,60 @@
+use wolfssl_sys::WOLFSSL;
+
+use thiserror::Error;
+
+// Note that this accepts an `unsigned long` instead of an `int`.
+//
+// Which is odd, because we're supposed to pass this the result of
+// `wolfSSL_get_error`, which returns a `c_int`
+fn wolf_get_error_string(raw_err: ::std::os::raw::c_ulong) -> String {
+    let mut buffer = vec![0u8; wolfssl_sys::WOLFSSL_MAX_ERROR_SZ as usize];
+    unsafe {
+        wolfssl_sys::wolfSSL_ERR_error_string(
+            raw_err,
+            // note that we are asked for a `char *`, but the
+            // following `from_utf8` asks for a Vec<u8>
+            buffer.as_mut_slice().as_mut_ptr() as *mut i8,
+        );
+    }
+    String::from_utf8(buffer)
+        .expect("wolfSSL_ERR_error_string returned invalid ASCII")
+        .trim_end_matches(char::from(0))
+        .to_string()
+}
+
+#[derive(Error, Debug)]
+pub enum WolfError {
+    #[error("WolfSSL wants to read in data")]
+    WantRead,
+    #[error("WolfSSL wants to write data out")]
+    WantWrite,
+    #[error("unknown: {what}")]
+    Unknown { what: String, code: usize },
+}
+
+impl WolfError {
+    pub(crate) fn get_error(ssl: *mut WOLFSSL, ret: i32) -> Self {
+        let err = unsafe { wolfssl_sys::wolfSSL_get_error(ssl, ret) };
+        WolfError::from(err)
+    }
+}
+
+impl std::convert::From<std::os::raw::c_int> for WolfError {
+    fn from(code: std::os::raw::c_int) -> Self {
+        match code {
+            wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Self::WantRead,
+            wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Self::WantWrite,
+            x => {
+                let what = wolf_get_error_string(x as std::os::raw::c_ulong);
+                Self::Unknown {
+                    what,
+                    code: x as usize,
+                }
+            }
+        }
+    }
+}
+
 /// Return error values for [`wolf_init`]
 #[derive(Debug)]
 pub enum WolfInitError {
