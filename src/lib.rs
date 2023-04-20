@@ -372,6 +372,19 @@ impl WolfSession {
             None
         }
     }
+
+    /// Invokes [`wolfSSL_is_init_finished`][0]
+    ///
+    /// "Init" in this case is the formation of the TLS connection.
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_is_init_finished
+    pub fn is_init_finished(&self) -> bool {
+        match unsafe { wolfssl_sys::wolfSSL_is_init_finished(self.0) } {
+            0 => false,
+            1 => true,
+            _ => unimplemented!("Only 0 or 1 is expected as return value"),
+        }
+    }
 }
 
 impl Drop for WolfSession {
