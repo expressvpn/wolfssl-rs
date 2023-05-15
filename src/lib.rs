@@ -65,7 +65,13 @@ pub enum WolfMethod {
 }
 
 impl WolfMethod {
-    pub fn into_method_ptr(self) -> Option<*mut wolfssl_sys::WOLFSSL_METHOD> {
+    /// Turns this `WolfMethod` into a `WOLFSSL_METHOD*`. [[0]]
+    ///
+    /// WolfSSL only returns `NULL` if it cannot allocate the method
+    /// struct. We handle it here by panicking.
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html
+    pub fn into_method_ptr(self) -> *mut wolfssl_sys::WOLFSSL_METHOD {
         let ptr = match self {
             Self::DtlsClient => unsafe { wolfssl_sys::wolfDTLS_client_method() },
             Self::DtlsClientV1_2 => unsafe { wolfssl_sys::wolfDTLSv1_2_client_method() },
@@ -80,9 +86,9 @@ impl WolfMethod {
         };
 
         if !ptr.is_null() {
-            Some(ptr)
+            ptr
         } else {
-            None
+            panic!("WolfSSL is unable to allocate {self:?}");
         }
     }
 }
@@ -114,7 +120,7 @@ impl WolfContextBuilder {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_new
     pub fn new(method: WolfMethod) -> Option<Self> {
-        let method_fn = method.into_method_ptr()?;
+        let method_fn = method.into_method_ptr();
 
         let ctx = unsafe { wolfssl_sys::wolfSSL_CTX_new(method_fn) };
 
@@ -545,7 +551,7 @@ mod tests {
     #[test_case(WolfMethod::TlsServerV1_3)]
     fn wolfssl_context_new(method: WolfMethod) {
         wolf_init().unwrap();
-        let _ = method.into_method_ptr().unwrap();
+        let _ = method.into_method_ptr();
         wolf_cleanup().unwrap();
     }
 
