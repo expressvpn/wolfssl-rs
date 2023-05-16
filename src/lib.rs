@@ -490,8 +490,8 @@ impl WolfSession {
                 Ok(x as usize)
             }
             x if x <= 0 => Err(WolfError::get_error(*ssl, x)),
-            _ => {
-                unreachable!("Unhandled wolfSSL_read return value");
+            x => {
+                unreachable!("Unhandled wolfSSL_read return value {x}");
             }
         }
     }
@@ -507,8 +507,8 @@ impl WolfSession {
         } {
             x if x <= 0 => Err(WolfError::get_error(*ssl, x)),
             x if x > 0 => Ok(x as usize),
-            _ => {
-                unreachable!("Unhandled wolfSSL_write return value");
+            x => {
+                unreachable!("Unhandled wolfSSL_write return value {x}");
             }
         }
     }
