@@ -117,3 +117,13 @@ impl From<i32> for LoadRootCertificateError {
         }
     }
 }
+
+#[derive(Error, Debug)]
+pub enum RehandshakeError {
+    #[error("SECURE_RENEGOTIATION_E")]
+    SecureRenegotiation,
+    #[error("BAD_FUNC_ARG")]
+    BadFunctionArguments,
+    #[error("Other: {0}")]
+    Other(WolfError),
+}

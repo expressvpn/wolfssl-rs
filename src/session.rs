@@ -1,10 +1,15 @@
-use crate::{async_client::WolfClientCallbackContext, context::WolfContext, errors::WolfError};
+use crate::{
+    async_client::WolfClientCallbackContext,
+    context::WolfContext,
+    errors::{RehandshakeError, WolfError},
+    WolfMethod,
+};
 use parking_lot::Mutex;
 use tokio::io::ReadBuf;
 
 #[allow(missing_docs)]
 pub struct WolfSession {
-    pub(crate) _ctx: WolfContext,
+    pub(crate) ctx: WolfContext,
     pub(crate) ssl: Mutex<*mut wolfssl_sys::WOLFSSL>,
 }
 
@@ -141,6 +146,34 @@ impl WolfSession {
             x if x > 0 => Ok(x as usize),
             x => {
                 unreachable!("Unhandled wolfSSL_write return value {x}");
+            }
+        }
+    }
+
+    /// Invokes [`wolfSSL_rehandshake`][0]
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_rehandshake
+    pub fn rehandshake(&self) -> Result<(), RehandshakeError> {
+        if !matches!(
+            self.ctx.method(),
+            WolfMethod::DtlsClientV1_2 | WolfMethod::DtlsServerV1_2,
+        ) {
+            log::warn!("Attempted a rehandshake while not on DTLS 1.2");
+            return Err(RehandshakeError::SecureRenegotiation);
+        }
+
+        let ssl = self.ssl.lock();
+        match unsafe { wolfssl_sys::wolfSSL_Rehandshake(*ssl) } {
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
+            wolfssl_sys::BAD_FUNC_ARG => Err(RehandshakeError::BadFunctionArguments),
+            wolfssl_sys::wolfSSL_ErrorCodes_SECURE_RENEGOTIATION_E => {
+                Err(RehandshakeError::SecureRenegotiation)
+            }
+            x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => {
+                Err(RehandshakeError::Other(WolfError::get_error(*ssl, x)))
+            }
+            x => {
+                unreachable!("Unhandled wolfSSL_Rehandshake return value {x}");
             }
         }
     }

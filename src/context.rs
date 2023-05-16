@@ -263,7 +263,7 @@ impl WolfContext {
         let ptr = unsafe { wolfssl_sys::wolfSSL_new(*ctx) };
         if !ptr.is_null() {
             Some(WolfSession {
-                _ctx: self.clone(),
+                ctx: self.clone(),
                 ssl: Mutex::new(ptr),
             })
         } else {
