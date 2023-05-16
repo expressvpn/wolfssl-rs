@@ -56,18 +56,18 @@ impl std::convert::From<std::os::raw::c_int> for WolfError {
 }
 
 /// Return error values for [`wolf_init`]
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum WolfInitError {
-    /// Corresponds with `BAD_MUTEX_E`
+    #[error("BAD_MUTEX_E")]
     Mutex,
-    /// Corresponds with `WC_INIT_E`
+    #[error("WC_INIT_E")]
     WolfCrypt,
 }
 
 /// Return error values for [`wolf_cleanup`]
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum WolfCleanupError {
-    /// Corresponds with `BAD_MUTEX_E`
+    #[error("BAD_MUTEX_E")]
     Mutex,
 }
 
@@ -76,27 +76,28 @@ pub enum WolfCleanupError {
 ///
 /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_load_verify_buffer
 /// [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_load_verify_locations
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum LoadRootCertificateError {
-    /// `SSL_FAILURE`
+    #[error("SSL_FAILURE")]
     Failure,
-    /// `SSL_BAD_FILETYPE`
+    #[error("SSL_BAD_FILETYPE")]
     BadFiletype,
-    /// `SSL_BAD_FILE`
+    #[error("SSL_BAD_FILE")]
     BadFile,
-    /// `MEMORY_E`
+    #[error("MEMORY_E")]
     Memory,
-    /// `ASN_INPUT_E`
+    #[error("ASN_INPUT_E")]
     AsnInput,
-    /// `ASN_BEFORE_DATE_E`
+    #[error("ASN_BEFORE_DATE_E")]
     AsnBeforeDate,
-    /// `ASN_AFTER_DATE_E`
+    #[error("ASN_AFTER_DATE_E")]
     AsnAfterDate,
-    /// `BUFFER_E`
+    #[error("BUFFER_E")]
     Buffer,
-    /// `BAD_PATH_ERROR`
+    #[error("BAD_PATH_ERROR")]
     Path,
     /// Error values outside of what was documented
+    #[error("Unknown code: {0}")]
     Other(i64),
 }
 
