@@ -55,7 +55,7 @@ impl std::convert::From<std::os::raw::c_int> for WolfError {
     }
 }
 
-/// Return error values for [`wolf_init`]
+/// Return error values for [`crate::wolf_init`]
 #[derive(Error, Debug)]
 pub enum WolfInitError {
     #[error("BAD_MUTEX_E")]
@@ -64,7 +64,7 @@ pub enum WolfInitError {
     WolfCrypt,
 }
 
-/// Return error values for [`wolf_cleanup`]
+/// Return error values for [`crate::wolf_cleanup`]
 #[derive(Error, Debug)]
 pub enum WolfCleanupError {
     #[error("BAD_MUTEX_E")]
