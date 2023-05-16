@@ -6,6 +6,9 @@
 mod async_client;
 mod errors;
 
+#[cfg(test)]
+mod test_helpers;
+
 pub use async_client::WolfClient;
 
 use async_client::WolfClientCallbackContext;

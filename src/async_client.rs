@@ -550,29 +550,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin> AsyncWrite for WolfClient<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use once_cell::sync::OnceCell;
+    use crate::test_helpers::{CA_CERT, INIT_ENV_LOGGER, SERVER_CERT, SERVER_KEY};
     use test_case::test_case;
     use tokio::{
         io::{duplex, AsyncReadExt, AsyncWriteExt},
         net::{TcpListener, TcpStream},
     };
-
-    static INIT_ENV_LOGGER: OnceCell<()> = OnceCell::new();
-
-    const SERVER_CERT: &[u8] = &include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/test_data/server_cert_der_2048"
-    ));
-
-    const SERVER_KEY: &[u8] = &include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/test_data/server_key_der_2048"
-    ));
-
-    const CA_CERT: &[u8] = &include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/test_data/ca_cert_der_2048"
-    ));
 
     #[tokio::test]
     async fn custom_io_callbacks_accept_and_connect_over_tcp() {
