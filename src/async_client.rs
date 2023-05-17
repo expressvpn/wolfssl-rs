@@ -102,8 +102,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + std::fmt::Debug> WolfClient<T> {
 
         // register context-side callbacks
         unsafe {
-            wolfssl_sys::wolfSSL_CTX_SetIORecv(ssl_context.ctx, Some(wolf_tls_read_cb));
-            wolfssl_sys::wolfSSL_CTX_SetIOSend(ssl_context.ctx, Some(wolf_tls_write_cb));
+            let ssl_context_ptr = ssl_context.ctx.lock();
+            wolfssl_sys::wolfSSL_CTX_SetIORecv(*ssl_context_ptr, Some(wolf_tls_read_cb));
+            wolfssl_sys::wolfSSL_CTX_SetIOSend(*ssl_context_ptr, Some(wolf_tls_write_cb));
         }
 
         let session_context = Box::new(WolfClientCallbackContext {
