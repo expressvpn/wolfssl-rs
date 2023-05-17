@@ -26,7 +26,7 @@
 //! [4]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_write
 //! [5]: https://docs.rs/tokio/latest/tokio/net/struct.TcpStream.html#impl-AsRawFd-for-TcpStream
 
-use crate::{errors::WolfError, WolfContext, WolfContextBuilder, WolfSession};
+use crate::{errors::WolfError, session::WolfSession, WolfContext, WolfContextBuilder};
 
 use bytes::{Buf, BytesMut};
 use pin_project::pin_project;
