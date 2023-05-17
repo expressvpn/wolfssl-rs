@@ -1,4 +1,4 @@
-use crate::{async_client::WolfClientCallbackContext, errors::WolfError, WolfContext};
+use crate::{async_client::WolfClientCallbackContext, context::WolfContext, errors::WolfError};
 use parking_lot::Mutex;
 use tokio::io::ReadBuf;
 
@@ -149,8 +149,9 @@ impl WolfSession {
 #[cfg(test)]
 mod tests {
     use crate::{
+        context::WolfContextBuilder,
         test_helpers::{make_connected_clients, INIT_ENV_LOGGER},
-        WolfContextBuilder, WolfMethod,
+        WolfMethod,
     };
 
     #[tokio::test]

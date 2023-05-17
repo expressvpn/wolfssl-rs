@@ -1,5 +1,4 @@
-use crate::async_client::WolfClient;
-use crate::WolfContextBuilder;
+use crate::{async_client::WolfClient, context::WolfContextBuilder};
 use once_cell::sync::OnceCell;
 use tokio::io::{duplex, DuplexStream};
 
