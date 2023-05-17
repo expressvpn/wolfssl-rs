@@ -75,9 +75,9 @@ pub struct WolfClient<T: AsyncRead + AsyncWrite + Unpin> {
     // actually bad design: Each context should be able to spawn off
     // clients, which carry a copy of the context around
     #[pin]
-    _ssl_context: WolfContext,
+    pub(crate) _ssl_context: WolfContext,
     #[pin]
-    ssl_session: WolfSession,
+    pub(crate) ssl_session: WolfSession,
     #[pin]
     session_context: Box<WolfClientCallbackContext>,
     #[pin]

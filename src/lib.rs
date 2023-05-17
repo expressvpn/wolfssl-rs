@@ -637,3 +637,27 @@ mod tests {
         wolf_cleanup().unwrap();
     }
 }
+
+#[cfg(test)]
+mod wolfsession_tests {
+    use super::*;
+    use crate::test_helpers::{make_connected_clients, INIT_ENV_LOGGER};
+
+    #[tokio::test]
+    async fn session_get_current_cipher_name() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        crate::wolf_init().unwrap();
+
+        let client_builder = WolfContextBuilder::new(WolfMethod::TlsClient)
+            .and_then(|b| b.with_secure_renegotiation())
+            .unwrap();
+        let server_builder = WolfContextBuilder::new(WolfMethod::TlsServer)
+            .and_then(|b| b.with_secure_renegotiation())
+            .unwrap();
+
+        let (client, _server) = make_connected_clients(client_builder, server_builder).await;
+
+        assert!(client.ssl_session.get_current_cipher_name().is_some());
+    }
+}
