@@ -218,12 +218,16 @@ impl WolfContextBuilder {
 
     /// Wraps `wolfSSL_CTX_UseSecureRenegotiation`
     ///
-    // TODO (pangt): I can't seem to find documentation online for this.
-    // this might also prompt a more general review of how we should
-    // be checking for and handling errors (i.e; should we just
-    // collect all error codes and throw it back up instead of
-    // wrapping it in an enum?)
+    /// Note that this only works on DTLS1.2
     pub fn with_secure_renegotiation(self) -> Option<Self> {
+        if !matches!(
+            self.0.method(),
+            WolfMethod::DtlsClientV1_2 | WolfMethod::DtlsServerV1_2
+        ) {
+            log::warn!("Attempted to enable secure renegotiation while not on DTLS 1.2");
+            return Some(self);
+        }
+
         let result = unsafe {
             let ctx = self.0.ctx.lock();
             wolfssl_sys::wolfSSL_CTX_UseSecureRenegotiation(*ctx)
@@ -360,7 +364,7 @@ mod tests {
 
     #[test]
     fn wolf_context_set_secure_renegotiation() {
-        let _ = WolfContextBuilder::new(WolfMethod::TlsClient)
+        let _ = WolfContextBuilder::new(WolfMethod::DtlsClientV1_2)
             .unwrap()
             .with_secure_renegotiation()
             .unwrap();

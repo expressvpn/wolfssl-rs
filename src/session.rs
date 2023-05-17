@@ -193,12 +193,8 @@ mod tests {
 
         crate::wolf_init().unwrap();
 
-        let client_builder = WolfContextBuilder::new(WolfMethod::TlsClient)
-            .and_then(|b| b.with_secure_renegotiation())
-            .unwrap();
-        let server_builder = WolfContextBuilder::new(WolfMethod::TlsServer)
-            .and_then(|b| b.with_secure_renegotiation())
-            .unwrap();
+        let client_builder = WolfContextBuilder::new(WolfMethod::TlsClient).unwrap();
+        let server_builder = WolfContextBuilder::new(WolfMethod::TlsServer).unwrap();
 
         let (client, _server) = make_connected_clients(client_builder, server_builder).await;
 
