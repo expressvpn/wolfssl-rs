@@ -1,5 +1,25 @@
 use thiserror::Error;
 
+// Note that this accepts an `unsigned long` instead of an `int`.
+//
+// Which is odd, because we're supposed to pass this the result of
+// `wolfSSL_get_error`, which returns a `c_int`
+#[allow(dead_code)]
+pub fn wolf_error_string(raw_err: ::std::os::raw::c_ulong) -> String {
+    let mut buffer = vec![0u8; wolfssl_sys::WOLFSSL_MAX_ERROR_SZ as usize];
+    unsafe {
+        wolfssl_sys::wolfSSL_ERR_error_string(
+            raw_err,
+            // note that we are asked for a `char *`, but the
+            // following `from_utf8` asks for a Vec<u8>
+            buffer.as_mut_slice().as_mut_ptr() as *mut i8,
+        );
+    }
+    String::from_utf8_lossy(&buffer)
+        .trim_end_matches(char::from(0))
+        .to_string()
+}
+
 /// Return error values for [`crate::wolf_init`]
 #[derive(Error, Debug)]
 pub enum WolfInitError {
