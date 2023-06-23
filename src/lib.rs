@@ -59,6 +59,8 @@ pub enum WolfMethod {
 }
 
 impl WolfMethod {
+    /// Converts a [`WolfMethod`] into a [`wolfssl_sys::WOLFSSL_METHOD`]
+    /// compatible with [`wolfssl_sys::wolfSSL_CTX_new`]
     pub fn into_method_ptr(self) -> Option<*mut wolfssl_sys::WOLFSSL_METHOD> {
         let ptr = match self {
             Self::DtlsClient => unsafe { wolfssl_sys::wolfDTLS_client_method() },
