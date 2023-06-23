@@ -1,5 +1,5 @@
 use crate::{
-    errors::LoadRootCertificateError, session::WolfSession, RootCertificate, Secret, WolfMethod,
+    error::LoadRootCertificateError, session::WolfSession, RootCertificate, Secret, WolfMethod,
 };
 
 #[allow(missing_docs)]

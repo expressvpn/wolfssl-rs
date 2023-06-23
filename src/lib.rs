@@ -4,10 +4,10 @@
 #![warn(missing_docs)]
 
 mod context;
-mod errors;
+mod error;
 mod session;
 
-use errors::{WolfCleanupError, WolfInitError};
+use error::{WolfCleanupError, WolfInitError};
 
 pub use context::*;
 pub use session::*;
