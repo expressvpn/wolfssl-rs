@@ -318,7 +318,7 @@ mod tests {
     fn root_certificate_buffer() {
         const CA_CERT: &[u8] = &include!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/test_data/ca_cert_der_2048"
+            "/tests/data/ca_cert_der_2048"
         ));
 
         let cert = RootCertificate::Asn1Buffer(CA_CERT);
@@ -347,7 +347,7 @@ mod tests {
     fn set_certificate_buffer() {
         const SERVER_CERT: &[u8] = &include!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/test_data/server_cert_der_2048"
+            "/tests/data/server_cert_der_2048"
         ));
 
         let cert = Secret::Asn1Buffer(SERVER_CERT);
@@ -364,7 +364,7 @@ mod tests {
     fn set_private_key_buffer() {
         const SERVER_KEY: &[u8] = &include!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/test_data/server_key_der_2048"
+            "/tests/data/server_key_der_2048"
         ));
 
         let key = Secret::Asn1Buffer(SERVER_KEY);
