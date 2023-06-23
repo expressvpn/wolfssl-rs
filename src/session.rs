@@ -8,7 +8,7 @@ impl WolfSession {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
     pub fn new_from_context(ctx: &WolfContext) -> Option<Self> {
-        let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.as_wolf_ptr()) };
+        let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.ctx().as_ptr()) };
         if !ptr.is_null() {
             Some(WolfSession(ptr))
         } else {

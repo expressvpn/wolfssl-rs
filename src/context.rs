@@ -1,11 +1,13 @@
 use crate::{
     error::LoadRootCertificateError, session::WolfSession, RootCertificate, Secret, WolfMethod,
 };
+use parking_lot::{Mutex, MutexGuard};
+use std::ptr::NonNull;
 
 #[allow(missing_docs)]
 #[derive(Debug)]
 pub struct WolfContextBuilder {
-    ctx: *mut wolfssl_sys::WOLFSSL_CTX,
+    ctx: NonNull<wolfssl_sys::WOLFSSL_CTX>,
     method: WolfMethod,
 }
 
@@ -17,12 +19,9 @@ impl WolfContextBuilder {
         let method_fn = method.into_method_ptr()?;
 
         let ctx = unsafe { wolfssl_sys::wolfSSL_CTX_new(method_fn.as_ptr()) };
+        let ctx = NonNull::new(ctx)?;
 
-        if !ctx.is_null() {
-            Some(Self { ctx, method })
-        } else {
-            None
-        }
+        Some(Self { ctx, method })
     }
 
     /// Wraps [`wolfSSL_CTX_load_verify_buffer`][0] and [`wolfSSL_CTX_load_verify_locations`][1]
@@ -41,7 +40,7 @@ impl WolfContextBuilder {
         let result = match root {
             RootCertificate::Asn1Buffer(buf) => unsafe {
                 wolfSSL_CTX_load_verify_buffer(
-                    self.ctx,
+                    self.ctx.as_ptr(),
                     buf.as_ptr(),
                     buf.len() as i64,
                     WOLFSSL_FILETYPE_ASN1,
@@ -49,7 +48,7 @@ impl WolfContextBuilder {
             },
             RootCertificate::PemBuffer(buf) => unsafe {
                 wolfSSL_CTX_load_verify_buffer(
-                    self.ctx,
+                    self.ctx.as_ptr(),
                     buf.as_ptr(),
                     buf.len() as i64,
                     WOLFSSL_FILETYPE_PEM,
@@ -63,7 +62,7 @@ impl WolfContextBuilder {
                 if is_dir {
                     unsafe {
                         wolfSSL_CTX_load_verify_locations(
-                            self.ctx,
+                            self.ctx.as_ptr(),
                             std::ptr::null(),
                             path.as_c_str().as_ptr(),
                         )
@@ -71,7 +70,7 @@ impl WolfContextBuilder {
                 } else {
                     unsafe {
                         wolfSSL_CTX_load_verify_locations(
-                            self.ctx,
+                            self.ctx.as_ptr(),
                             path.as_c_str().as_ptr(),
                             std::ptr::null(),
                         )
@@ -93,7 +92,10 @@ impl WolfContextBuilder {
     pub fn with_cipher_list(self, cipher_list: &str) -> Option<Self> {
         let cipher_list = std::ffi::CString::new(cipher_list).ok()?;
         let result = unsafe {
-            wolfssl_sys::wolfSSL_CTX_set_cipher_list(self.ctx, cipher_list.as_c_str().as_ptr())
+            wolfssl_sys::wolfSSL_CTX_set_cipher_list(
+                self.ctx.as_ptr(),
+                cipher_list.as_c_str().as_ptr(),
+            )
         };
         if result == wolfssl_sys::WOLFSSL_SUCCESS {
             Some(self)
@@ -115,7 +117,7 @@ impl WolfContextBuilder {
         let result = match secret {
             Secret::Asn1Buffer(buf) => unsafe {
                 wolfSSL_CTX_use_certificate_buffer(
-                    self.ctx,
+                    self.ctx.as_ptr(),
                     buf.as_ptr(),
                     buf.len() as i64,
                     WOLFSSL_FILETYPE_ASN1,
@@ -124,14 +126,14 @@ impl WolfContextBuilder {
             Secret::Asn1File(path) => unsafe {
                 let file = std::ffi::CString::new(path.to_str()?).ok()?;
                 wolfSSL_CTX_use_certificate_file(
-                    self.ctx,
+                    self.ctx.as_ptr(),
                     file.as_c_str().as_ptr(),
                     WOLFSSL_FILETYPE_ASN1,
                 )
             },
             Secret::PemBuffer(buf) => unsafe {
                 wolfSSL_CTX_use_certificate_buffer(
-                    self.ctx,
+                    self.ctx.as_ptr(),
                     buf.as_ptr(),
                     buf.len() as i64,
                     WOLFSSL_FILETYPE_PEM,
@@ -140,7 +142,7 @@ impl WolfContextBuilder {
             Secret::PemFile(path) => unsafe {
                 let file = std::ffi::CString::new(path.to_str()?).ok()?;
                 wolfSSL_CTX_use_certificate_file(
-                    self.ctx,
+                    self.ctx.as_ptr(),
                     file.as_c_str().as_ptr(),
                     WOLFSSL_FILETYPE_PEM,
                 )
@@ -167,7 +169,7 @@ impl WolfContextBuilder {
         let result = match secret {
             Secret::Asn1Buffer(buf) => unsafe {
                 wolfSSL_CTX_use_PrivateKey_buffer(
-                    self.ctx,
+                    self.ctx.as_ptr(),
                     buf.as_ptr(),
                     buf.len() as i64,
                     WOLFSSL_FILETYPE_ASN1,
@@ -176,14 +178,14 @@ impl WolfContextBuilder {
             Secret::Asn1File(path) => unsafe {
                 let path = std::ffi::CString::new(path.to_str()?).ok()?;
                 wolfSSL_CTX_use_PrivateKey_file(
-                    self.ctx,
+                    self.ctx.as_ptr(),
                     path.as_c_str().as_ptr(),
                     WOLFSSL_FILETYPE_ASN1,
                 )
             },
             Secret::PemBuffer(buf) => unsafe {
                 wolfSSL_CTX_use_PrivateKey_buffer(
-                    self.ctx,
+                    self.ctx.as_ptr(),
                     buf.as_ptr(),
                     buf.len() as i64,
                     WOLFSSL_FILETYPE_PEM,
@@ -192,7 +194,7 @@ impl WolfContextBuilder {
             Secret::PemFile(path) => unsafe {
                 let path = std::ffi::CString::new(path.to_str()?).ok()?;
                 wolfSSL_CTX_use_PrivateKey_file(
-                    self.ctx,
+                    self.ctx.as_ptr(),
                     path.as_c_str().as_ptr(),
                     WOLFSSL_FILETYPE_PEM,
                 )
@@ -214,7 +216,7 @@ impl WolfContextBuilder {
     // collect all error codes and throw it back up instead of
     // wrapping it in an enum?)
     pub fn with_secure_renegotiation(self) -> Option<Self> {
-        let result = unsafe { wolfssl_sys::wolfSSL_CTX_UseSecureRenegotiation(self.ctx) };
+        let result = unsafe { wolfssl_sys::wolfSSL_CTX_UseSecureRenegotiation(self.ctx.as_ptr()) };
         if result == wolfssl_sys::WOLFSSL_SUCCESS {
             Some(self)
         } else {
@@ -226,7 +228,7 @@ impl WolfContextBuilder {
     pub fn build(self) -> WolfContext {
         WolfContext {
             _method: self.method,
-            ctx: self.ctx,
+            ctx: Mutex::new(self.ctx),
         }
     }
 }
@@ -234,7 +236,7 @@ impl WolfContextBuilder {
 #[allow(missing_docs)]
 pub struct WolfContext {
     _method: WolfMethod,
-    ctx: *mut wolfssl_sys::WOLFSSL_CTX,
+    ctx: Mutex<NonNull<wolfssl_sys::WOLFSSL_CTX>>,
 }
 
 /// This is necessary because `WolfContext` will need to cross
@@ -251,8 +253,8 @@ unsafe impl Send for WolfContext {}
 impl WolfContext {
     /// Gets the underlying [`wolfssl_sys::WOLFSSL_CTX`] pointer that this
     /// [`WolfContext`] is managing.
-    pub fn as_wolf_ptr(&self) -> *mut wolfssl_sys::WOLFSSL_CTX {
-        self.ctx
+    pub fn ctx(&self) -> MutexGuard<NonNull<wolfssl_sys::WOLFSSL_CTX>> {
+        self.ctx.lock()
     }
 
     /// Creates a new SSL session using this underlying context.
@@ -266,7 +268,7 @@ impl Drop for WolfContext {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_free
     fn drop(&mut self) {
-        unsafe { wolfssl_sys::wolfSSL_CTX_free(self.ctx) }
+        unsafe { wolfssl_sys::wolfSSL_CTX_free(self.ctx.lock().as_ptr()) }
     }
 }
 
