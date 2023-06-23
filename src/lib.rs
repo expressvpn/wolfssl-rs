@@ -3,6 +3,7 @@
 
 #![warn(missing_docs)]
 
+mod callback;
 mod context;
 mod error;
 mod session;
@@ -13,6 +14,18 @@ pub use session::*;
 use error::{WolfCleanupError, WolfInitError};
 
 use std::ptr::NonNull;
+
+/// Record size is defined as `2^14 + 1`.
+///
+/// > ...the full encoded TLSInnerPlaintext MUST NOT exceed 2^14 + 1
+/// > octets
+/// - [source][0]
+///
+/// This value must also equal or exceed `<wolfssl/internal.h>`'s
+/// `MAX_RECORD_SIZE` (though I'm not sure how to assert that yet).
+///
+/// [0]: https://www.rfc-editor.org/rfc/rfc8446#section-5.4
+const TLS_MAX_RECORD_SIZE: usize = 2usize.pow(14) + 1;
 
 /// Wraps [`wolfSSL_Init`][0]
 ///

@@ -1,5 +1,8 @@
 use crate::{
-    error::LoadRootCertificateError, session::WolfSession, RootCertificate, Secret, WolfMethod,
+    callback::{wolf_tls_read_cb, wolf_tls_write_cb},
+    error::LoadRootCertificateError,
+    session::WolfSession,
+    RootCertificate, Secret, WolfMethod,
 };
 use parking_lot::{Mutex, MutexGuard};
 use std::ptr::NonNull;
@@ -226,9 +229,20 @@ impl WolfContextBuilder {
 
     /// Finalizes a `WolfContext`.
     pub fn build(self) -> WolfContext {
+        self.register_io_callbacks();
         WolfContext {
             _method: self.method,
             ctx: Mutex::new(self.ctx),
+        }
+    }
+}
+
+impl WolfContextBuilder {
+    fn register_io_callbacks(&self) {
+        let ctx = self.ctx;
+        unsafe {
+            wolfssl_sys::wolfSSL_CTX_SetIORecv(ctx.as_ptr(), Some(wolf_tls_read_cb));
+            wolfssl_sys::wolfSSL_CTX_SetIOSend(ctx.as_ptr(), Some(wolf_tls_write_cb));
         }
     }
 }
