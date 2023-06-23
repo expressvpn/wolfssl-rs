@@ -1,7 +1,11 @@
 use crate::context::WolfContext;
 
+use parking_lot::Mutex;
+
+use std::ptr::NonNull;
+
 #[allow(missing_docs)]
-pub struct WolfSession(*mut wolfssl_sys::WOLFSSL);
+pub struct WolfSession(Mutex<NonNull<wolfssl_sys::WOLFSSL>>);
 
 impl WolfSession {
     /// Invokes [`wolfSSL_new`][0]
@@ -9,17 +13,15 @@ impl WolfSession {
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
     pub fn new_from_context(ctx: &WolfContext) -> Option<Self> {
         let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.ctx().as_ptr()) };
-        if !ptr.is_null() {
-            Some(WolfSession(ptr))
-        } else {
-            None
-        }
+        let ptr = NonNull::new(ptr)?;
+
+        Some(WolfSession(Mutex::new(ptr)))
     }
 
     /// Gets the current cipher of the session.
     /// If there is no cipher, returns `Some("NONE")`.
     pub fn get_current_cipher_name(&self) -> Option<String> {
-        let cipher = unsafe { wolfssl_sys::wolfSSL_get_current_cipher(self.0) };
+        let cipher = unsafe { wolfssl_sys::wolfSSL_get_current_cipher(self.0.lock().as_ptr()) };
         if !cipher.is_null() {
             let name = unsafe {
                 let name = wolfssl_sys::wolfSSL_CIPHER_get_name(cipher);
@@ -37,7 +39,7 @@ impl WolfSession {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_is_init_finished
     pub fn is_init_finished(&self) -> bool {
-        match unsafe { wolfssl_sys::wolfSSL_is_init_finished(self.0) } {
+        match unsafe { wolfssl_sys::wolfSSL_is_init_finished(self.0.lock().as_ptr()) } {
             0 => false,
             1 => true,
             _ => unimplemented!("Only 0 or 1 is expected as return value"),
@@ -50,6 +52,6 @@ impl Drop for WolfSession {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_free
     fn drop(&mut self) {
-        unsafe { wolfssl_sys::wolfSSL_free(self.0) }
+        unsafe { wolfssl_sys::wolfSSL_free(self.0.lock().as_ptr()) }
     }
 }
