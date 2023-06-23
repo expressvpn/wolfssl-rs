@@ -12,6 +12,8 @@ pub use session::*;
 
 use error::{WolfCleanupError, WolfInitError};
 
+use std::ptr::NonNull;
+
 /// Wraps [`wolfSSL_Init`][0]
 ///
 /// Note that this is also internally during initialization by
@@ -66,7 +68,7 @@ pub enum WolfMethod {
 impl WolfMethod {
     /// Converts a [`WolfMethod`] into a [`wolfssl_sys::WOLFSSL_METHOD`]
     /// compatible with [`wolfssl_sys::wolfSSL_CTX_new`]
-    pub fn into_method_ptr(self) -> Option<*mut wolfssl_sys::WOLFSSL_METHOD> {
+    pub fn into_method_ptr(self) -> Option<NonNull<wolfssl_sys::WOLFSSL_METHOD>> {
         let ptr = match self {
             Self::DtlsClient => unsafe { wolfssl_sys::wolfDTLS_client_method() },
             Self::DtlsClientV1_2 => unsafe { wolfssl_sys::wolfDTLSv1_2_client_method() },
@@ -80,11 +82,7 @@ impl WolfMethod {
             Self::TlsServerV1_3 => unsafe { wolfssl_sys::wolfTLSv1_3_server_method() },
         };
 
-        if !ptr.is_null() {
-            Some(ptr)
-        } else {
-            None
-        }
+        NonNull::new(ptr)
     }
 }
 

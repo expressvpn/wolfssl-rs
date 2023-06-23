@@ -16,7 +16,7 @@ impl WolfContextBuilder {
     pub fn new(method: WolfMethod) -> Option<Self> {
         let method_fn = method.into_method_ptr()?;
 
-        let ctx = unsafe { wolfssl_sys::wolfSSL_CTX_new(method_fn) };
+        let ctx = unsafe { wolfssl_sys::wolfSSL_CTX_new(method_fn.as_ptr()) };
 
         if !ctx.is_null() {
             Some(Self { ctx, method })
