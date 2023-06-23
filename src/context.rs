@@ -1,4 +1,6 @@
-use crate::{errors::LoadRootCertificateError, RootCertificate, Secret, WolfMethod, WolfSession};
+use crate::{
+    errors::LoadRootCertificateError, session::WolfSession, RootCertificate, Secret, WolfMethod,
+};
 
 #[allow(missing_docs)]
 #[derive(Debug)]
@@ -247,16 +249,15 @@ pub struct WolfContext {
 unsafe impl Send for WolfContext {}
 
 impl WolfContext {
-    /// Invokes [`wolfSSL_new`][0]
-    ///
-    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
+    /// Gets the underlying [`wolfssl_sys::WOLFSSL_CTX`] pointer that this
+    /// [`WolfContext`] is managing.
+    pub fn as_wolf_ptr(&self) -> *mut wolfssl_sys::WOLFSSL_CTX {
+        self.ctx
+    }
+
+    /// Creates a new SSL session using this underlying context.
     pub fn new_session(&self) -> Option<WolfSession> {
-        let ptr = unsafe { wolfssl_sys::wolfSSL_new(self.ctx) };
-        if !ptr.is_null() {
-            Some(WolfSession(ptr))
-        } else {
-            None
-        }
+        WolfSession::new_from_context(self)
     }
 }
 
