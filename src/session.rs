@@ -19,10 +19,10 @@ impl WolfSession {
     }
 
     /// Gets the current cipher of the session.
-    /// If there is no cipher, returns `Some("NONE")`.
+    /// If the cipher name is "None", return None.
     pub fn get_current_cipher_name(&self) -> Option<String> {
         let cipher = unsafe { wolfssl_sys::wolfSSL_get_current_cipher(self.0.lock().as_ptr()) };
-        if !cipher.is_null() {
+        let cipher = if !cipher.is_null() {
             let name = unsafe {
                 let name = wolfssl_sys::wolfSSL_CIPHER_get_name(cipher);
                 std::ffi::CStr::from_ptr(name).to_str().ok()?.to_string()
@@ -30,6 +30,11 @@ impl WolfSession {
             Some(name)
         } else {
             None
+        };
+
+        match cipher {
+            Some(x) if x == "None" => None,
+            x => x,
         }
     }
 
