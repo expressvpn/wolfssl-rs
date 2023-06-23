@@ -7,10 +7,10 @@ mod context;
 mod error;
 mod session;
 
-use error::{WolfCleanupError, WolfInitError};
-
 pub use context::*;
 pub use session::*;
+
+use error::{WolfCleanupError, WolfInitError};
 
 /// Wraps [`wolfSSL_Init`][0]
 ///
