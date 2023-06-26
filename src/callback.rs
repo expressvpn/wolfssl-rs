@@ -1,4 +1,4 @@
-use crate::session::DataBuffer;
+use crate::ssl::DataBuffer;
 use bytes::Buf;
 use std::ffi::{c_char, c_int, c_void};
 

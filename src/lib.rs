@@ -6,10 +6,10 @@
 mod callback;
 mod context;
 mod error;
-mod session;
+mod ssl;
 
 pub use context::*;
-pub use session::*;
+pub use ssl::*;
 
 use error::{WolfCleanupError, WolfInitError};
 

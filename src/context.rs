@@ -1,7 +1,7 @@
 use crate::{
     callback::{wolf_tls_read_cb, wolf_tls_write_cb},
     error::LoadRootCertificateError,
-    session::WolfSession,
+    ssl::WolfSession,
     RootCertificate, Secret, WolfMethod,
 };
 use parking_lot::{Mutex, MutexGuard};
