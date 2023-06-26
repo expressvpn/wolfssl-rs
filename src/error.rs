@@ -1,11 +1,47 @@
 use thiserror::Error;
 
+/// Convenience alias for [`WolfError`]
+pub type Result<T> = std::result::Result<T, WolfError>;
+
+#[derive(Error, Debug)]
+pub enum WolfError {
+    #[error("WolfSSL needs to read more data to progress")]
+    WantRead,
+    #[error("WolfSSL needs to send more data to progress")]
+    WantWrite,
+    #[error("unknown: {what}, code: {code}")]
+    Unknown { what: String, code: usize },
+}
+
+impl WolfError {
+    /// Given an error code, try mapping it to a [`WolfError`].
+    ///
+    /// Some codes represent not-an-error, if so, return `Ok`
+    pub fn check(code: std::ffi::c_int) -> Result<()> {
+        match code {
+            wolfssl_sys::WOLFSSL_SUCCESS | wolfssl_sys::WOLFSSL_ERROR_NONE => Ok(()),
+            wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Err(Self::WantRead),
+            wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Err(Self::WantWrite),
+            x => Err(Self::Unknown {
+                what: wolf_error_string(x as std::ffi::c_ulong),
+                code: x as usize,
+            }),
+        }
+    }
+
+    pub fn is_non_fatal(&self) -> bool {
+        match self {
+            Self::WantRead | Self::WantWrite => true,
+            Self::Unknown { .. } => false,
+        }
+    }
+}
+
 // Note that this accepts an `unsigned long` instead of an `int`.
 //
 // Which is odd, because we're supposed to pass this the result of
 // `wolfSSL_get_error`, which returns a `c_int`
-#[allow(dead_code)]
-pub fn wolf_error_string(raw_err: ::std::os::raw::c_ulong) -> String {
+fn wolf_error_string(raw_err: std::ffi::c_ulong) -> String {
     let mut buffer = vec![0u8; wolfssl_sys::WOLFSSL_MAX_ERROR_SZ as usize];
     unsafe {
         wolfssl_sys::wolfSSL_ERR_error_string(
@@ -81,5 +117,19 @@ impl From<c_int> for LoadRootCertificateError {
             wolfssl_sys::BAD_PATH_ERROR => Self::Path,
             e => Self::Other(e as i64),
         }
+    }
+}
+
+#[cfg(test)]
+mod wolf_error {
+    use super::*;
+    use test_case::test_case;
+
+    #[test_case(wolfssl_sys::WOLFSSL_SUCCESS          => matches Ok(()))]
+    #[test_case(wolfssl_sys::WOLFSSL_ERROR_NONE       => matches Ok(()))]
+    #[test_case(wolfssl_sys::WOLFSSL_ERROR_WANT_READ  => matches Err(WolfError::WantRead))]
+    #[test_case(wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => matches Err(WolfError::WantWrite))]
+    fn check(code: std::ffi::c_int) -> Result<()> {
+        WolfError::check(code)
     }
 }

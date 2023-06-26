@@ -1,4 +1,4 @@
-use crate::session::CallbackBuffer;
+use crate::session::DataBuffer;
 use bytes::Buf;
 use std::ffi::{c_char, c_int, c_void};
 
@@ -12,10 +12,11 @@ pub unsafe extern "C" fn wolf_tls_read_cb(
     sz: c_int,
     ctx: *mut c_void,
 ) -> c_int {
+    debug_assert!(!_ssl.is_null());
     debug_assert!(!buf.is_null());
     debug_assert!(!ctx.is_null());
 
-    let read_buffer = unsafe { &mut *(ctx as *mut CallbackBuffer) };
+    let read_buffer = unsafe { &mut *(ctx as *mut DataBuffer) };
 
     // If our buffer is empty, there's nothing more to do here. Tell
     // WolfSSL that we need more data
@@ -62,10 +63,11 @@ pub unsafe extern "C" fn wolf_tls_write_cb(
     sz: c_int,
     ctx: *mut c_void,
 ) -> c_int {
+    debug_assert!(!_ssl.is_null());
     debug_assert!(!buf.is_null());
     debug_assert!(!ctx.is_null());
 
-    let write_buffer = unsafe { &mut *(ctx as *mut CallbackBuffer) };
+    let write_buffer = unsafe { &mut *(ctx as *mut DataBuffer) };
 
     // Create a slice using the c pointer and length from WolfSSL.
     // This contains the bytes we need to write out

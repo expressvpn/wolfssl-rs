@@ -228,7 +228,7 @@ impl WolfContextBuilder {
     }
 
     /// Finalizes a `WolfContext`.
-    pub fn build(self) -> WolfContext {
+    pub fn build(mut self) -> WolfContext {
         self.register_io_callbacks();
         WolfContext {
             _method: self.method,
@@ -238,7 +238,7 @@ impl WolfContextBuilder {
 }
 
 impl WolfContextBuilder {
-    fn register_io_callbacks(&self) {
+    fn register_io_callbacks(&mut self) {
         let ctx = self.ctx;
         unsafe {
             wolfssl_sys::wolfSSL_CTX_SetIORecv(ctx.as_ptr(), Some(wolf_tls_read_cb));
@@ -385,5 +385,12 @@ mod tests {
             .unwrap();
 
         wolf_cleanup().unwrap();
+    }
+
+    #[test]
+    fn register_io_callbacks() {
+        let _ = WolfContextBuilder::new(WolfMethod::TlsClient)
+            .unwrap()
+            .build();
     }
 }
