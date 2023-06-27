@@ -253,17 +253,6 @@ pub struct WolfContext {
     ctx: Mutex<NonNull<wolfssl_sys::WOLFSSL_CTX>>,
 }
 
-/// This is necessary because `WolfContext` will need to cross
-/// `.await` boundaries, which means it must be safe to transfer
-/// across threads.
-///
-/// We cannot specify just `wolfssl_sys::WOLFSSL_CTX` because of
-/// orphan rules.
-///
-// TODO (pangt): Perhaps store the pointer inside something `Send`
-// instead
-unsafe impl Send for WolfContext {}
-
 impl WolfContext {
     /// Gets the underlying [`wolfssl_sys::WOLFSSL_CTX`] pointer that this
     /// [`WolfContext`] is managing.
