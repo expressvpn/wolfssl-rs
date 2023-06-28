@@ -1,42 +1,57 @@
+use std::ffi::c_int;
+
 use thiserror::Error;
 
-/// Convenience alias for [`WolfError`]
-pub type Result<T> = std::result::Result<T, WolfError>;
+pub use std::task::Poll;
 
+/// Extracts an error message given a wolfssl error enum.
 #[derive(Error, Debug)]
-pub enum WolfError {
-    #[error("WolfSSL needs to read more data to progress")]
-    WantRead,
-    #[error("WolfSSL needs to send more data to progress")]
-    WantWrite,
-    #[error("unknown: {what}, code: {code}")]
-    Unknown { what: String, code: usize },
+#[error("Fatal: code: {code}, what: {what}")]
+pub struct FatalError {
+    what: String,
+    code: c_int,
 }
 
-impl WolfError {
-    /// Given an error code, try mapping it to a [`WolfError`].
-    ///
-    /// Some codes represent not-an-error, if so, return `Ok`
-    pub fn check(code: std::ffi::c_int) -> Result<()> {
-        match code {
-            wolfssl_sys::WOLFSSL_SUCCESS | wolfssl_sys::WOLFSSL_ERROR_NONE => Ok(()),
-            wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Err(Self::WantRead),
-            wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Err(Self::WantWrite),
-            x => Err(Self::Unknown {
-                what: wolf_error_string(x as std::ffi::c_ulong),
-                code: x as usize,
-            }),
-        }
-    }
+impl std::convert::From<c_int> for FatalError {
+    // Not all errors are fatal. Since the errors are fundamentally C-style
+    // enums, the most we can do is to just check that only fatal errors get
+    // constructed.
+    fn from(code: c_int) -> Self {
+        let this = Self {
+            what: wolf_error_string(code as std::ffi::c_ulong),
+            code,
+        };
 
-    pub fn is_non_fatal(&self) -> bool {
-        match self {
-            Self::WantRead | Self::WantWrite => true,
-            Self::Unknown { .. } => false,
-        }
+        debug_assert!(
+            !matches!(
+                this,
+                Self {
+                    code: wolfssl_sys::WOLFSSL_ERROR_WANT_READ
+                        | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE
+                        | wolfssl_sys::WOLFSSL_SUCCESS,
+                        // | wolfssl_sys::WOLFSSL_ERROR_NONE, // since WOLFSSL_FAILURE also uses this value
+                    ..
+                }
+            ),
+            "Attempting to construct a `FatalError` from a non-fatal error code {code}, with error message {what}",
+            code = this.code,
+            what = this.what
+        );
+
+        this
     }
 }
 
+/// Describes an outcome that is asynchronous. Certain methods in WolfSSL can
+/// return a `WANT_READ`/`WANT_WRITE`-ish error, which WolfSSL does not consider
+/// fatal, and indicates that the caller should retry again (usually after doing
+/// some form of rectification like handling the IO buffers)
+pub type PollResult<T> = std::result::Result<Poll<T>, FatalError>;
+
+/// Describes an outcome that is synchronous.
+pub type Result<T> = std::result::Result<T, FatalError>;
+
+/// Converts a WolfSSL error code to a string
 // Note that this accepts an `unsigned long` instead of an `int`.
 //
 // Which is odd, because we're supposed to pass this the result of
@@ -56,80 +71,13 @@ fn wolf_error_string(raw_err: std::ffi::c_ulong) -> String {
         .to_string()
 }
 
-/// Return error values for [`crate::wolf_init`]
-#[derive(Error, Debug)]
-pub enum WolfInitError {
-    #[error("BAD_MUTEX_E")]
-    Mutex,
-    #[error("WC_INIT_E")]
-    WolfCrypt,
-}
-
-/// Return error values for [`crate::wolf_cleanup`]
-#[derive(Error, Debug)]
-pub enum WolfCleanupError {
-    #[error("BAD_MUTEX_E")]
-    Mutex,
-}
-
-/// Possible errors returnable by
-/// [`wolfSSL_CTX_load_verify_buffer`][0] and [`wolfSSL_CTX_load_verify_locations`][1]
-///
-/// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_load_verify_buffer
-/// [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_load_verify_locations
-#[derive(Error, Debug)]
-pub enum LoadRootCertificateError {
-    #[error("SSL_FAILURE")]
-    Failure,
-    #[error("SSL_BAD_FILETYPE")]
-    BadFiletype,
-    #[error("SSL_BAD_FILE")]
-    BadFile,
-    #[error("MEMORY_E")]
-    Memory,
-    #[error("ASN_INPUT_E")]
-    AsnInput,
-    #[error("ASN_BEFORE_DATE_E")]
-    AsnBeforeDate,
-    #[error("ASN_AFTER_DATE_E")]
-    AsnAfterDate,
-    #[error("BUFFER_E")]
-    Buffer,
-    #[error("BAD_PATH_ERROR")]
-    Path,
-    #[error("Unknown: {0}")]
-    Other(i64),
-}
-
-use std::os::raw::c_int;
-
-impl From<c_int> for LoadRootCertificateError {
-    fn from(value: c_int) -> Self {
-        match value {
-            wolfssl_sys::WOLFSSL_BAD_FILETYPE => Self::BadFiletype,
-            wolfssl_sys::WOLFSSL_BAD_FILE => Self::BadFile,
-            wolfssl_sys::MEMORY_E => Self::Memory,
-            wolfssl_sys::ASN_INPUT_E => Self::AsnInput,
-            wolfssl_sys::BUFFER_E => Self::Buffer,
-            wolfssl_sys::WOLFSSL_FAILURE => Self::Failure,
-            wolfssl_sys::ASN_AFTER_DATE_E => Self::AsnAfterDate,
-            wolfssl_sys::ASN_BEFORE_DATE_E => Self::AsnBeforeDate,
-            wolfssl_sys::BAD_PATH_ERROR => Self::Path,
-            e => Self::Other(e as i64),
-        }
-    }
-}
-
 #[cfg(test)]
 mod wolf_error {
     use super::*;
-    use test_case::test_case;
 
-    #[test_case(wolfssl_sys::WOLFSSL_SUCCESS          => matches Ok(()))]
-    #[test_case(wolfssl_sys::WOLFSSL_ERROR_NONE       => matches Ok(()))]
-    #[test_case(wolfssl_sys::WOLFSSL_ERROR_WANT_READ  => matches Err(WolfError::WantRead))]
-    #[test_case(wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => matches Err(WolfError::WantWrite))]
-    fn check(code: std::ffi::c_int) -> Result<()> {
-        WolfError::check(code)
+    #[test]
+    fn wolf_error_string_check_string() {
+        let s = wolf_error_string(wolfssl_sys::WOLFSSL_ERROR_WANT_READ as std::ffi::c_ulong);
+        assert_eq!(s, "non-blocking socket wants data to be read");
     }
 }

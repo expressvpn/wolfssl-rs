@@ -2,7 +2,7 @@ mod data_buffer;
 
 use crate::{
     context::WolfContext,
-    error::{Result, WolfError},
+    error::{FatalError, Poll, PollResult},
     TLS_MAX_RECORD_SIZE,
 };
 pub use data_buffer::DataBuffer;
@@ -10,7 +10,7 @@ pub use data_buffer::DataBuffer;
 use bytes::Bytes;
 use parking_lot::Mutex;
 
-use std::ptr::NonNull;
+use std::{ffi::c_int, ptr::NonNull};
 
 #[allow(missing_docs)]
 pub struct WolfSession {
@@ -85,13 +85,20 @@ impl WolfSession {
     ///   via [`Self::io_read_in`].
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_negotiate
-    pub fn try_negotiate(&self) -> Result<()> {
-        let ret = unsafe {
+    pub fn try_negotiate(&self) -> PollResult<()> {
+        match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_negotiate(ssl.as_ptr())
-        };
-
-        self.check_error(ret)
+        } {
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(())),
+            x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
+                    Ok(Poll::Pending)
+                }
+                e => Err(FatalError::from(e)),
+            },
+            _ => unreachable!(),
+        }
     }
 
     /// Extracts data wolfSSL wants sent over the network, if there is any.
@@ -128,10 +135,9 @@ impl WolfSession {
     /// Generates a [`WolfError`] if one exists.
     ///
     /// This is stateful, and collects the error of the previous invoked method.
-    fn check_error(&self, ret: std::ffi::c_int) -> Result<()> {
+    fn get_error(&self, ret: c_int) -> c_int {
         let ssl = self.ssl.lock();
-        let result = unsafe { wolfssl_sys::wolfSSL_get_error(ssl.as_ptr(), ret) };
-        WolfError::check(result)
+        unsafe { wolfssl_sys::wolfSSL_get_error(ssl.as_ptr(), ret) }
     }
 }
 
@@ -200,17 +206,8 @@ mod tests {
         let mut server_ssl = server_ctx.new_session().unwrap();
 
         for _ in 0..4 {
-            client_ssl
-                .try_negotiate()
-                // WANT_READ/WRITE are nonfatal errors
-                .or_else(|x| if x.is_non_fatal() { Ok(()) } else { Err(x) })
-                .unwrap();
-
-            server_ssl
-                .try_negotiate()
-                // WANT_READ/WRITE are nonfatal errors
-                .or_else(|x| if x.is_non_fatal() { Ok(()) } else { Err(x) })
-                .unwrap();
+            let _ = client_ssl.try_negotiate().unwrap();
+            let _ = server_ssl.try_negotiate().unwrap();
 
             client_ssl.io_read_in(server_ssl.io_write_out());
             server_ssl.io_read_in(client_ssl.io_write_out());

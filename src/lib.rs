@@ -11,7 +11,7 @@ mod ssl;
 pub use context::*;
 pub use ssl::*;
 
-use error::{WolfCleanupError, WolfInitError};
+use error::{FatalError, Result};
 
 use std::ptr::NonNull;
 
@@ -33,23 +33,20 @@ const TLS_MAX_RECORD_SIZE: usize = 2usize.pow(14) + 1;
 /// [`WolfContextBuilder`].
 ///
 /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_init
-pub fn wolf_init() -> Result<(), WolfInitError> {
+pub fn wolf_init() -> Result<()> {
     match unsafe { wolfssl_sys::wolfSSL_Init() } {
         wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
-        wolfssl_sys::BAD_MUTEX_E => Err(WolfInitError::Mutex),
-        wolfssl_sys::WC_INIT_E => Err(WolfInitError::WolfCrypt),
-        e => panic!("Unexpected return value from `wolfSSL_Init`. Got {e}"),
+        e => Err(FatalError::from(e)),
     }
 }
 
 /// Wraps [`wolfSSL_Cleanup`][0]
 ///
 /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_cleanup
-pub fn wolf_cleanup() -> Result<(), WolfCleanupError> {
+pub fn wolf_cleanup() -> Result<()> {
     match unsafe { wolfssl_sys::wolfSSL_Cleanup() } {
         wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
-        wolfssl_sys::BAD_MUTEX_E => Err(WolfCleanupError::Mutex),
-        e => panic!("Unexpected return value from `wolfSSL_Cleanup. Got {e}`"),
+        e => Err(FatalError::from(e)),
     }
 }
 
