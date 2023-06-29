@@ -101,6 +101,33 @@ impl WolfSession {
         }
     }
 
+    /// Invokes [`wolfSSL_shutdown`][0] *once*.
+    ///
+    /// Like other IO-related functions in wolfSSL, this would require the
+    /// caller to ensure that the necessary data exchange over the network is
+    /// accomplished (see [`Self::try_negotiate`] for more details).
+    ///
+    /// Fortunately, if there is no intent to reuse the connection, you do not
+    /// need to await for a response from the other side.
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_shutdown
+    pub fn try_shutdown(&self) -> PollResult<()> {
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_shutdown(ssl.as_ptr())
+        } {
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(())),
+            wolfssl_sys::WOLFSSL_SHUTDOWN_NOT_DONE => Ok(Poll::Pending),
+            x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
+                    Ok(Poll::Pending)
+                }
+                x => Err(FatalError::from(x)),
+            },
+            _ => unreachable!(),
+        }
+    }
+
     /// Extracts data wolfSSL wants sent over the network, if there is any.
     pub fn io_write_out(&mut self) -> Bytes {
         self.callback_write_buffer.split().freeze()
