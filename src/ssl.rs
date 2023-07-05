@@ -2,7 +2,7 @@ mod data_buffer;
 
 use crate::{
     context::WolfContext,
-    error::{Error, Poll, PollResult},
+    error::{Error, Poll, PollResult, Result},
     TLS_MAX_RECORD_SIZE,
 };
 pub use data_buffer::DataBuffer;
@@ -99,6 +99,11 @@ impl WolfSession {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
                     Ok(Poll::Pending)
                 }
+                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
+                    if self.is_secure_renegotiation_supported() =>
+                {
+                    self.handle_app_data().map(Poll::AppData)
+                }
                 e => Err(Error::fatal(e)),
             },
             _ => unreachable!(),
@@ -125,6 +130,11 @@ impl WolfSession {
             x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
                     Ok(Poll::Pending)
+                }
+                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
+                    if self.is_secure_renegotiation_supported() =>
+                {
+                    self.handle_app_data().map(Poll::AppData)
                 }
                 x => Err(Error::fatal(x)),
             },
@@ -181,9 +191,14 @@ impl WolfSession {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE | wolfssl_sys::WOLFSSL_ERROR_WANT_READ => {
                     Ok(Poll::Pending)
                 }
+                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
+                    if self.is_secure_renegotiation_supported() =>
+                {
+                    self.handle_app_data().map(Poll::AppData)
+                }
                 e => Err(Error::fatal(e)),
             },
-            _ => unreachable!("Unexpected error code from wolfSSL_write"),
+            e => Err(Error::fatal(e)),
         }
     }
 
@@ -229,9 +244,75 @@ impl WolfSession {
                 wolfssl_sys::WOLFSSL_ERROR_NONE => {
                     unreachable!("wolfSSL_read should only be called if buffer has capacity")
                 }
+                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
+                    if self.is_secure_renegotiation_supported() =>
+                {
+                    self.handle_app_data().map(Poll::AppData)
+                }
                 e => Err(Error::fatal(e)),
             },
-            _ => unreachable!("Unexpected error from wolfSSL_read"),
+            e => Err(Error::fatal(e)),
+        }
+    }
+
+    /// Checks if this session supports secure renegotiation
+    ///
+    /// Only some D/TLS connections support secure renegotiation, so this method
+    /// checks if it's something we can do here.
+    pub fn is_secure_renegotiation_supported(&self) -> bool {
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_SSL_get_secure_renegotiation_support(ssl.as_ptr())
+        } {
+            0 => false,
+            1 => true,
+            _ => unreachable!(),
+        }
+    }
+
+    /// Checks if there is an ongoing secure renegotiation triggered by
+    /// [`Self::try_rehandshake`].
+    //
+    // NOTE (pangt): I can't find online documentation on
+    // `wolfSSL_SSL_renegotiate_pending`, so no links to it.
+    pub fn is_secure_renegotiation_pending(&self) -> bool {
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_SSL_renegotiate_pending(ssl.as_ptr())
+        } {
+            0 => false,
+            1 => true,
+            _ => unreachable!(),
+        }
+    }
+
+    /// Invokes [`wolfSSL_Rehandshake`][0] *once*.
+    ///
+    /// Is a no-op unless the session supports secure renegotiation.
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html?query=wolfssl_rehandshake#function-wolfssl_rehandshake
+    pub fn try_rehandshake(&mut self) -> PollResult<()> {
+        if !self.is_secure_renegotiation_supported() {
+            return Ok(Poll::Ready(()));
+        }
+
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_Rehandshake(ssl.as_ptr())
+        } {
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(())),
+            x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
+                    Ok(Poll::Pending)
+                }
+                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
+                    if self.is_secure_renegotiation_supported() =>
+                {
+                    self.handle_app_data().map(Poll::AppData)
+                }
+                e => Err(Error::fatal(e)),
+            },
+            _ => unreachable!(),
         }
     }
 }
@@ -264,6 +345,37 @@ impl WolfSession {
     fn get_error(&self, ret: c_int) -> c_int {
         let ssl = self.ssl.lock();
         unsafe { wolfssl_sys::wolfSSL_get_error(ssl.as_ptr(), ret) }
+    }
+
+    /// During secure renegotiation, wolfssl allows the user to send and receive data.
+    ///
+    /// If data is detected, WolfSSL will return a `APP_DATA_READY` code, it is then
+    /// expected that we immediately read this data, or risk it dropping.
+    ///
+    /// Since every WolfSSL TLS API could raise this error, the logic is
+    /// centralized here, in this helper function.
+    //
+    // It's implied that the data has already arrived and `wolfSSL_read` will
+    // not return a `WANT_READ` or similar error code, so if we see them we will
+    // convert it to an error.
+    fn handle_app_data(&mut self) -> Result<Bytes> {
+        debug_assert!(self.is_secure_renegotiation_supported());
+
+        let mut buf = BytesMut::with_capacity(TLS_MAX_RECORD_SIZE);
+        // Collect the appdata wolfssl kindly informed us about.
+        match self.try_read(&mut buf) {
+            Ok(Poll::Ready(_)) => Ok(buf.freeze()),
+            Err(Error::Fatal(e) | Error::AppData(e)) => Err(Error::AppData(e)),
+            Ok(Poll::Pending) => {
+                unreachable!("App data is ready, so why are we waiting?")
+            }
+            // Lightway Core (C) does recurse, but only seems to
+            // care about the last wolfssl_read, which likely
+            // means that this won't recurse.
+            Ok(Poll::AppData(_)) => {
+                unreachable!("We assume that no nested calls are possible.")
+            }
+        }
     }
 }
 
@@ -322,18 +434,29 @@ mod tests {
     }
 
     fn make_connected_clients() -> (TestClient, TestClient) {
-        let client_ctx = WolfContextBuilder::new(WolfMethod::TlsClientV1_3)
-            .expect("client WolfBuilder")
+        make_connected_clients_with_method(WolfMethod::TlsClientV1_3, WolfMethod::TlsServerV1_3)
+    }
+
+    fn make_connected_clients_with_method(
+        client_method: WolfMethod,
+        server_method: WolfMethod,
+    ) -> (TestClient, TestClient) {
+        let client_ctx = WolfContextBuilder::new(client_method)
+            .unwrap_or_else(|| panic!("new(WolfMethod::{client_method:?})"))
             .with_root_certificate(RootCertificate::Asn1Buffer(CA_CERT))
+            .unwrap()
+            .with_secure_renegotiation()
             .unwrap()
             .build();
 
-        let server_ctx = WolfContextBuilder::new(WolfMethod::TlsServerV1_3)
-            .expect("new(crate::WolfMethod::TlsServer)")
+        let server_ctx = WolfContextBuilder::new(server_method)
+            .unwrap_or_else(|| panic!("new(WolfMethod::{server_method:?})"))
             .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
             .unwrap()
             .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
             .expect("server WolfBuilder")
+            .with_secure_renegotiation()
+            .unwrap()
             .build();
 
         let client_ssl = client_ctx.new_session().unwrap();
@@ -349,7 +472,7 @@ mod tests {
             ssl: server_ssl,
         };
 
-        for _ in 0..4 {
+        for _ in 0..7 {
             let _ = client.ssl.try_negotiate().unwrap();
             let _ = server.ssl.try_negotiate().unwrap();
 
@@ -357,7 +480,6 @@ mod tests {
             server.ssl.io_read_in(client.ssl.io_write_out());
         }
 
-        // The handshake should complete in 4 rounds.
         assert!(client.ssl.is_init_finished());
         assert!(server.ssl.is_init_finished());
 
@@ -441,5 +563,70 @@ mod tests {
             }
             e => panic!("Expected bytes to be read! Got {e:?}"),
         }
+    }
+
+    #[test]
+    fn try_rehandshake() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let (mut client, mut server) = make_connected_clients_with_method(
+            WolfMethod::DtlsClientV1_2,
+            WolfMethod::DtlsServerV1_2,
+        );
+
+        assert!(client.ssl.is_secure_renegotiation_supported());
+        assert!(server.ssl.is_secure_renegotiation_supported());
+
+        const TEST: &str = "foobar";
+
+        for _ in 0..5 {
+            let mut bytes = BytesMut::from(TEST.as_bytes());
+
+            // Keep invoking `try_rehandshake` to progress the secure
+            // renegotiation.
+            match client.ssl.try_rehandshake() {
+                Ok(Poll::Ready(_)) => {
+                    break;
+                }
+                Ok(Poll::Pending) => {}
+                Ok(Poll::AppData(_)) => {
+                    panic!("Should not receive AppData from anywhere")
+                }
+                Err(e) => panic!("{e}"),
+            }
+
+            // While we are here, also test out the Application Data
+            // functionality. Lets send some app data while a secure
+            // renegotiation is ongoing.
+            match client.ssl.try_write(&mut bytes) {
+                Ok(Poll::Ready(_) | Poll::Pending) => {}
+                Ok(Poll::AppData(_)) => {
+                    panic!("Should not receive AppData from anywhere")
+                }
+                Err(e) => panic!("{e}"),
+            };
+
+            server.ssl.io_read_in(client.ssl.io_write_out());
+
+            // We should expect to see on the server side that some application
+            // data has been discovered, and that we should get it out or
+            // otherwise lose it.
+            let mut server_bytes = BytesMut::with_capacity(TEST.len());
+            match server.ssl.try_read(&mut server_bytes) {
+                Ok(Poll::Ready(_) | Poll::Pending) => {}
+                Ok(Poll::AppData(b)) => {
+                    assert_eq!(b, TEST);
+                    // `server_bytes` should not have been modified if appdata
+                    // is discovered.
+                    assert!(server_bytes.is_empty());
+                }
+                Err(e) => panic!("{e}"),
+            };
+
+            client.ssl.io_read_in(server.ssl.io_write_out());
+        }
+
+        assert!(!client.ssl.is_secure_renegotiation_pending());
+        assert!(!server.ssl.is_secure_renegotiation_pending());
     }
 }
