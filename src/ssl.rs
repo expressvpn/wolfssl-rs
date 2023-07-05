@@ -2,7 +2,7 @@ mod data_buffer;
 
 use crate::{
     context::WolfContext,
-    error::{FatalError, Poll, PollResult},
+    error::{Error, Poll, PollResult},
     TLS_MAX_RECORD_SIZE,
 };
 pub use data_buffer::DataBuffer;
@@ -99,7 +99,7 @@ impl WolfSession {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
                     Ok(Poll::Pending)
                 }
-                e => Err(FatalError::from(e)),
+                e => Err(Error::fatal(e)),
             },
             _ => unreachable!(),
         }
@@ -126,7 +126,7 @@ impl WolfSession {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
                     Ok(Poll::Pending)
                 }
-                x => Err(FatalError::from(x)),
+                x => Err(Error::fatal(x)),
             },
             _ => unreachable!(),
         }
@@ -181,7 +181,7 @@ impl WolfSession {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE | wolfssl_sys::WOLFSSL_ERROR_WANT_READ => {
                     Ok(Poll::Pending)
                 }
-                e => Err(FatalError::from(e)),
+                e => Err(Error::fatal(e)),
             },
             _ => unreachable!("Unexpected error code from wolfSSL_write"),
         }
@@ -229,7 +229,7 @@ impl WolfSession {
                 wolfssl_sys::WOLFSSL_ERROR_NONE => {
                     unreachable!("wolfSSL_read should only be called if buffer has capacity")
                 }
-                e => Err(FatalError::from(e)),
+                e => Err(Error::fatal(e)),
             },
             _ => unreachable!("Unexpected error from wolfSSL_read"),
         }

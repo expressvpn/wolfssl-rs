@@ -1,6 +1,6 @@
 use crate::{
     callback::{wolf_tls_read_cb, wolf_tls_write_cb},
-    error::{FatalError, Result},
+    error::{Error, Result},
     ssl::WolfSession,
     RootCertificate, Secret, WolfMethod,
 };
@@ -58,9 +58,9 @@ impl WolfContextBuilder {
                 let is_dir = path.is_dir();
                 let path = path
                     .to_str()
-                    .ok_or(FatalError::from(wolfssl_sys::WOLFSSL_BAD_PATH))?;
+                    .ok_or(Error::fatal(wolfssl_sys::WOLFSSL_BAD_PATH))?;
                 let path = std::ffi::CString::new(path)
-                    .or(Err(FatalError::from(wolfssl_sys::WOLFSSL_BAD_PATH)))?;
+                    .or(Err(Error::fatal(wolfssl_sys::WOLFSSL_BAD_PATH)))?;
                 if is_dir {
                     unsafe {
                         wolfSSL_CTX_load_verify_locations(
@@ -84,7 +84,7 @@ impl WolfContextBuilder {
         if result == wolfssl_sys::WOLFSSL_SUCCESS {
             Ok(self)
         } else {
-            Err(FatalError::from(result))
+            Err(Error::fatal(result))
         }
     }
 
@@ -93,7 +93,7 @@ impl WolfContextBuilder {
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_ctx_set_cipher_list
     pub fn with_cipher_list(self, cipher_list: &str) -> Result<Self> {
         let cipher_list = std::ffi::CString::new(cipher_list)
-            .or(Err(FatalError::from(wolfssl_sys::WOLFSSL_FAILURE)))?;
+            .or(Err(Error::fatal(wolfssl_sys::WOLFSSL_FAILURE)))?;
 
         let result = unsafe {
             wolfssl_sys::wolfSSL_CTX_set_cipher_list(
@@ -105,7 +105,7 @@ impl WolfContextBuilder {
         if result == wolfssl_sys::WOLFSSL_SUCCESS {
             Ok(self)
         } else {
-            Err(FatalError::from(result))
+            Err(Error::fatal(result))
         }
     }
 
@@ -131,9 +131,9 @@ impl WolfContextBuilder {
             Secret::Asn1File(path) => unsafe {
                 let path = path
                     .to_str()
-                    .ok_or(FatalError::from(wolfssl_sys::BAD_PATH_ERROR))?;
+                    .ok_or(Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 let file = std::ffi::CString::new(path)
-                    .or(Err(FatalError::from(wolfssl_sys::BAD_PATH_ERROR)))?;
+                    .or(Err(Error::fatal(wolfssl_sys::BAD_PATH_ERROR)))?;
                 wolfSSL_CTX_use_certificate_file(
                     self.ctx.as_ptr(),
                     file.as_c_str().as_ptr(),
@@ -151,9 +151,9 @@ impl WolfContextBuilder {
             Secret::PemFile(path) => unsafe {
                 let path = path
                     .to_str()
-                    .ok_or(FatalError::from(wolfssl_sys::BAD_PATH_ERROR))?;
+                    .ok_or(Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 let file = std::ffi::CString::new(path)
-                    .or(Err(FatalError::from(wolfssl_sys::BAD_PATH_ERROR)))?;
+                    .or(Err(Error::fatal(wolfssl_sys::BAD_PATH_ERROR)))?;
                 wolfSSL_CTX_use_certificate_file(
                     self.ctx.as_ptr(),
                     file.as_c_str().as_ptr(),
@@ -165,7 +165,7 @@ impl WolfContextBuilder {
         if result == wolfssl_sys::WOLFSSL_SUCCESS {
             Ok(self)
         } else {
-            Err(FatalError::from(result))
+            Err(Error::fatal(result))
         }
     }
 
@@ -191,9 +191,9 @@ impl WolfContextBuilder {
             Secret::Asn1File(path) => unsafe {
                 let path = path
                     .to_str()
-                    .ok_or(FatalError::from(wolfssl_sys::BAD_PATH_ERROR))?;
+                    .ok_or(Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 let file = std::ffi::CString::new(path)
-                    .or(Err(FatalError::from(wolfssl_sys::BAD_PATH_ERROR)))?;
+                    .or(Err(Error::fatal(wolfssl_sys::BAD_PATH_ERROR)))?;
                 wolfSSL_CTX_use_PrivateKey_file(
                     self.ctx.as_ptr(),
                     file.as_c_str().as_ptr(),
@@ -211,9 +211,9 @@ impl WolfContextBuilder {
             Secret::PemFile(path) => unsafe {
                 let path = path
                     .to_str()
-                    .ok_or(FatalError::from(wolfssl_sys::BAD_PATH_ERROR))?;
+                    .ok_or(Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 let file = std::ffi::CString::new(path)
-                    .or(Err(FatalError::from(wolfssl_sys::BAD_PATH_ERROR)))?;
+                    .or(Err(Error::fatal(wolfssl_sys::BAD_PATH_ERROR)))?;
                 wolfSSL_CTX_use_PrivateKey_file(
                     self.ctx.as_ptr(),
                     file.as_c_str().as_ptr(),
@@ -225,7 +225,7 @@ impl WolfContextBuilder {
         if result == wolfssl_sys::WOLFSSL_SUCCESS {
             Ok(self)
         } else {
-            Err(FatalError::from(result))
+            Err(Error::fatal(result))
         }
     }
 
@@ -241,7 +241,7 @@ impl WolfContextBuilder {
         if result == wolfssl_sys::WOLFSSL_SUCCESS {
             Ok(self)
         } else {
-            Err(FatalError::from(result))
+            Err(Error::fatal(result))
         }
     }
 

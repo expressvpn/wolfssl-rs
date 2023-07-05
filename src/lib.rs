@@ -11,7 +11,7 @@ mod ssl;
 pub use context::*;
 pub use ssl::*;
 
-use error::{FatalError, Result};
+use error::{Error, Result};
 
 use std::ptr::NonNull;
 
@@ -36,7 +36,7 @@ const TLS_MAX_RECORD_SIZE: usize = 2usize.pow(14) + 1;
 pub fn wolf_init() -> Result<()> {
     match unsafe { wolfssl_sys::wolfSSL_Init() } {
         wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
-        e => Err(FatalError::from(e)),
+        e => Err(Error::fatal(e)),
     }
 }
 
@@ -46,7 +46,7 @@ pub fn wolf_init() -> Result<()> {
 pub fn wolf_cleanup() -> Result<()> {
     match unsafe { wolfssl_sys::wolfSSL_Cleanup() } {
         wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
-        e => Err(FatalError::from(e)),
+        e => Err(Error::fatal(e)),
     }
 }
 

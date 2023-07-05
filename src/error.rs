@@ -1,12 +1,46 @@
 use std::ffi::c_int;
 
+use bytes::Bytes;
 use thiserror::Error;
 
-pub use std::task::Poll;
+#[derive(Debug)]
+pub enum Poll<T> {
+    /// Underlying IO operations are still ongoing. No output has been generated
+    /// yet.
+    Pending,
+    /// An output has been generated.
+    Ready(T),
+    /// When under secure renegotiation, WolfSSL can now sometimes emit an
+    /// `APP_DATA_READY` code, meaning that it has received application data
+    /// during this renegotiation. This variant contains this information.
+    AppData(Bytes),
+}
+
+#[derive(Error, Debug)]
+pub enum Error {
+    /// During secure renegotiation, if application data is found, we must call
+    /// `wolfssl_read` to extract the data. If that `wolfssl_read` call fails,
+    /// this error will be generated.
+    #[error("App Data: {0}")]
+    AppData(FatalError),
+    /// Top-level errors from WolfSSL API invocations.
+    #[error("Fatal: {0}")]
+    Fatal(FatalError),
+}
+
+impl Error {
+    pub fn fatal(code: c_int) -> Self {
+        Self::Fatal(FatalError::from(code))
+    }
+
+    pub fn app_data(code: c_int) -> Self {
+        Self::AppData(FatalError::from(code))
+    }
+}
 
 /// Extracts an error message given a wolfssl error enum.
 #[derive(Error, Debug)]
-#[error("Fatal: code: {code}, what: {what}")]
+#[error("code: {code}, what: {what}")]
 pub struct FatalError {
     what: String,
     code: c_int,
@@ -46,10 +80,10 @@ impl std::convert::From<c_int> for FatalError {
 /// return a `WANT_READ`/`WANT_WRITE`-ish error, which WolfSSL does not consider
 /// fatal, and indicates that the caller should retry again (usually after doing
 /// some form of rectification like handling the IO buffers)
-pub type PollResult<T> = std::result::Result<Poll<T>, FatalError>;
+pub type PollResult<T> = std::result::Result<Poll<T>, Error>;
 
 /// Describes an outcome that is synchronous.
-pub type Result<T> = std::result::Result<T, FatalError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Converts a WolfSSL error code to a string
 // Note that this accepts an `unsigned long` instead of an `int`.
