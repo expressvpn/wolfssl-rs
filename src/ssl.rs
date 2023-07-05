@@ -89,7 +89,7 @@ impl WolfSession {
     ///   via [`Self::io_read_in`].
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_negotiate
-    pub fn try_negotiate(&self) -> PollResult<()> {
+    pub fn try_negotiate(&mut self) -> PollResult<()> {
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_negotiate(ssl.as_ptr())
@@ -115,7 +115,7 @@ impl WolfSession {
     /// need to await for a response from the other side.
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_shutdown
-    pub fn try_shutdown(&self) -> PollResult<()> {
+    pub fn try_shutdown(&mut self) -> PollResult<()> {
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_shutdown(ssl.as_ptr())
