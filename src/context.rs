@@ -249,7 +249,7 @@ impl WolfContextBuilder {
     pub fn build(mut self) -> WolfContext {
         self.register_io_callbacks();
         WolfContext {
-            _method: self.method,
+            method: self.method,
             ctx: Mutex::new(self.ctx),
         }
     }
@@ -267,7 +267,7 @@ impl WolfContextBuilder {
 
 #[allow(missing_docs)]
 pub struct WolfContext {
-    _method: WolfMethod,
+    method: WolfMethod,
     ctx: Mutex<NonNull<wolfssl_sys::WOLFSSL_CTX>>,
 }
 
@@ -276,6 +276,11 @@ impl WolfContext {
     /// [`WolfContext`] is managing.
     pub fn ctx(&self) -> MutexGuard<NonNull<wolfssl_sys::WOLFSSL_CTX>> {
         self.ctx.lock()
+    }
+
+    /// Returns the Context's [`WolfMethod`].
+    pub fn method(&self) -> WolfMethod {
+        self.method
     }
 
     /// Creates a new SSL session using this underlying context.

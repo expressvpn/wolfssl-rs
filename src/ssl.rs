@@ -3,7 +3,7 @@ mod data_buffer;
 use crate::{
     context::WolfContext,
     error::{Error, Poll, PollResult, Result},
-    TLS_MAX_RECORD_SIZE,
+    WolfMethod, TLS_MAX_RECORD_SIZE,
 };
 pub use data_buffer::DataBuffer;
 
@@ -18,6 +18,8 @@ use std::{
 
 #[allow(missing_docs)]
 pub struct WolfSession {
+    method: WolfMethod,
+
     ssl: Mutex<NonNull<wolfssl_sys::WOLFSSL>>,
 
     // A `Box` because we need a stable pointer address
@@ -33,6 +35,7 @@ impl WolfSession {
         let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.ctx().as_ptr()) };
 
         let mut session = Self {
+            method: ctx.method(),
             ssl: Mutex::new(NonNull::new(ptr)?),
             callback_read_buffer: Box::new(DataBuffer::with_capacity(TLS_MAX_RECORD_SIZE)),
             callback_write_buffer: Box::new(DataBuffer::with_capacity(TLS_MAX_RECORD_SIZE)),
@@ -169,11 +172,12 @@ impl WolfSession {
     /// then manually handle the data transfer.
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_write
+    //
+    // Note that even if no data was consumed, WolfSSL might take this
+    // opportunity to update its internal state (for example, if it needs to
+    // update encryption keys). This can be seen in
+    // [`Self::trigger_update_keys`].
     pub fn try_write(&mut self, data_in: &mut BytesMut) -> PollResult<usize> {
-        if data_in.is_empty() {
-            return Ok(Poll::Ready(0));
-        }
-
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_write(
@@ -187,7 +191,7 @@ impl WolfSession {
                 Ok(Poll::Ready(x as usize))
             }
             x @ (0 | wolfssl_sys::WOLFSSL_FATAL_ERROR) => match self.get_error(x) {
-                wolfssl_sys::WOLFSSL_ERROR_NONE => unreachable!("wolfSSL_write was fed no data"),
+                wolfssl_sys::WOLFSSL_ERROR_NONE => Ok(Poll::Ready(0)),
                 wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE | wolfssl_sys::WOLFSSL_ERROR_WANT_READ => {
                     Ok(Poll::Pending)
                 }
@@ -211,15 +215,11 @@ impl WolfSession {
     ///   - It does not alter existing data inside the buffer.
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_read
-    // NOTE: We want to reduce allocations so we accept a buffer to mutate
-    // instead of returning a buffer.
+    //
+    // Like [`Self::try_write`], we call through to `wolfSSL_read` even if there
+    // is no space to allow WolfSSL's internal state to advance.
     pub fn try_read(&mut self, data_out: &mut BytesMut) -> PollResult<usize> {
         let buf = data_out.spare_capacity_mut();
-
-        // Skip calling into `wolfSSL_read` if there is no space.
-        if buf.is_empty() {
-            return Ok(Poll::Ready(0));
-        }
 
         match unsafe {
             let ssl = self.ssl.lock();
@@ -241,9 +241,7 @@ impl WolfSession {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
                     Ok(Poll::Pending)
                 }
-                wolfssl_sys::WOLFSSL_ERROR_NONE => {
-                    unreachable!("wolfSSL_read should only be called if buffer has capacity")
-                }
+                wolfssl_sys::WOLFSSL_ERROR_NONE => Ok(Poll::Ready(0)),
                 wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
                     if self.is_secure_renegotiation_supported() =>
                 {
@@ -312,6 +310,63 @@ impl WolfSession {
                 }
                 e => Err(Error::fatal(e)),
             },
+            _ => unreachable!(),
+        }
+    }
+
+    /// Checks if the session is over TLS 1.3
+    pub fn is_tls_13(&self) -> bool {
+        self.method.is_tls_13()
+    }
+
+    /// Invokes [`wolfSSL_update_keys`][0] *once*
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_update_keys
+    pub fn try_trigger_update_key(&mut self) -> PollResult<()> {
+        if !self.method.is_tls_13() {
+            return Ok(Poll::Ready(()));
+        }
+
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_update_keys(ssl.as_ptr())
+        } {
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(())),
+            wolfssl_sys::BAD_FUNC_ARG => unreachable!(),
+            wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::Pending),
+            e => unreachable!("Received unknown code {e}"),
+        }
+    }
+
+    /// Invokes [`wolfSSL_key_update_response`][0]
+    ///
+    /// Returns `true` if the client has sent a key update and is expecting a
+    /// response, `false` otherwise.
+    ///
+    /// Note that this is a TLS 1.3 only feature. If the session is not TLS 1.3
+    /// we will always return false.
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_key_update_response
+    pub fn is_update_keys_pending(&self) -> bool {
+        if !self.method.is_tls_13() {
+            return false;
+        }
+
+        let mut required = std::mem::MaybeUninit::<c_int>::uninit();
+
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_key_update_response(ssl.as_ptr(), required.as_mut_ptr())
+        } {
+            0 => {}
+            // panic on non-success, because `ssl` is always non-null and the
+            // method here must be TLS1.3
+            _ => unreachable!(),
+        }
+
+        match unsafe { required.assume_init() } {
+            1 => true,
+            0 => false,
             _ => unreachable!(),
         }
     }
@@ -530,7 +585,8 @@ mod tests {
         }
     }
 
-    #[test_case(0 => 0)]
+    // Passing in 0 counterintutively results in a WANT_READ/WANT_WRITE instead of an ERROR_NONE
+    #[test_case(0 => panics)]
     #[test_case("Hello World".len() => "Hello World".len())]
     #[test_case(TLS_MAX_RECORD_SIZE - 1 => TLS_MAX_RECORD_SIZE - 1)]
     // More than one invocation to `try_read`/`try_write` would be required here
@@ -543,6 +599,8 @@ mod tests {
         let (mut client, mut server) = make_connected_clients();
 
         let mut client_bytes = BytesMut::from(text.as_bytes());
+
+        assert_eq!(client_bytes.capacity(), len);
 
         let Ok(Poll::Ready(_)) = client.ssl.try_write(&mut client_bytes) else {
             panic!("Unusual write behavior for this payload");
@@ -628,5 +686,81 @@ mod tests {
 
         assert!(!client.ssl.is_secure_renegotiation_pending());
         assert!(!server.ssl.is_secure_renegotiation_pending());
+    }
+
+    #[test]
+    fn try_trigger_update_keys() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let (mut client, mut server) = make_connected_clients_with_method(
+            WolfMethod::TlsClientV1_3,
+            WolfMethod::TlsServerV1_3,
+        );
+
+        assert!(client.ssl.is_tls_13());
+        assert!(server.ssl.is_tls_13());
+
+        unsafe {
+            wolfssl_sys::wolfSSL_Debugging_ON();
+        }
+
+        // Trigger the wolfssl key update mechanism. This will cause the client
+        // to send a key update message.
+        match client.ssl.try_trigger_update_key() {
+            Ok(Poll::Ready(_)) => {}
+            Ok(Poll::Pending) => {
+                panic!("Should not be pending any data")
+            }
+            Ok(Poll::AppData(_)) => {
+                panic!("Should not receive AppData from anywhere")
+            }
+            Err(e) => panic!("{e}"),
+        }
+
+        assert!(
+            client.ssl.is_update_keys_pending(),
+            "Client should be expecting a response containing decryption keys"
+        );
+
+        let client_send_data = client.ssl.io_write_out();
+        assert!(!client_send_data.is_empty());
+        server.ssl.io_read_in(client_send_data);
+
+        // The server reads no application data, but this internally triggers
+        // some wolfSSL machinery to deal with the key update.
+        //
+        // This will cause the server to send its own key update message.
+        match server.ssl.try_read(&mut BytesMut::with_capacity(0)) {
+            Ok(Poll::Pending) => {}
+            Ok(Poll::Ready(_)) => {
+                panic!("There should be no data to read")
+            }
+            Ok(Poll::AppData(_)) => {
+                panic!("Should not receive AppData from anywhere");
+            }
+            Err(e) => panic!("{e}"),
+        };
+
+        let server_send_data = server.ssl.io_write_out();
+        assert!(!server_send_data.is_empty());
+        client.ssl.io_read_in(server_send_data);
+
+        // The client also reads no application data, but this will trigger the
+        // same key update machinery to occur on the client side.
+        match client.ssl.try_read(&mut BytesMut::with_capacity(0)) {
+            Ok(Poll::Pending) => {}
+            Ok(Poll::Ready(_)) => {
+                panic!("There should be no data to read")
+            }
+            Ok(Poll::AppData(_)) => {
+                panic!("Should not receive AppData from anywhere")
+            }
+            Err(e) => panic!("{e}"),
+        };
+
+        assert!(
+            !client.ssl.is_update_keys_pending(),
+            "Key update should be done within one round trip"
+        );
     }
 }
