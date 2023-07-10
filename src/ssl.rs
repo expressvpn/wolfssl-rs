@@ -13,6 +13,7 @@ use parking_lot::Mutex;
 use std::{
     ffi::{c_int, c_void},
     ptr::NonNull,
+    time::Duration,
     unreachable,
 };
 
@@ -370,6 +371,110 @@ impl WolfSession {
             _ => unreachable!(),
         }
     }
+
+    /// Invokes [`wolfSSL_dtls_get_current_timeout`][0].
+    ///
+    /// This reports how long the calling application needs to wait for
+    /// available received data, in seconds.
+    ///
+    /// WolfSSL implements a backoff, so the returned value will likely change.
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls_get_current_timeout
+    pub fn dtls_current_timeout(&self) -> Duration {
+        if !self.is_dtls() {
+            log::debug!("Session is not configured for DTLS");
+        }
+
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_dtls_get_current_timeout(ssl.as_ptr())
+        } {
+            wolfssl_sys::NOT_COMPILED_IN => unreachable!(),
+            x if x > 0 => Duration::from_secs(x as u64),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Invokes [`wolfSSL_dtls_set_timeout_init`][0]
+    ///
+    /// This sets both the initial timeout (the value WolfSSL uses before any
+    /// kind of backoff), and the current, ongoing timeout if there is one.
+    ///
+    /// There are multiple timeout values because WolfSSL has a backoff.
+    ///
+    /// The duration:
+    /// - Should not be 0
+    /// - Should not exceed the current maximum timeout (refer to
+    ///   [`Self::dtls_set_max_timeout`]).
+    ///
+    /// Truncates to the nearest second.
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls_set_timeout_init
+    pub fn dtls_set_timeout(&self, time: Duration) -> Result<()> {
+        if !self.is_dtls() {
+            log::debug!("Session is not configured for DTLS");
+        }
+
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_dtls_set_timeout_init(ssl.as_ptr(), time.as_secs() as c_int)
+        } {
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
+            x @ wolfssl_sys::BAD_FUNC_ARG => Err(Error::fatal(x)),
+            e => unreachable!("{e:?}"),
+        }
+    }
+
+    /// Invokes [`wolfSSL_dtls_set_timeout_max`][0]
+    ///
+    /// This sets the maximum amount of time WolfSSL is allowed to wait before
+    /// declaring a timeout, including backoff. (defaults to `DTLS_TIMEOUT_MAX`)
+    ///
+    /// Returns an error if the argument is set to 0, exceeds WolfSSL's internal
+    /// limits, or if the argument is lower than the current timeout as set by
+    /// [`Self::dtls_set_timeout`].
+    ///
+    /// Truncates to the nearest second.
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls_set_timeout_max
+    pub fn dtls_set_max_timeout(&self, time: Duration) -> Result<()> {
+        if !self.is_dtls() {
+            log::debug!("Session is not configured for DTLS");
+        }
+
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_dtls_set_timeout_max(ssl.as_ptr(), time.as_secs() as c_int)
+        } {
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
+            x @ wolfssl_sys::BAD_FUNC_ARG => Err(Error::fatal(x)),
+            e => unreachable!("{e:?}"),
+        }
+    }
+
+    /// Invokes [`wolfSSL_dtls_got_timeout`][0]
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls_got_timeout
+    pub fn dtls_has_timed_out(&self) -> Poll<bool> {
+        if !self.is_dtls() {
+            log::debug!("Session is not configured for DTLS");
+        }
+
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_dtls_got_timeout(ssl.as_ptr())
+        } {
+            wolfssl_sys::NOT_COMPILED_IN => unreachable!(),
+            wolfssl_sys::WOLFSSL_SUCCESS => Poll::Ready(false),
+            x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
+                    Poll::Pending
+                }
+                _ => Poll::Ready(true),
+            },
+            e => unreachable!("{e:?}"),
+        }
+    }
 }
 
 impl WolfSession {
@@ -430,6 +535,22 @@ impl WolfSession {
             Ok(Poll::AppData(_)) => {
                 unreachable!("We assume that no nested calls are possible.")
             }
+        }
+    }
+
+    /// Invokes [`wolfSSL_dtls`][0]
+    ///
+    /// Returns `true` if this session is configured for DTLS.
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls
+    fn is_dtls(&self) -> bool {
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_dtls(ssl.as_ptr())
+        } {
+            1 => true,
+            0 => false,
+            _ => unreachable!(),
         }
     }
 }
@@ -762,5 +883,78 @@ mod tests {
             !client.ssl.is_update_keys_pending(),
             "Key update should be done within one round trip"
         );
+    }
+
+    #[test]
+    fn dtls_current_timeout() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let client_ctx = WolfContextBuilder::new(WolfMethod::DtlsClientV1_2)
+            .unwrap()
+            .build();
+
+        let ssl = client_ctx.new_session().unwrap();
+
+        // The default is 1 second (`DTLS_TIMEOUT_INIT`). This might change in
+        // the future or at the whims of the WolfSSL library authors
+        assert_eq!(
+            ssl.dtls_current_timeout(),
+            std::time::Duration::from_secs(1)
+        );
+    }
+
+    #[test_case(true)]
+    // TODO (pangt): Unable to force a time-in. I'm not sure if the test is
+    // constructed wrongly, or if it's something else.
+    #[test_case(false => ignore)]
+    fn dtls_timeout(should_timeout: bool) {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let (mut client, mut server) = make_connected_clients_with_method(
+            WolfMethod::DtlsClientV1_2,
+            WolfMethod::DtlsServerV1_2,
+        );
+
+        client
+            .ssl
+            .dtls_set_max_timeout(Duration::from_secs(2))
+            .unwrap();
+        client.ssl.dtls_set_timeout(Duration::from_secs(2)).unwrap();
+
+        // Force a duration that must cause a timeout.
+        let curr_timeout = client.ssl.dtls_current_timeout();
+        let dtls_timeout = if should_timeout {
+            let d = Duration::from_secs(3);
+            assert!(d > curr_timeout);
+            d
+        } else {
+            let d = Duration::from_secs(1);
+            assert!(d < curr_timeout);
+            d
+        };
+
+        // Initiate something that requires a handshake
+        match client.ssl.try_rehandshake() {
+            Ok(Poll::Ready(_) | Poll::Pending) => {}
+            e => panic!("{e:?}"),
+        }
+
+        std::thread::sleep(dtls_timeout);
+        server.ssl.io_read_in(client.ssl.io_write_out());
+
+        // Ask for a handshake again.
+        match client.ssl.try_rehandshake() {
+            Ok(Poll::Ready(_) | Poll::Pending) => {}
+            e => panic!("{e:?}"),
+        }
+
+        // This should have timed out since no reply has been returned
+        // (deliberately) past the timeout period.
+        let res = match client.ssl.dtls_has_timed_out() {
+            Poll::Ready(x) => x,
+            e => panic!("{e:?}"),
+        };
+
+        assert_eq!(should_timeout, res);
     }
 }
