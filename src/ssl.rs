@@ -821,10 +821,6 @@ mod tests {
         assert!(client.ssl.is_tls_13());
         assert!(server.ssl.is_tls_13());
 
-        unsafe {
-            wolfssl_sys::wolfSSL_Debugging_ON();
-        }
-
         // Trigger the wolfssl key update mechanism. This will cause the client
         // to send a key update message.
         match client.ssl.try_trigger_update_key() {
