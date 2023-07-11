@@ -11,11 +11,60 @@ use bytes::{Buf, Bytes, BytesMut};
 use parking_lot::Mutex;
 
 use std::{
-    ffi::{c_int, c_void},
+    ffi::{c_int, c_uchar, c_ushort, c_void},
     ptr::NonNull,
     time::Duration,
     unreachable,
 };
+
+#[allow(missing_docs)]
+#[derive(Default)]
+pub struct WolfSessionConfig {
+    pub dtls_use_nonblock: Option<bool>,
+    pub dtls_mtu: Option<u16>,
+    pub server_name_indicator: Option<String>,
+    pub checked_domain_name: Option<String>,
+}
+
+impl WolfSessionConfig {
+    /// Creates a default [`Self`] with no configuration
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// If the session is DTLS, sets it to nonblocking mode.
+    ///
+    /// Does nothing otherwise.
+    pub fn with_dtls_nonblocking(mut self, is_nonblocking: bool) -> Self {
+        self.dtls_use_nonblock = Some(is_nonblocking);
+        self
+    }
+
+    /// If the session is DTLS, sets the MTU to provided value.
+    ///
+    /// Refer to [`WolfSession::dtls_set_mtu`] for further constraints regarding
+    /// input value.
+    ///
+    /// Does nothing otherwise.
+    pub fn with_dtls_mtu(mut self, mtu: u16) -> Self {
+        self.dtls_mtu = Some(mtu);
+        self
+    }
+
+    /// Configures SNI (Server Name Indication) for the session with the given
+    /// hostname
+    pub fn with_sni(mut self, hostname: &str) -> Self {
+        self.server_name_indicator = Some(hostname.to_string());
+        self
+    }
+
+    /// Configures the session to check the given domain against the peer
+    /// certificate during connection.
+    pub fn with_checked_domain_name(mut self, domain: &str) -> Self {
+        self.checked_domain_name = Some(domain.to_string());
+        self
+    }
+}
 
 #[allow(missing_docs)]
 pub struct WolfSession {
@@ -32,7 +81,7 @@ impl WolfSession {
     /// Invokes [`wolfSSL_new`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
-    pub fn new_from_context(ctx: &WolfContext) -> Option<Self> {
+    pub fn new_from_context(ctx: &WolfContext, config: WolfSessionConfig) -> Option<Self> {
         let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.ctx().as_ptr()) };
 
         let mut session = Self {
@@ -43,6 +92,22 @@ impl WolfSession {
         };
 
         session.register_io_context();
+
+        if let Some(is_nonblocking) = config.dtls_use_nonblock {
+            session.dtls_set_nonblock_use(is_nonblocking);
+        }
+
+        if let Some(mtu) = config.dtls_mtu {
+            session.dtls_set_mtu(mtu as c_ushort);
+        }
+
+        if let Some(sni) = config.server_name_indicator {
+            session.set_server_name_indication(&sni).ok()?;
+        }
+
+        if let Some(name) = config.checked_domain_name {
+            session.set_domain_name_to_check(&name).ok()?;
+        }
 
         Some(session)
     }
@@ -538,6 +603,54 @@ impl WolfSession {
         }
     }
 
+    /// Invokes [`wolfSSL_set_using_nonblock`][0]
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_set_using_nonblock
+    fn dtls_set_nonblock_use(&mut self, is_nonblock: bool) {
+        if !self.is_dtls() {
+            log::debug!("Session is not configured for DTLS");
+            return;
+        }
+
+        unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_dtls_set_using_nonblock(ssl.as_ptr(), is_nonblock as c_int)
+        }
+    }
+
+    /// Invokes `wolfSSL_dtls_set_mtu`
+    ///
+    /// Does nothing if the argument exceeds wolfSSL's `MAX_RECORD_SIZE`
+    /// (currently 2^14), or is 0.
+    ///
+    /// I can't find online documentation for this.
+    fn dtls_set_mtu(&mut self, mtu: c_ushort) {
+        if !self.is_dtls() {
+            log::debug!("Session is not configured for DTLS");
+            return;
+        }
+
+        if mtu > 2u16.pow(14) {
+            log::warn!("Attempted to set MTU to greater than WolfSSL's MAX_RECORD_SIZE");
+            return;
+        }
+
+        if mtu == 0 {
+            log::warn!("Attempted to set MTU to 0");
+            return;
+        }
+
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_dtls_set_mtu(ssl.as_ptr(), mtu)
+        } {
+            wolfssl_sys::WOLFSSL_SUCCESS => {}
+            _ => {
+                unreachable!()
+            }
+        }
+    }
+
     /// Invokes [`wolfSSL_dtls`][0]
     ///
     /// Returns `true` if this session is configured for DTLS.
@@ -550,6 +663,40 @@ impl WolfSession {
         } {
             1 => true,
             0 => false,
+            _ => unreachable!(),
+        }
+    }
+
+    /// Invokes [`wolfSSL_UseSNI`][0]
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_usesni
+    fn set_server_name_indication(&mut self, sni: &String) -> Result<()> {
+        let bytes = sni.as_bytes();
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_UseSNI(
+                ssl.as_ptr(),
+                wolfssl_sys::WOLFSSL_SNI_HOST_NAME as c_uchar,
+                bytes.as_ptr() as *const c_void,
+                bytes.len() as c_ushort,
+            )
+        } {
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
+            wolfssl_sys::BAD_FUNC_ARG => unreachable!(),
+            e => Err(Error::fatal(e)),
+        }
+    }
+
+    fn set_domain_name_to_check(&mut self, domain_name: &str) -> Result<()> {
+        let domain_name = std::ffi::CString::new(domain_name.to_string())
+            .expect("Input string '{domain_name:?}' contains an interior NULL");
+
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_check_domain_name(ssl.as_ptr(), domain_name.as_c_str().as_ptr())
+        } {
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
+            x @ wolfssl_sys::WOLFSSL_FAILURE => Err(Error::fatal(self.get_error(x))),
             _ => unreachable!(),
         }
     }
@@ -635,8 +782,12 @@ mod tests {
             .unwrap()
             .build();
 
-        let client_ssl = client_ctx.new_session().unwrap();
-        let server_ssl = server_ctx.new_session().unwrap();
+        let client_ssl = client_ctx
+            .new_session(WolfSessionConfig::default())
+            .unwrap();
+        let server_ssl = server_ctx
+            .new_session(WolfSessionConfig::default())
+            .unwrap();
 
         let mut client = TestClient {
             _ctx: client_ctx,
@@ -889,7 +1040,9 @@ mod tests {
             .unwrap()
             .build();
 
-        let ssl = client_ctx.new_session().unwrap();
+        let ssl = client_ctx
+            .new_session(WolfSessionConfig::default())
+            .unwrap();
 
         // The default is 1 second (`DTLS_TIMEOUT_INIT`). This might change in
         // the future or at the whims of the WolfSSL library authors
@@ -952,5 +1105,24 @@ mod tests {
         };
 
         assert_eq!(should_timeout, res);
+    }
+
+    #[test_case(0)]
+    #[test_case(1)]
+    #[test_case(10)]
+    #[test_case(2u16.pow(14))]
+    #[test_case(2u16.pow(14) + 1)]
+    fn dtls_mtu(mtu: u16) {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let client_ctx = WolfContextBuilder::new(WolfMethod::DtlsClientV1_2)
+            .unwrap()
+            .build();
+
+        let mut ssl = client_ctx
+            .new_session(WolfSessionConfig::default())
+            .unwrap();
+
+        ssl.dtls_set_mtu(mtu);
     }
 }

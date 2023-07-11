@@ -1,7 +1,7 @@
 use crate::{
     callback::{wolf_tls_read_cb, wolf_tls_write_cb},
     error::{Error, Result},
-    ssl::WolfSession,
+    ssl::{WolfSession, WolfSessionConfig},
     RootCertificate, Secret, WolfMethod,
 };
 use parking_lot::{Mutex, MutexGuard};
@@ -284,8 +284,8 @@ impl WolfContext {
     }
 
     /// Creates a new SSL session using this underlying context.
-    pub fn new_session(&self) -> Option<WolfSession> {
-        WolfSession::new_from_context(self)
+    pub fn new_session(&self, config: WolfSessionConfig) -> Option<WolfSession> {
+        WolfSession::new_from_context(self, config)
     }
 }
 
