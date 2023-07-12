@@ -7,7 +7,7 @@ use crate::{
 use parking_lot::{Mutex, MutexGuard};
 use std::ptr::NonNull;
 
-#[allow(missing_docs)]
+/// Produces a [`Context`] once built.
 #[derive(Debug)]
 pub struct ContextBuilder {
     ctx: NonNull<wolfssl_sys::WOLFSSL_CTX>,
@@ -231,11 +231,7 @@ impl ContextBuilder {
 
     /// Wraps `wolfSSL_CTX_UseSecureRenegotiation`
     ///
-    // TODO (pangt): I can't seem to find documentation online for this.
-    // this might also prompt a more general review of how we should
-    // be checking for and handling errors (i.e; should we just
-    // collect all error codes and throw it back up instead of
-    // wrapping it in an enum?)
+    // NOTE (pangt): I can't seem to find documentation online for this.
     pub fn with_secure_renegotiation(self) -> Result<Self> {
         let result = unsafe { wolfssl_sys::wolfSSL_CTX_UseSecureRenegotiation(self.ctx.as_ptr()) };
         if result == wolfssl_sys::WOLFSSL_SUCCESS {
@@ -265,7 +261,7 @@ impl ContextBuilder {
     }
 }
 
-#[allow(missing_docs)]
+/// A wrapper around a `WOLFSSL_CTX`.
 pub struct Context {
     protocol: Protocol,
     ctx: Mutex<NonNull<wolfssl_sys::WOLFSSL_CTX>>,

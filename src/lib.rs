@@ -101,18 +101,25 @@ impl Protocol {
     }
 }
 
-#[allow(missing_docs)]
+/// Defines a CA certificate
 pub enum RootCertificate<'a> {
+    /// In-memory PEM buffer
     PemBuffer(&'a [u8]),
+    /// In-memory ASN1 buffer
     Asn1Buffer(&'a [u8]),
+    /// Path to a PEM file, or a directory of PEM files
     PemFileOrDirectory(&'a std::path::Path),
 }
 
-#[allow(missing_docs)]
+/// Defines either a public or private key
 pub enum Secret<'a> {
+    /// In-memory ASN1 buffer
     Asn1Buffer(&'a [u8]),
+    /// Path to ASN1 file
     Asn1File(&'a std::path::Path),
+    /// In-memory PEM buffer
     PemBuffer(&'a [u8]),
+    /// Path to PEM file
     PemFile(&'a std::path::Path),
 }
 

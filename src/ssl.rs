@@ -16,12 +16,21 @@ use std::{
     time::Duration,
 };
 
-#[allow(missing_docs)]
+/// Stores configurations we want to initialize a [`Session`] with.
 #[derive(Default)]
 pub struct SessionConfig {
+    /// If set and the session is DTLS, sets the nonblocking mode.
     pub dtls_use_nonblock: Option<bool>,
+    /// If set and the session is DTLS, sets the MTU of the session.
+    ///
+    /// If value exceeds wolfSSL's `MAX_RECORD_SIZE` (currently 2^14), or
+    /// is 0, ignored.
     pub dtls_mtu: Option<u16>,
+    /// If set, configures SNI (Server Name Indication) for the session with the
+    /// given hostname.
     pub server_name_indicator: Option<String>,
+    /// If set, configures the session to check the given domain against the
+    /// peer certificate during connection.
     pub checked_domain_name: Option<String>,
 }
 
@@ -31,41 +40,33 @@ impl SessionConfig {
         Self::default()
     }
 
-    /// If the session is DTLS, sets it to nonblocking mode.
-    ///
-    /// Does nothing otherwise.
+    /// Sets [`Self::dtls_use_nonblock`]
     pub fn with_dtls_nonblocking(mut self, is_nonblocking: bool) -> Self {
         self.dtls_use_nonblock = Some(is_nonblocking);
         self
     }
 
-    /// If the session is DTLS, sets the MTU to provided value.
-    ///
-    /// Refer to [`Session`] and how it sets MTU internally for further
-    /// constraints regarding input value.
-    ///
-    /// Does nothing otherwise.
+    /// Sets [`Self::dtls_mtu`]
     pub fn with_dtls_mtu(mut self, mtu: u16) -> Self {
         self.dtls_mtu = Some(mtu);
         self
     }
 
-    /// Configures SNI (Server Name Indication) for the session with the given
-    /// hostname
+    /// Sets [`Self::server_name_indicator`]
     pub fn with_sni(mut self, hostname: &str) -> Self {
         self.server_name_indicator = Some(hostname.to_string());
         self
     }
 
-    /// Configures the session to check the given domain against the peer
-    /// certificate during connection.
+    /// Sets [`Self::checked_domain_name`]
     pub fn with_checked_domain_name(mut self, domain: &str) -> Self {
         self.checked_domain_name = Some(domain.to_string());
         self
     }
 }
 
-#[allow(missing_docs)]
+/// Wraps a `WOLFSSL` pointer, as well as the additional fields needed to
+/// write into, and read from, wolfSSL's custom IO callbacks.
 pub struct Session {
     protocol: Protocol,
 
@@ -614,10 +615,10 @@ impl Session {
 
     /// Invokes `wolfSSL_dtls_set_mtu`
     ///
-    /// Does nothing if the argument exceeds wolfSSL's `MAX_RECORD_SIZE`
-    /// (currently 2^14), or is 0.
+    /// Refer to [`SessionConfig::dtls_mtu`] for documentation of constraints on
+    /// what values `mtu` can be.
     ///
-    /// I can't find online documentation for this.
+    /// I can't find online documentation for `wolfSSL_dtls_set_mtu`.
     fn dtls_set_mtu(&mut self, mtu: c_ushort) {
         if !self.is_dtls() {
             log::debug!("Session is not configured for DTLS");
