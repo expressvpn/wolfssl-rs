@@ -725,7 +725,7 @@ impl Drop for WolfSession {
 mod tests {
     use super::*;
     use crate::{
-        context::WolfContextBuilder, RootCertificate, Secret, WolfContext, WolfMethod, WolfSession,
+        context::ContextBuilder, RootCertificate, Secret, WolfContext, WolfMethod, WolfSession,
         TLS_MAX_RECORD_SIZE,
     };
 
@@ -763,7 +763,7 @@ mod tests {
         client_method: WolfMethod,
         server_method: WolfMethod,
     ) -> (TestClient, TestClient) {
-        let client_ctx = WolfContextBuilder::new(client_method)
+        let client_ctx = ContextBuilder::new(client_method)
             .unwrap_or_else(|| panic!("new(WolfMethod::{client_method:?})"))
             .with_root_certificate(RootCertificate::Asn1Buffer(CA_CERT))
             .unwrap()
@@ -771,7 +771,7 @@ mod tests {
             .unwrap()
             .build();
 
-        let server_ctx = WolfContextBuilder::new(server_method)
+        let server_ctx = ContextBuilder::new(server_method)
             .unwrap_or_else(|| panic!("new(WolfMethod::{server_method:?})"))
             .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
             .unwrap()
@@ -1031,7 +1031,7 @@ mod tests {
     fn dtls_current_timeout() {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let client_ctx = WolfContextBuilder::new(WolfMethod::DtlsClientV1_2)
+        let client_ctx = ContextBuilder::new(WolfMethod::DtlsClientV1_2)
             .unwrap()
             .build();
 
@@ -1108,7 +1108,7 @@ mod tests {
     fn dtls_mtu(mtu: u16) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let client_ctx = WolfContextBuilder::new(WolfMethod::DtlsClientV1_2)
+        let client_ctx = ContextBuilder::new(WolfMethod::DtlsClientV1_2)
             .unwrap()
             .build();
 

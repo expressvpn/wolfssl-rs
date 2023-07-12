@@ -30,7 +30,7 @@ const TLS_MAX_RECORD_SIZE: usize = 2usize.pow(14) + 1;
 /// Wraps [`wolfSSL_Init`][0]
 ///
 /// Note that this is also internally during initialization by
-/// [`WolfContextBuilder`].
+/// [`ContextBuilder`].
 ///
 /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_init
 pub fn wolf_init() -> Result<()> {

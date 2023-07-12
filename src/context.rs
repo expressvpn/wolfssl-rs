@@ -9,12 +9,12 @@ use std::ptr::NonNull;
 
 #[allow(missing_docs)]
 #[derive(Debug)]
-pub struct WolfContextBuilder {
+pub struct ContextBuilder {
     ctx: NonNull<wolfssl_sys::WOLFSSL_CTX>,
     method: WolfMethod,
 }
 
-impl WolfContextBuilder {
+impl ContextBuilder {
     /// Invokes [`wolfSSL_CTX_new`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_new
@@ -255,7 +255,7 @@ impl WolfContextBuilder {
     }
 }
 
-impl WolfContextBuilder {
+impl ContextBuilder {
     fn register_io_callbacks(&mut self) {
         let ctx = self.ctx;
         unsafe {
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn new() {
-        WolfContextBuilder::new(WolfMethod::DtlsClient).unwrap();
+        ContextBuilder::new(WolfMethod::DtlsClient).unwrap();
         wolf_cleanup().unwrap();
     }
 
@@ -335,7 +335,7 @@ mod tests {
 
         let cert = RootCertificate::Asn1Buffer(CA_CERT);
 
-        let _ = WolfContextBuilder::new(WolfMethod::TlsClient)
+        let _ = ContextBuilder::new(WolfMethod::TlsClient)
             .unwrap()
             .with_root_certificate(cert)
             .unwrap();
@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn set_cipher_list() {
-        let _ = WolfContextBuilder::new(WolfMethod::DtlsClient)
+        let _ = ContextBuilder::new(WolfMethod::DtlsClient)
             .unwrap()
             // This string might need to change depending on the flags
             // we built wolfssl with.
@@ -364,7 +364,7 @@ mod tests {
 
         let cert = Secret::Asn1Buffer(SERVER_CERT);
 
-        let _ = WolfContextBuilder::new(WolfMethod::TlsClient)
+        let _ = ContextBuilder::new(WolfMethod::TlsClient)
             .unwrap()
             .with_certificate(cert)
             .unwrap();
@@ -381,7 +381,7 @@ mod tests {
 
         let key = Secret::Asn1Buffer(SERVER_KEY);
 
-        let _ = WolfContextBuilder::new(WolfMethod::TlsClient)
+        let _ = ContextBuilder::new(WolfMethod::TlsClient)
             .unwrap()
             .with_private_key(key)
             .unwrap();
@@ -391,7 +391,7 @@ mod tests {
 
     #[test]
     fn set_secure_renegotiation() {
-        let _ = WolfContextBuilder::new(WolfMethod::TlsClient)
+        let _ = ContextBuilder::new(WolfMethod::TlsClient)
             .unwrap()
             .with_secure_renegotiation()
             .unwrap();
@@ -401,8 +401,6 @@ mod tests {
 
     #[test]
     fn register_io_callbacks() {
-        let _ = WolfContextBuilder::new(WolfMethod::TlsClient)
-            .unwrap()
-            .build();
+        let _ = ContextBuilder::new(WolfMethod::TlsClient).unwrap().build();
     }
 }
