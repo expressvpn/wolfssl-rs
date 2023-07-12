@@ -1,7 +1,7 @@
 mod data_buffer;
 
 use crate::{
-    context::WolfContext,
+    context::Context,
     error::{Error, Poll, PollResult, Result},
     Protocol, TLS_MAX_RECORD_SIZE,
 };
@@ -80,7 +80,7 @@ impl Session {
     /// Invokes [`wolfSSL_new`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
-    pub fn new_from_context(ctx: &WolfContext, config: SessionConfig) -> Option<Self> {
+    pub fn new_from_context(ctx: &Context, config: SessionConfig) -> Option<Self> {
         let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.ctx().as_ptr()) };
 
         let mut session = Self {
@@ -720,7 +720,7 @@ impl Drop for Session {
 mod tests {
     use super::*;
     use crate::{
-        context::ContextBuilder, Protocol, RootCertificate, Secret, Session, WolfContext,
+        context::ContextBuilder, Context, Protocol, RootCertificate, Secret, Session,
         TLS_MAX_RECORD_SIZE,
     };
 
@@ -746,7 +746,7 @@ mod tests {
     static INIT_ENV_LOGGER: OnceLock<()> = OnceLock::new();
 
     struct TestClient {
-        _ctx: WolfContext,
+        _ctx: Context,
         ssl: Session,
     }
 

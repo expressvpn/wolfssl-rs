@@ -246,9 +246,9 @@ impl ContextBuilder {
     }
 
     /// Finalizes a `WolfContext`.
-    pub fn build(mut self) -> WolfContext {
+    pub fn build(mut self) -> Context {
         self.register_io_callbacks();
-        WolfContext {
+        Context {
             protocol: self.protocol,
             ctx: Mutex::new(self.ctx),
         }
@@ -266,12 +266,12 @@ impl ContextBuilder {
 }
 
 #[allow(missing_docs)]
-pub struct WolfContext {
+pub struct Context {
     protocol: Protocol,
     ctx: Mutex<NonNull<wolfssl_sys::WOLFSSL_CTX>>,
 }
 
-impl WolfContext {
+impl Context {
     /// Gets the underlying [`wolfssl_sys::WOLFSSL_CTX`] pointer that this is
     /// managing.
     pub fn ctx(&self) -> MutexGuard<NonNull<wolfssl_sys::WOLFSSL_CTX>> {
@@ -289,7 +289,7 @@ impl WolfContext {
     }
 }
 
-impl Drop for WolfContext {
+impl Drop for Context {
     /// Invokes [`wolfSSL_CTX_free`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_free
