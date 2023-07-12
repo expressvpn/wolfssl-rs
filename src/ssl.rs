@@ -3,7 +3,7 @@ mod data_buffer;
 use crate::{
     context::WolfContext,
     error::{Error, Poll, PollResult, Result},
-    WolfMethod, TLS_MAX_RECORD_SIZE,
+    Protocol, TLS_MAX_RECORD_SIZE,
 };
 pub use data_buffer::DataBuffer;
 
@@ -67,7 +67,7 @@ impl SessionConfig {
 
 #[allow(missing_docs)]
 pub struct WolfSession {
-    method: WolfMethod,
+    protocol: Protocol,
 
     ssl: Mutex<NonNull<wolfssl_sys::WOLFSSL>>,
 
@@ -84,7 +84,7 @@ impl WolfSession {
         let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.ctx().as_ptr()) };
 
         let mut session = Self {
-            method: ctx.method(),
+            protocol: ctx.protocol(),
             ssl: Mutex::new(NonNull::new(ptr)?),
             callback_read_buffer: Box::new(DataBuffer::with_capacity(TLS_MAX_RECORD_SIZE)),
             callback_write_buffer: Box::new(DataBuffer::with_capacity(TLS_MAX_RECORD_SIZE)),
@@ -381,14 +381,14 @@ impl WolfSession {
 
     /// Checks if the session is over TLS 1.3
     pub fn is_tls_13(&self) -> bool {
-        self.method.is_tls_13()
+        self.protocol.is_tls_13()
     }
 
     /// Invokes [`wolfSSL_update_keys`][0] *once*
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_update_keys
     pub fn try_trigger_update_key(&mut self) -> PollResult<()> {
-        if !self.method.is_tls_13() {
+        if !self.protocol.is_tls_13() {
             return Ok(Poll::Ready(()));
         }
 
@@ -413,7 +413,7 @@ impl WolfSession {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_key_update_response
     pub fn is_update_keys_pending(&self) -> bool {
-        if !self.method.is_tls_13() {
+        if !self.protocol.is_tls_13() {
             return false;
         }
 
@@ -725,7 +725,7 @@ impl Drop for WolfSession {
 mod tests {
     use super::*;
     use crate::{
-        context::ContextBuilder, RootCertificate, Secret, WolfContext, WolfMethod, WolfSession,
+        context::ContextBuilder, Protocol, RootCertificate, Secret, WolfContext, WolfSession,
         TLS_MAX_RECORD_SIZE,
     };
 
@@ -756,27 +756,27 @@ mod tests {
     }
 
     fn make_connected_clients() -> (TestClient, TestClient) {
-        make_connected_clients_with_method(WolfMethod::TlsClientV1_3, WolfMethod::TlsServerV1_3)
+        make_connected_clients_with_protocol(Protocol::TlsClientV1_3, Protocol::TlsServerV1_3)
     }
 
-    fn make_connected_clients_with_method(
-        client_method: WolfMethod,
-        server_method: WolfMethod,
+    fn make_connected_clients_with_protocol(
+        client_protocol: Protocol,
+        server_protocol: Protocol,
     ) -> (TestClient, TestClient) {
-        let client_ctx = ContextBuilder::new(client_method)
-            .unwrap_or_else(|| panic!("new(WolfMethod::{client_method:?})"))
+        let client_ctx = ContextBuilder::new(client_protocol)
+            .unwrap_or_else(|| panic!("new({client_protocol:?})"))
             .with_root_certificate(RootCertificate::Asn1Buffer(CA_CERT))
             .unwrap()
             .with_secure_renegotiation()
             .unwrap()
             .build();
 
-        let server_ctx = ContextBuilder::new(server_method)
-            .unwrap_or_else(|| panic!("new(WolfMethod::{server_method:?})"))
+        let server_ctx = ContextBuilder::new(server_protocol)
+            .unwrap_or_else(|| panic!("new({server_protocol:?})"))
             .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
             .unwrap()
             .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
-            .expect("server WolfBuilder")
+            .unwrap()
             .with_secure_renegotiation()
             .unwrap()
             .build();
@@ -894,9 +894,9 @@ mod tests {
     fn try_rehandshake() {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let (mut client, mut server) = make_connected_clients_with_method(
-            WolfMethod::DtlsClientV1_2,
-            WolfMethod::DtlsServerV1_2,
+        let (mut client, mut server) = make_connected_clients_with_protocol(
+            Protocol::DtlsClientV1_2,
+            Protocol::DtlsServerV1_2,
         );
 
         assert!(client.ssl.is_secure_renegotiation_supported());
@@ -959,10 +959,8 @@ mod tests {
     fn try_trigger_update_keys() {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let (mut client, mut server) = make_connected_clients_with_method(
-            WolfMethod::TlsClientV1_3,
-            WolfMethod::TlsServerV1_3,
-        );
+        let (mut client, mut server) =
+            make_connected_clients_with_protocol(Protocol::TlsClientV1_3, Protocol::TlsServerV1_3);
 
         assert!(client.ssl.is_tls_13());
         assert!(server.ssl.is_tls_13());
@@ -1031,7 +1029,7 @@ mod tests {
     fn dtls_current_timeout() {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let client_ctx = ContextBuilder::new(WolfMethod::DtlsClientV1_2)
+        let client_ctx = ContextBuilder::new(Protocol::DtlsClientV1_2)
             .unwrap()
             .build();
 
@@ -1052,9 +1050,9 @@ mod tests {
     fn dtls_timeout(should_timeout: bool) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let (mut client, mut server) = make_connected_clients_with_method(
-            WolfMethod::DtlsClientV1_2,
-            WolfMethod::DtlsServerV1_2,
+        let (mut client, mut server) = make_connected_clients_with_protocol(
+            Protocol::DtlsClientV1_2,
+            Protocol::DtlsServerV1_2,
         );
 
         client
@@ -1108,7 +1106,7 @@ mod tests {
     fn dtls_mtu(mtu: u16) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let client_ctx = ContextBuilder::new(WolfMethod::DtlsClientV1_2)
+        let client_ctx = ContextBuilder::new(Protocol::DtlsClientV1_2)
             .unwrap()
             .build();
 

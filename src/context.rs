@@ -2,7 +2,7 @@ use crate::{
     callback::{wolf_tls_read_cb, wolf_tls_write_cb},
     error::{Error, Result},
     ssl::{SessionConfig, WolfSession},
-    RootCertificate, Secret, WolfMethod,
+    Protocol, RootCertificate, Secret,
 };
 use parking_lot::{Mutex, MutexGuard};
 use std::ptr::NonNull;
@@ -11,20 +11,20 @@ use std::ptr::NonNull;
 #[derive(Debug)]
 pub struct ContextBuilder {
     ctx: NonNull<wolfssl_sys::WOLFSSL_CTX>,
-    method: WolfMethod,
+    protocol: Protocol,
 }
 
 impl ContextBuilder {
     /// Invokes [`wolfSSL_CTX_new`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_new
-    pub fn new(method: WolfMethod) -> Option<Self> {
-        let method_fn = method.into_method_ptr()?;
+    pub fn new(protocol: Protocol) -> Option<Self> {
+        let method_fn = protocol.into_method_ptr()?;
 
         let ctx = unsafe { wolfssl_sys::wolfSSL_CTX_new(method_fn.as_ptr()) };
         let ctx = NonNull::new(ctx)?;
 
-        Some(Self { ctx, method })
+        Some(Self { ctx, protocol })
     }
 
     /// Wraps [`wolfSSL_CTX_load_verify_buffer`][0] and [`wolfSSL_CTX_load_verify_locations`][1]
@@ -249,7 +249,7 @@ impl ContextBuilder {
     pub fn build(mut self) -> WolfContext {
         self.register_io_callbacks();
         WolfContext {
-            method: self.method,
+            protocol: self.protocol,
             ctx: Mutex::new(self.ctx),
         }
     }
@@ -267,20 +267,20 @@ impl ContextBuilder {
 
 #[allow(missing_docs)]
 pub struct WolfContext {
-    method: WolfMethod,
+    protocol: Protocol,
     ctx: Mutex<NonNull<wolfssl_sys::WOLFSSL_CTX>>,
 }
 
 impl WolfContext {
-    /// Gets the underlying [`wolfssl_sys::WOLFSSL_CTX`] pointer that this
-    /// [`WolfContext`] is managing.
+    /// Gets the underlying [`wolfssl_sys::WOLFSSL_CTX`] pointer that this is
+    /// managing.
     pub fn ctx(&self) -> MutexGuard<NonNull<wolfssl_sys::WOLFSSL_CTX>> {
         self.ctx.lock()
     }
 
-    /// Returns the Context's [`WolfMethod`].
-    pub fn method(&self) -> WolfMethod {
-        self.method
+    /// Returns the Context's [`Protocol`].
+    pub fn protocol(&self) -> Protocol {
+        self.protocol
     }
 
     /// Creates a new SSL session using this underlying context.
@@ -304,25 +304,25 @@ mod tests {
     use crate::{wolf_cleanup, wolf_init};
     use test_case::test_case;
 
-    #[test_case(WolfMethod::DtlsClient)]
-    #[test_case(WolfMethod::DtlsClientV1_2)]
-    #[test_case(WolfMethod::DtlsServer)]
-    #[test_case(WolfMethod::DtlsServerV1_2)]
-    #[test_case(WolfMethod::TlsClient)]
-    #[test_case(WolfMethod::TlsClientV1_2)]
-    #[test_case(WolfMethod::TlsClientV1_3)]
-    #[test_case(WolfMethod::TlsServer)]
-    #[test_case(WolfMethod::TlsServerV1_2)]
-    #[test_case(WolfMethod::TlsServerV1_3)]
-    fn wolfssl_context_new(method: WolfMethod) {
+    #[test_case(Protocol::DtlsClient)]
+    #[test_case(Protocol::DtlsClientV1_2)]
+    #[test_case(Protocol::DtlsServer)]
+    #[test_case(Protocol::DtlsServerV1_2)]
+    #[test_case(Protocol::TlsClient)]
+    #[test_case(Protocol::TlsClientV1_2)]
+    #[test_case(Protocol::TlsClientV1_3)]
+    #[test_case(Protocol::TlsServer)]
+    #[test_case(Protocol::TlsServerV1_2)]
+    #[test_case(Protocol::TlsServerV1_3)]
+    fn wolfssl_context_new(protocol: Protocol) {
         wolf_init().unwrap();
-        let _ = method.into_method_ptr().unwrap();
+        let _ = protocol.into_method_ptr().unwrap();
         wolf_cleanup().unwrap();
     }
 
     #[test]
     fn new() {
-        ContextBuilder::new(WolfMethod::DtlsClient).unwrap();
+        ContextBuilder::new(Protocol::DtlsClient).unwrap();
         wolf_cleanup().unwrap();
     }
 
@@ -335,7 +335,7 @@ mod tests {
 
         let cert = RootCertificate::Asn1Buffer(CA_CERT);
 
-        let _ = ContextBuilder::new(WolfMethod::TlsClient)
+        let _ = ContextBuilder::new(Protocol::TlsClient)
             .unwrap()
             .with_root_certificate(cert)
             .unwrap();
@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn set_cipher_list() {
-        let _ = ContextBuilder::new(WolfMethod::DtlsClient)
+        let _ = ContextBuilder::new(Protocol::DtlsClient)
             .unwrap()
             // This string might need to change depending on the flags
             // we built wolfssl with.
@@ -364,7 +364,7 @@ mod tests {
 
         let cert = Secret::Asn1Buffer(SERVER_CERT);
 
-        let _ = ContextBuilder::new(WolfMethod::TlsClient)
+        let _ = ContextBuilder::new(Protocol::TlsClient)
             .unwrap()
             .with_certificate(cert)
             .unwrap();
@@ -381,7 +381,7 @@ mod tests {
 
         let key = Secret::Asn1Buffer(SERVER_KEY);
 
-        let _ = ContextBuilder::new(WolfMethod::TlsClient)
+        let _ = ContextBuilder::new(Protocol::TlsClient)
             .unwrap()
             .with_private_key(key)
             .unwrap();
@@ -391,7 +391,7 @@ mod tests {
 
     #[test]
     fn set_secure_renegotiation() {
-        let _ = ContextBuilder::new(WolfMethod::TlsClient)
+        let _ = ContextBuilder::new(Protocol::TlsClient)
             .unwrap()
             .with_secure_renegotiation()
             .unwrap();
@@ -401,6 +401,6 @@ mod tests {
 
     #[test]
     fn register_io_callbacks() {
-        let _ = ContextBuilder::new(WolfMethod::TlsClient).unwrap().build();
+        let _ = ContextBuilder::new(Protocol::TlsClient).unwrap().build();
     }
 }
