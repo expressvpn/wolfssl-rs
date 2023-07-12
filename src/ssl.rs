@@ -379,11 +379,6 @@ impl WolfSession {
         }
     }
 
-    /// Checks if the session is over TLS 1.3
-    pub fn is_tls_13(&self) -> bool {
-        self.protocol.is_tls_13()
-    }
-
     /// Invokes [`wolfSSL_update_keys`][0] *once*
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_update_keys
@@ -962,8 +957,8 @@ mod tests {
         let (mut client, mut server) =
             make_connected_clients_with_protocol(Protocol::TlsClientV1_3, Protocol::TlsServerV1_3);
 
-        assert!(client.ssl.is_tls_13());
-        assert!(server.ssl.is_tls_13());
+        assert!(client.ssl.protocol.is_tls_13());
+        assert!(server.ssl.protocol.is_tls_13());
 
         // Trigger the wolfssl key update mechanism. This will cause the client
         // to send a key update message.
