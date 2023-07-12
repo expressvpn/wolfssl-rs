@@ -18,14 +18,14 @@ use std::{
 
 #[allow(missing_docs)]
 #[derive(Default)]
-pub struct WolfSessionConfig {
+pub struct SessionConfig {
     pub dtls_use_nonblock: Option<bool>,
     pub dtls_mtu: Option<u16>,
     pub server_name_indicator: Option<String>,
     pub checked_domain_name: Option<String>,
 }
 
-impl WolfSessionConfig {
+impl SessionConfig {
     /// Creates a default [`Self`] with no configuration
     pub fn new() -> Self {
         Self::default()
@@ -80,7 +80,7 @@ impl WolfSession {
     /// Invokes [`wolfSSL_new`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
-    pub fn new_from_context(ctx: &WolfContext, config: WolfSessionConfig) -> Option<Self> {
+    pub fn new_from_context(ctx: &WolfContext, config: SessionConfig) -> Option<Self> {
         let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.ctx().as_ptr()) };
 
         let mut session = Self {
@@ -781,12 +781,8 @@ mod tests {
             .unwrap()
             .build();
 
-        let client_ssl = client_ctx
-            .new_session(WolfSessionConfig::default())
-            .unwrap();
-        let server_ssl = server_ctx
-            .new_session(WolfSessionConfig::default())
-            .unwrap();
+        let client_ssl = client_ctx.new_session(SessionConfig::default()).unwrap();
+        let server_ssl = server_ctx.new_session(SessionConfig::default()).unwrap();
 
         let mut client = TestClient {
             _ctx: client_ctx,
@@ -1039,9 +1035,7 @@ mod tests {
             .unwrap()
             .build();
 
-        let ssl = client_ctx
-            .new_session(WolfSessionConfig::default())
-            .unwrap();
+        let ssl = client_ctx.new_session(SessionConfig::default()).unwrap();
 
         // The default is 1 second (`DTLS_TIMEOUT_INIT`). This might change in
         // the future or at the whims of the WolfSSL library authors
@@ -1118,9 +1112,7 @@ mod tests {
             .unwrap()
             .build();
 
-        let mut ssl = client_ctx
-            .new_session(WolfSessionConfig::default())
-            .unwrap();
+        let mut ssl = client_ctx.new_session(SessionConfig::default()).unwrap();
 
         ssl.dtls_set_mtu(mtu);
     }
