@@ -14,7 +14,6 @@ use std::{
     ffi::{c_int, c_uchar, c_ushort, c_void},
     ptr::NonNull,
     time::Duration,
-    unreachable,
 };
 
 #[allow(missing_docs)]
