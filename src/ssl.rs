@@ -41,8 +41,8 @@ impl SessionConfig {
 
     /// If the session is DTLS, sets the MTU to provided value.
     ///
-    /// Refer to [`Session::dtls_set_mtu`] for further constraints regarding
-    /// input value.
+    /// Refer to [`Session`] and how it sets MTU internally for further
+    /// constraints regarding input value.
     ///
     /// Does nothing otherwise.
     pub fn with_dtls_mtu(mut self, mtu: u16) -> Self {
