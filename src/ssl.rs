@@ -41,7 +41,7 @@ impl SessionConfig {
 
     /// If the session is DTLS, sets the MTU to provided value.
     ///
-    /// Refer to [`WolfSession::dtls_set_mtu`] for further constraints regarding
+    /// Refer to [`Session::dtls_set_mtu`] for further constraints regarding
     /// input value.
     ///
     /// Does nothing otherwise.
@@ -66,7 +66,7 @@ impl SessionConfig {
 }
 
 #[allow(missing_docs)]
-pub struct WolfSession {
+pub struct Session {
     protocol: Protocol,
 
     ssl: Mutex<NonNull<wolfssl_sys::WOLFSSL>>,
@@ -76,7 +76,7 @@ pub struct WolfSession {
     callback_write_buffer: Box<DataBuffer>,
 }
 
-impl WolfSession {
+impl Session {
     /// Invokes [`wolfSSL_new`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
@@ -536,7 +536,7 @@ impl WolfSession {
     }
 }
 
-impl WolfSession {
+impl Session {
     /// Registers a context that will be visible within the custom IO callbacks
     /// tied to this `WOLFSSL` session.
     ///
@@ -697,7 +697,7 @@ impl WolfSession {
 }
 
 #[cfg(test)]
-impl WolfSession {
+impl Session {
     pub fn read_buffer(&self) -> &DataBuffer {
         self.callback_read_buffer.as_ref()
     }
@@ -707,7 +707,7 @@ impl WolfSession {
     }
 }
 
-impl Drop for WolfSession {
+impl Drop for Session {
     /// Invokes [`wolfSSL_free`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_free
@@ -720,7 +720,7 @@ impl Drop for WolfSession {
 mod tests {
     use super::*;
     use crate::{
-        context::ContextBuilder, Protocol, RootCertificate, Secret, WolfContext, WolfSession,
+        context::ContextBuilder, Protocol, RootCertificate, Secret, Session, WolfContext,
         TLS_MAX_RECORD_SIZE,
     };
 
@@ -747,7 +747,7 @@ mod tests {
 
     struct TestClient {
         _ctx: WolfContext,
-        ssl: WolfSession,
+        ssl: Session,
     }
 
     fn make_connected_clients() -> (TestClient, TestClient) {
