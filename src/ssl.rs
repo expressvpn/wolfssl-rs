@@ -141,7 +141,7 @@ impl Session {
         match unsafe { wolfssl_sys::wolfSSL_is_init_finished(self.ssl.lock().as_ptr()) } {
             0 => false,
             1 => true,
-            _ => unimplemented!("Only 0 or 1 is expected as return value"),
+            e => unreachable!("{e:?}"),
         }
     }
 
@@ -175,7 +175,7 @@ impl Session {
                 }
                 e => Err(Error::fatal(e)),
             },
-            _ => unreachable!(),
+            e => unreachable!("{e:?}"),
         }
     }
 
@@ -207,7 +207,7 @@ impl Session {
                 }
                 x => Err(Error::fatal(x)),
             },
-            _ => unreachable!(),
+            e => unreachable!("{e:?}"),
         }
     }
 
@@ -330,7 +330,7 @@ impl Session {
         } {
             0 => false,
             1 => true,
-            _ => unreachable!(),
+            e => unreachable!("{e:?}"),
         }
     }
 
@@ -346,7 +346,7 @@ impl Session {
         } {
             0 => false,
             1 => true,
-            _ => unreachable!(),
+            e => unreachable!("{e:?}"),
         }
     }
 
@@ -376,7 +376,7 @@ impl Session {
                 }
                 e => Err(Error::fatal(e)),
             },
-            _ => unreachable!(),
+            e => unreachable!("{e:?}"),
         }
     }
 
@@ -393,7 +393,7 @@ impl Session {
             wolfssl_sys::wolfSSL_update_keys(ssl.as_ptr())
         } {
             wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(())),
-            wolfssl_sys::BAD_FUNC_ARG => unreachable!(),
+            e @ wolfssl_sys::BAD_FUNC_ARG => unreachable!("{e:?}"),
             wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::Pending),
             e => unreachable!("Received unknown code {e}"),
         }
@@ -422,13 +422,13 @@ impl Session {
             0 => {}
             // panic on non-success, because `ssl` is always non-null and the
             // method here must be TLS1.3
-            _ => unreachable!(),
+            e => unreachable!("{e:?}"),
         }
 
         match unsafe { required.assume_init() } {
             1 => true,
             0 => false,
-            _ => unreachable!(),
+            e => unreachable!("{e:?}"),
         }
     }
 
@@ -449,9 +449,9 @@ impl Session {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_dtls_get_current_timeout(ssl.as_ptr())
         } {
-            wolfssl_sys::NOT_COMPILED_IN => unreachable!(),
+            e @ wolfssl_sys::NOT_COMPILED_IN => unreachable!("{e:?}"),
             x if x > 0 => Duration::from_secs(x as u64),
-            _ => unreachable!(),
+            e => unreachable!("{e:?}"),
         }
     }
 
@@ -524,7 +524,7 @@ impl Session {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_dtls_got_timeout(ssl.as_ptr())
         } {
-            wolfssl_sys::NOT_COMPILED_IN => unreachable!(),
+            e @ wolfssl_sys::NOT_COMPILED_IN => unreachable!("{e:?}"),
             wolfssl_sys::WOLFSSL_SUCCESS => Poll::Ready(false),
             x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
@@ -640,9 +640,7 @@ impl Session {
             wolfssl_sys::wolfSSL_dtls_set_mtu(ssl.as_ptr(), mtu)
         } {
             wolfssl_sys::WOLFSSL_SUCCESS => {}
-            _ => {
-                unreachable!()
-            }
+            e => unreachable!("{e:?}"),
         }
     }
 
@@ -658,7 +656,7 @@ impl Session {
         } {
             1 => true,
             0 => false,
-            _ => unreachable!(),
+            e => unreachable!("{e:?}"),
         }
     }
 
@@ -677,7 +675,7 @@ impl Session {
             )
         } {
             wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
-            wolfssl_sys::BAD_FUNC_ARG => unreachable!(),
+            e @ wolfssl_sys::BAD_FUNC_ARG => unreachable!("{e:?}"),
             e => Err(Error::fatal(e)),
         }
     }
@@ -692,7 +690,7 @@ impl Session {
         } {
             wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
             x @ wolfssl_sys::WOLFSSL_FAILURE => Err(Error::fatal(self.get_error(x))),
-            _ => unreachable!(),
+            e => unreachable!("{e:?}"),
         }
     }
 }
