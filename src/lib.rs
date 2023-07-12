@@ -6,9 +6,11 @@
 mod callback;
 mod context;
 mod error;
+mod rng;
 mod ssl;
 
 pub use context::*;
+pub use rng::*;
 pub use ssl::*;
 
 use error::{Error, Result};
