@@ -32,13 +32,8 @@ pub enum Error {
 
 impl Error {
     /// Construct a fatal error
-    pub fn fatal(code: c_int) -> Self {
+    pub(crate) fn fatal(code: c_int) -> Self {
         Self::Fatal(FatalError::from(code))
-    }
-
-    /// Construct an app data error
-    pub fn app_data(code: c_int) -> Self {
-        Self::AppData(FatalError::from(code))
     }
 }
 
