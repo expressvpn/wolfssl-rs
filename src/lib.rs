@@ -13,7 +13,7 @@ pub use context::*;
 pub use rng::*;
 pub use ssl::*;
 
-use error::{Error, Result};
+pub use error::{Error, Poll, Result};
 
 use std::ptr::NonNull;
 

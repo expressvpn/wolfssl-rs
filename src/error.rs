@@ -3,6 +3,7 @@ use std::ffi::c_int;
 use bytes::Bytes;
 use thiserror::Error;
 
+/// The `Result::Ok` for a non-blocking operation.
 #[derive(Debug)]
 pub enum Poll<T> {
     /// Underlying IO operations are still ongoing. No output has been generated
@@ -17,6 +18,7 @@ pub enum Poll<T> {
 }
 
 #[derive(Error, Debug)]
+/// The failure result of an operation.
 pub enum Error {
     /// During secure renegotiation, if application data is found, we must call
     /// `wolfssl_read` to extract the data. If that `wolfssl_read` call fails,
@@ -29,10 +31,12 @@ pub enum Error {
 }
 
 impl Error {
+    /// Construct a fatal error
     pub fn fatal(code: c_int) -> Self {
         Self::Fatal(FatalError::from(code))
     }
 
+    /// Construct an app data error
     pub fn app_data(code: c_int) -> Self {
         Self::AppData(FatalError::from(code))
     }
