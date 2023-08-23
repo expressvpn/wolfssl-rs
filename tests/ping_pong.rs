@@ -273,6 +273,9 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
 async fn dtls() {
     use Protocol::*;
 
+    #[cfg(feature = "debug")]
+    wolfssl::enable_debugging(true);
+
     // Communicate over a local datagram socket for simplicity
     let (client_sock, server_sock) = UnixDatagram::pair().expect("UnixDatagram");
 
@@ -286,6 +289,9 @@ async fn dtls() {
 #[tokio::test]
 async fn tls() {
     use Protocol::*;
+
+    #[cfg(feature = "debug")]
+    wolfssl::enable_debugging(true);
 
     // Communicate over a local stream socket for simplicity
     let (client_sock, server_sock) = UnixStream::pair().expect("UnixStream");

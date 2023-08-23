@@ -52,6 +52,26 @@ pub fn wolf_cleanup() -> Result<()> {
     }
 }
 
+/// Wraps [`wolfSSL_Debugging_ON`][0] and [`wolfSSL_Debugging_OFF`][1]
+///
+/// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Debug.html#function-wolfssl_debugging_on
+/// [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Debug.html#function-wolfssl_debugging_off
+#[cfg(feature = "debug")]
+pub fn enable_debugging(on: bool) {
+    if on {
+        match unsafe { wolfssl_sys::wolfSSL_Debugging_ON() } {
+            0 => {}
+            // This wrapper function is only enabled if we built wolfssl-sys with debugging on.
+            wolfssl_sys::NOT_COMPILED_IN => {
+                panic!("Inconsistent build, debug not enabled in wolfssl_sys")
+            }
+            e => unreachable!("{e:?}"),
+        }
+    } else {
+        unsafe { wolfssl_sys::wolfSSL_Debugging_OFF() }
+    }
+}
+
 /// Corresponds to the various `wolf*_{client,server}_method()` APIs
 #[derive(Debug, Copy, Clone)]
 pub enum Protocol {
