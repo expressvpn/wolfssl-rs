@@ -1,6 +1,8 @@
 #![deny(unsafe_code)] // unsafety should all be in the library.
 
-use wolfssl::{ContextBuilder, Protocol, RootCertificate, Secret, Session, SessionConfig};
+use wolfssl::{
+    ContextBuilder, IOCallbacks, Protocol, RootCertificate, Secret, Session, SessionConfig,
+};
 
 use async_trait::async_trait;
 use bytes::BytesMut;
@@ -17,6 +19,11 @@ trait SockIO {
     fn try_recv(&self, buf: &mut [u8]) -> std::io::Result<usize>;
     fn try_send(&self, buf: &[u8]) -> std::io::Result<usize>;
 }
+
+#[derive(Clone)]
+struct SockIOCallbacks<IOCB: SockIO>(std::rc::Rc<IOCB>);
+
+impl<IOCB: SockIO> IOCallbacks for SockIOCallbacks<IOCB> {}
 
 #[async_trait]
 impl SockIO for tokio::net::UnixDatagram {
@@ -48,7 +55,11 @@ impl SockIO for tokio::net::UnixStream {
     }
 }
 
-async fn run_io_loop<S: SockIO>(sock: &S, who: &'static str, sess: &mut Session) {
+async fn run_io_loop<S: SockIO>(
+    sock: &S,
+    who: &'static str,
+    sess: &mut Session<SockIOCallbacks<S>>,
+) {
     let wr_buf = sess.io_write_out();
 
     let interest = if wr_buf.is_empty() {
@@ -99,6 +110,8 @@ async fn run_io_loop<S: SockIO>(sock: &S, who: &'static str, sess: &mut Session)
 }
 
 async fn client<S: SockIO>(sock: S, protocol: Protocol) {
+    let sock = std::rc::Rc::new(sock);
+
     let ca_cert = RootCertificate::Asn1Buffer(CA_CERT);
 
     let ctx = ContextBuilder::new(protocol)
@@ -107,7 +120,8 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
         .expect("[Client] add root certificate")
         .build();
 
-    let session_config = SessionConfig::new().with_dtls_nonblocking(true);
+    let io = SockIOCallbacks(sock.clone());
+    let session_config = SessionConfig::new(io).with_dtls_nonblocking(true);
     let mut session = ctx
         .new_session(session_config)
         .expect("[Client] Create Client SSL session");
@@ -117,7 +131,7 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
         match session.try_negotiate().expect("[Client] try_negotiate") {
             wolfssl::Poll::Pending => {
                 println!("[Client] Negotiation pending, polling sock");
-                run_io_loop(&sock, "Client", &mut session).await;
+                run_io_loop(sock.as_ref(), "Client", &mut session).await;
                 println!("[Client] Poll complete");
             }
             wolfssl::Poll::Ready(_) => {
@@ -142,7 +156,7 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
             match session.try_write(&mut ping).expect("[Client] try_write") {
                 wolfssl::Poll::Pending => {
                     println!("[Client] Write pending, polling sock");
-                    run_io_loop(&sock, "Client", &mut session).await;
+                    run_io_loop(sock.as_ref(), "Client", &mut session).await;
                     println!("[Client] Poll complete");
                 }
                 wolfssl::Poll::Ready(nr) => {
@@ -159,7 +173,7 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
             match session.try_read(&mut buf).expect("[Client] try_read") {
                 wolfssl::Poll::Pending => {
                     println!("[Client] Read pending, polling sock");
-                    run_io_loop(&sock, "Client", &mut session).await;
+                    run_io_loop(sock.as_ref(), "Client", &mut session).await;
                     println!("[Client] Poll complete");
                 }
                 wolfssl::Poll::Ready(nr) => {
@@ -177,6 +191,8 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
 }
 
 async fn server<S: SockIO>(sock: S, protocol: Protocol) {
+    let sock = std::rc::Rc::new(sock);
+
     let ca_cert = RootCertificate::Asn1Buffer(CA_CERT);
     let cert = Secret::Asn1Buffer(SERVER_CERT);
     let key = Secret::Asn1Buffer(SERVER_KEY);
@@ -191,7 +207,8 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
         .expect("[Server] add private key")
         .build();
 
-    let session_config = SessionConfig::new().with_dtls_nonblocking(true);
+    let io = SockIOCallbacks(sock.clone());
+    let session_config = SessionConfig::new(io).with_dtls_nonblocking(true);
     let mut session = ctx
         .new_session(session_config)
         .expect("[Server] Create Server SSL session");
@@ -201,7 +218,7 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
         match session.try_negotiate().expect("[Server] try_negotiate") {
             wolfssl::Poll::Pending => {
                 println!("[Server] Negotiation pending, polling sock");
-                run_io_loop(&sock, "Server", &mut session).await;
+                run_io_loop(sock.as_ref(), "Server", &mut session).await;
                 println!("[Server] Poll complete");
             }
             wolfssl::Poll::Ready(_) => {
@@ -224,7 +241,7 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
             match session.try_read(&mut buf).expect("[Server] try_read") {
                 wolfssl::Poll::Pending => {
                     println!("[Server] Read pending, polling sock");
-                    run_io_loop(&sock, "Server", &mut session).await;
+                    run_io_loop(sock.as_ref(), "Server", &mut session).await;
                     println!("[Server] Poll complete");
                 }
                 wolfssl::Poll::Ready(nr) => {
@@ -244,7 +261,7 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
             match session.try_write(&mut pong).expect("[Server] try_write") {
                 wolfssl::Poll::Pending => {
                     println!("[Server] Write pending, polling sock");
-                    run_io_loop(&sock, "Server", &mut session).await;
+                    run_io_loop(sock.as_ref(), "Server", &mut session).await;
                     println!("[Server] Poll complete");
                 }
                 wolfssl::Poll::Ready(nr) => {
@@ -268,7 +285,7 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
     //
     // Run a spurious I/O loop. The correct fix is to not tell WolfSSL
     // we've sent something we haven't in our callbacks.
-    run_io_loop(&sock, "Server(EXTRA)", &mut session).await;
+    run_io_loop(sock.as_ref(), "Server(EXTRA)", &mut session).await;
 }
 
 #[tokio::test]

@@ -1,6 +1,7 @@
 mod data_buffer;
 
 use crate::{
+    callback::IOCallbacks,
     context::Context,
     error::{Error, Poll, PollResult, Result},
     Protocol, TLS_MAX_RECORD_SIZE,
@@ -17,8 +18,10 @@ use std::{
 };
 
 /// Stores configurations we want to initialize a [`Session`] with.
-#[derive(Default)]
-pub struct SessionConfig {
+pub struct SessionConfig<IOCB: IOCallbacks> {
+    /// I/O callback handlers
+    pub io: IOCB,
+
     /// If set and the session is DTLS, sets the nonblocking mode.
     pub dtls_use_nonblock: Option<bool>,
     /// If set and the session is DTLS, sets the MTU of the session.
@@ -34,10 +37,16 @@ pub struct SessionConfig {
     pub checked_domain_name: Option<String>,
 }
 
-impl SessionConfig {
+impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
     /// Creates a default [`Self`] with no configuration
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(io: IOCB) -> Self {
+        Self {
+            io,
+            dtls_use_nonblock: Default::default(),
+            dtls_mtu: Default::default(),
+            server_name_indicator: Default::default(),
+            checked_domain_name: Default::default(),
+        }
     }
 
     /// Sets [`Self::dtls_use_nonblock`]
@@ -67,7 +76,7 @@ impl SessionConfig {
 
 /// Wraps a `WOLFSSL` pointer, as well as the additional fields needed to
 /// write into, and read from, wolfSSL's custom IO callbacks.
-pub struct Session {
+pub struct Session<IOCB: IOCallbacks> {
     protocol: Protocol,
 
     ssl: Mutex<NonNull<wolfssl_sys::WOLFSSL>>,
@@ -75,13 +84,16 @@ pub struct Session {
     // A `Box` because we need a stable pointer address
     callback_read_buffer: Box<DataBuffer>,
     callback_write_buffer: Box<DataBuffer>,
+
+    /// Box so we have a stable address to pass to FFI.
+    _io: Box<IOCB>,
 }
 
-impl Session {
+impl<IOCB: IOCallbacks> Session<IOCB> {
     /// Invokes [`wolfSSL_new`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
-    pub fn new_from_context(ctx: &Context, config: SessionConfig) -> Option<Self> {
+    pub fn new_from_context(ctx: &Context, config: SessionConfig<IOCB>) -> Option<Self> {
         let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.ctx().as_ptr()) };
 
         let mut session = Self {
@@ -89,6 +101,7 @@ impl Session {
             ssl: Mutex::new(NonNull::new(ptr)?),
             callback_read_buffer: Box::new(DataBuffer::with_capacity(TLS_MAX_RECORD_SIZE)),
             callback_write_buffer: Box::new(DataBuffer::with_capacity(TLS_MAX_RECORD_SIZE)),
+            _io: Box::new(config.io),
         };
 
         session.register_io_context();
@@ -701,7 +714,7 @@ impl Session {
 }
 
 #[cfg(test)]
-impl Session {
+impl<IOCB: IOCallbacks> Session<IOCB> {
     pub fn read_buffer(&self) -> &DataBuffer {
         self.callback_read_buffer.as_ref()
     }
@@ -711,7 +724,7 @@ impl Session {
     }
 }
 
-impl Drop for Session {
+impl<IOCB: IOCallbacks> Drop for Session<IOCB> {
     /// Invokes [`wolfSSL_free`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_free
@@ -749,9 +762,13 @@ mod tests {
 
     static INIT_ENV_LOGGER: OnceLock<()> = OnceLock::new();
 
+    struct NoIOCallbacks;
+
+    impl IOCallbacks for NoIOCallbacks {}
+
     struct TestClient {
         _ctx: Context,
-        ssl: Session,
+        ssl: Session<NoIOCallbacks>,
     }
 
     fn make_connected_clients() -> (TestClient, TestClient) {
@@ -780,8 +797,12 @@ mod tests {
             .unwrap()
             .build();
 
-        let client_ssl = client_ctx.new_session(SessionConfig::default()).unwrap();
-        let server_ssl = server_ctx.new_session(SessionConfig::default()).unwrap();
+        let client_ssl = client_ctx
+            .new_session(SessionConfig::new(NoIOCallbacks))
+            .unwrap();
+        let server_ssl = server_ctx
+            .new_session(SessionConfig::new(NoIOCallbacks))
+            .unwrap();
 
         let mut client = TestClient {
             _ctx: client_ctx,
@@ -1032,7 +1053,9 @@ mod tests {
             .unwrap()
             .build();
 
-        let ssl = client_ctx.new_session(SessionConfig::default()).unwrap();
+        let ssl = client_ctx
+            .new_session(SessionConfig::new(NoIOCallbacks))
+            .unwrap();
 
         // The default is 1 second (`DTLS_TIMEOUT_INIT`). This might change in
         // the future or at the whims of the WolfSSL library authors
@@ -1109,7 +1132,9 @@ mod tests {
             .unwrap()
             .build();
 
-        let mut ssl = client_ctx.new_session(SessionConfig::default()).unwrap();
+        let mut ssl = client_ctx
+            .new_session(SessionConfig::new(NoIOCallbacks))
+            .unwrap();
 
         ssl.dtls_set_mtu(mtu);
     }

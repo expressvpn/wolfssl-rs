@@ -9,6 +9,7 @@ mod error;
 mod rng;
 mod ssl;
 
+pub use callback::IOCallbacks;
 pub use context::*;
 pub use rng::*;
 pub use ssl::*;

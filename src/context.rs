@@ -1,5 +1,5 @@
 use crate::{
-    callback::{wolf_tls_read_cb, wolf_tls_write_cb},
+    callback::{wolf_tls_read_cb, wolf_tls_write_cb, IOCallbacks},
     error::{Error, Result},
     ssl::{Session, SessionConfig},
     Protocol, RootCertificate, Secret,
@@ -280,7 +280,10 @@ impl Context {
     }
 
     /// Creates a new SSL session using this underlying context.
-    pub fn new_session(&self, config: SessionConfig) -> Option<Session> {
+    pub fn new_session<IOCB: IOCallbacks>(
+        &self,
+        config: SessionConfig<IOCB>,
+    ) -> Option<Session<IOCB>> {
         Session::new_from_context(self, config)
     }
 }

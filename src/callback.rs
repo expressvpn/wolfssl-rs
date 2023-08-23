@@ -2,6 +2,13 @@ use crate::ssl::DataBuffer;
 use bytes::Buf;
 use std::ffi::{c_char, c_int, c_void};
 
+/// The application provided IO callbacks documented at [`EmbedRecieve`][0] (whose
+/// inputs and outputs we need to emulate). See also [`wolfSSL_CTX_SetIORecv`][1] and `wolfSSL_CTX_SetIOSend`
+///
+/// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-embedreceive
+/// [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-wolfssl_ctx_setiorecv
+pub trait IOCallbacks {}
+
 /// The custom IO callback documented at [`EmbedRecieve`][0] (whose
 /// inputs and outputs we need to emulate).
 ///
