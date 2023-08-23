@@ -9,4 +9,12 @@ repository = "https://github.com/expressvpn/wolfssl"
 keywords = ["wolfssl", "vpn", "lightway", "post-quantum", "cryptography"]
 
 [dependencies]
+bytes = "1"
+log = "0.4"
+parking_lot = "0.12.1"
+thiserror = "1.0"
 wolfssl-sys = { git = "https://github.com/expressvpn/wolfssl-sys", features = ["postquantum"] }
+
+[dev-dependencies]
+env_logger = "0.10.0"
+test-case = "3.0"
