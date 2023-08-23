@@ -8,113 +8,90 @@ const CA_CERT: &[u8] = &include!("data/ca_cert_der_2048");
 const SERVER_CERT: &[u8] = &include!("data/server_cert_der_2048");
 const SERVER_KEY: &[u8] = &include!("data/server_key_der_2048");
 
-#[async_trait(?Send)]
+#[async_trait]
 trait SockIO {
-    async fn run_io_loop(&self, who: &'static str, sess: &mut Session);
+    async fn ready(&self, interest: tokio::io::Interest) -> std::io::Result<tokio::io::Ready>;
+
+    fn try_recv(&self, buf: &mut [u8]) -> std::io::Result<usize>;
+    fn try_send(&self, buf: &[u8]) -> std::io::Result<usize>;
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl SockIO for tokio::net::UnixDatagram {
-    async fn run_io_loop(&self, who: &'static str, sess: &mut Session) {
-        let wr_buf = sess.io_write_out();
+    async fn ready(&self, interest: tokio::io::Interest) -> std::io::Result<tokio::io::Ready> {
+        Self::ready(self, interest).await
+    }
 
-        let interest = if wr_buf.is_empty() {
-            println!("[{who}] Polling for READ");
-            tokio::io::Interest::READABLE
-        } else {
-            println!("[{who}] Polling for READ|WRITE");
-            tokio::io::Interest::READABLE | tokio::io::Interest::WRITABLE
-        };
+    fn try_recv(&self, buf: &mut [u8]) -> std::io::Result<usize> {
+        Self::try_recv(self, buf)
+    }
 
-        let readiness = self
-            .ready(interest)
-            .await
-            .expect(&format!("[{who}] Poll for readiness"));
-
-        println!("[{who}] Socket is ready for {readiness:?}");
-        if readiness.is_readable() {
-            let mut rd_buf = BytesMut::zeroed(1900); // TODO: less allocating all the time...
-            match self.try_recv(&mut rd_buf[..]) {
-                Ok(nr) => {
-                    println!(
-                        "[{who}] Received {nr} bytes into {} byte buffer",
-                        rd_buf.len()
-                    );
-                    rd_buf.truncate(nr);
-                    sess.io_read_in(rd_buf.into());
-                }
-                Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) => {
-                    println!("[{who}] Receive would block!");
-                    // ignored
-                }
-                Err(_err) => todo!("[{who}] recv error handling"),
-            }
-        }
-        if readiness.is_writable() {
-            // wr_buf should be non-empty per checks above...
-            match self.try_send(&wr_buf[..]) {
-                Ok(nr) => {
-                    println!("[{who}] Sent {nr} bytes from {} byte buffer", wr_buf.len());
-                    assert!(nr == wr_buf.len(), "cannot handle partial write");
-                }
-                Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) => {
-                    todo!("[{who}] Send would block, need to deal with content of wr_bufm not lose it");
-                }
-                Err(err) => todo!("[{who}] send error handling: {err}"),
-            }
-        }
+    fn try_send(&self, buf: &[u8]) -> std::io::Result<usize> {
+        Self::try_send(self, buf)
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl SockIO for tokio::net::UnixStream {
-    async fn run_io_loop(&self, who: &'static str, sess: &mut Session) {
-        let wr_buf = sess.io_write_out();
+    async fn ready(&self, interest: tokio::io::Interest) -> std::io::Result<tokio::io::Ready> {
+        Self::ready(self, interest).await
+    }
 
-        let interest = if wr_buf.is_empty() {
-            println!("[{who}] Polling for READ");
-            tokio::io::Interest::READABLE
-        } else {
-            println!("[{who}] Polling for READ|WRITE");
-            tokio::io::Interest::READABLE | tokio::io::Interest::WRITABLE
-        };
+    fn try_recv(&self, buf: &mut [u8]) -> std::io::Result<usize> {
+        Self::try_read(self, buf)
+    }
 
-        let readiness = self
-            .ready(interest)
-            .await
-            .expect(&format!("[{who}] Poll for readiness"));
+    fn try_send(&self, buf: &[u8]) -> std::io::Result<usize> {
+        Self::try_write(self, buf)
+    }
+}
 
-        println!("[{who}] Socket is ready for {readiness:?}");
-        if readiness.is_readable() {
-            let mut rd_buf = BytesMut::zeroed(1900); // TODO: less allocating all the time...
-            match self.try_read(&mut rd_buf[..]) {
-                Ok(nr) => {
-                    println!(
-                        "[{who}] Received {nr} bytes into {} byte buffer",
-                        rd_buf.len()
-                    );
-                    rd_buf.truncate(nr);
-                    sess.io_read_in(rd_buf.into());
-                }
-                Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) => {
-                    println!("[{who}] Receive would block!");
-                    // ignored
-                }
-                Err(_err) => todo!("[{who}] recv error handling"),
+async fn run_io_loop<S: SockIO>(sock: &S, who: &'static str, sess: &mut Session) {
+    let wr_buf = sess.io_write_out();
+
+    let interest = if wr_buf.is_empty() {
+        println!("[{who}] Polling for READ");
+        tokio::io::Interest::READABLE
+    } else {
+        println!("[{who}] Polling for READ|WRITE");
+        tokio::io::Interest::READABLE | tokio::io::Interest::WRITABLE
+    };
+
+    let readiness = sock
+        .ready(interest)
+        .await
+        .expect(&format!("[{who}] Poll for readiness"));
+
+    println!("[{who}] Socket is ready for {readiness:?}");
+    if readiness.is_readable() {
+        let mut rd_buf = BytesMut::zeroed(1900); // TODO: less allocating all the time...
+        match sock.try_recv(&mut rd_buf[..]) {
+            Ok(nr) => {
+                println!(
+                    "[{who}] Received {nr} bytes into {} byte buffer",
+                    rd_buf.len()
+                );
+                rd_buf.truncate(nr);
+                sess.io_read_in(rd_buf.into());
             }
+            Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) => {
+                println!("[{who}] Receive would block!");
+                // ignored
+            }
+            Err(_err) => todo!("[{who}] recv error handling"),
         }
-        if readiness.is_writable() {
-            // wr_buf should be non empty by checks above...
-            match self.try_write(&wr_buf[..]) {
-                Ok(nr) => {
-                    println!("[{who}] Sent {nr} bytes from {} byte buffer", wr_buf.len());
-                    assert!(nr == wr_buf.len());
-                }
-                Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) => {
-                    todo!("[{who}] Send would block, need to deal with content of wr_buf");
-                }
-                Err(err) => todo!("[{who}] send error handling: {err}"),
+    }
+    if readiness.is_writable() {
+        // wr_buf should be non-empty per checks above...
+        match sock.try_send(&wr_buf[..]) {
+            Ok(nr) => {
+                println!("[{who}] Sent {nr} bytes from {} byte buffer", wr_buf.len());
+                assert!(nr == wr_buf.len(), "cannot handle partial write");
             }
+            Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) => {
+                todo!("[{who}] Send would block, need to deal with content of wr_bufm not lose it");
+            }
+            Err(err) => todo!("[{who}] send error handling: {err}"),
         }
     }
 }
@@ -138,7 +115,7 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
         match session.try_negotiate().expect("[Client] try_negotiate") {
             wolfssl::Poll::Pending => {
                 println!("[Client] Negotiation pending, polling sock");
-                sock.run_io_loop("Client", &mut session).await;
+                run_io_loop(&sock, "Client", &mut session).await;
                 println!("[Client] Poll complete");
             }
             wolfssl::Poll::Ready(_) => {
@@ -163,7 +140,7 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
             match session.try_write(&mut ping).expect("[Client] try_write") {
                 wolfssl::Poll::Pending => {
                     println!("[Client] Write pending, polling sock");
-                    sock.run_io_loop("Client", &mut session).await;
+                    run_io_loop(&sock, "Client", &mut session).await;
                     println!("[Client] Poll complete");
                 }
                 wolfssl::Poll::Ready(nr) => {
@@ -180,7 +157,7 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
             match session.try_read(&mut buf).expect("[Client] try_read") {
                 wolfssl::Poll::Pending => {
                     println!("[Client] Read pending, polling sock");
-                    sock.run_io_loop("Client", &mut session).await;
+                    run_io_loop(&sock, "Client", &mut session).await;
                     println!("[Client] Poll complete");
                 }
                 wolfssl::Poll::Ready(nr) => {
@@ -222,7 +199,7 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
         match session.try_negotiate().expect("[Server] try_negotiate") {
             wolfssl::Poll::Pending => {
                 println!("[Server] Negotiation pending, polling sock");
-                sock.run_io_loop("Server", &mut session).await;
+                run_io_loop(&sock, "Server", &mut session).await;
                 println!("[Server] Poll complete");
             }
             wolfssl::Poll::Ready(_) => {
@@ -245,7 +222,7 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
             match session.try_read(&mut buf).expect("[Server] try_read") {
                 wolfssl::Poll::Pending => {
                     println!("[Server] Read pending, polling sock");
-                    sock.run_io_loop("Server", &mut session).await;
+                    run_io_loop(&sock, "Server", &mut session).await;
                     println!("[Server] Poll complete");
                 }
                 wolfssl::Poll::Ready(nr) => {
@@ -265,7 +242,7 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
             match session.try_write(&mut pong).expect("[Server] try_write") {
                 wolfssl::Poll::Pending => {
                     println!("[Server] Write pending, polling sock");
-                    sock.run_io_loop("Server", &mut session).await;
+                    run_io_loop(&sock, "Server", &mut session).await;
                     println!("[Server] Poll complete");
                 }
                 wolfssl::Poll::Ready(nr) => {
@@ -289,7 +266,7 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
     //
     // Run a spurious I/O loop. The correct fix is to not tell WolfSSL
     // we've sent something we haven't in our callbacks.
-    sock.run_io_loop("Server(EXTRA)", &mut session).await;
+    run_io_loop(&sock, "Server(EXTRA)", &mut session).await;
 }
 
 #[tokio::test]
