@@ -60,7 +60,7 @@ async fn run_io_loop<S: SockIO>(sock: &S, who: &'static str, sess: &mut Session)
     let readiness = sock
         .ready(interest)
         .await
-        .expect(&format!("[{who}] Poll for readiness"));
+        .unwrap_or_else(|_| panic!("[{who}] Poll for readiness"));
 
     println!("[{who}] Socket is ready for {readiness:?}");
     if readiness.is_readable() {
