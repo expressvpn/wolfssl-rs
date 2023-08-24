@@ -181,21 +181,28 @@ impl Session {
 
     /// Invokes [`wolfSSL_shutdown`][0] *once*.
     ///
-    /// Like other IO-related functions in wolfSSL, this would require the
-    /// caller to ensure that the necessary data exchange over the network is
-    /// accomplished (see [`Self::try_negotiate`] for more details).
+    /// Returns `Poll::Ready(true)` if the connection has been fully
+    /// (bidirectionally) shutdown, including having seen the "closing
+    /// notify" message from the peer.
     ///
-    /// Fortunately, if there is no intent to reuse the connection, you do not
-    /// need to await for a response from the other side.
+    /// Returns `Poll::Ready(false)` if the connection has only been
+    /// shutdown from this end. If you intend to reuse the connection
+    /// then you must call `try_shutdown` again. You do not need to
+    /// poll for new I/O first, `Poll::Pending` will be returned if
+    /// I/O is required.
+    ///
+    /// If there is no intent to reuse the connection, you do not need
+    /// to await for a response from the other side and
+    /// `Poll::Ready(false)` can be ignored.
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_shutdown
-    pub fn try_shutdown(&mut self) -> PollResult<()> {
+    pub fn try_shutdown(&mut self) -> PollResult<bool> {
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_shutdown(ssl.as_ptr())
         } {
-            wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(())),
-            wolfssl_sys::WOLFSSL_SHUTDOWN_NOT_DONE => Ok(Poll::Pending),
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(true)),
+            wolfssl_sys::WOLFSSL_SHUTDOWN_NOT_DONE => Ok(Poll::Ready(false)),
             x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
                     Ok(Poll::Pending)
