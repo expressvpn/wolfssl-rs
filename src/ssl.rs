@@ -535,9 +535,7 @@ impl Session {
             e => unreachable!("{e:?}"),
         }
     }
-}
 
-impl Session {
     /// Registers a context that will be visible within the custom IO callbacks
     /// tied to this `WOLFSSL` session.
     ///
