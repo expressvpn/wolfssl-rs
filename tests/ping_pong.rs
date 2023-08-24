@@ -129,7 +129,7 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
     println!("[Client] Connecting...");
     'negotiate: loop {
         match session.try_negotiate().expect("[Client] try_negotiate") {
-            wolfssl::Poll::Pending => {
+            wolfssl::Poll::PendingRead | wolfssl::Poll::PendingWrite => {
                 println!("[Client] Negotiation pending, polling sock");
                 run_io_loop(sock.as_ref(), "Client", &mut session).await;
                 println!("[Client] Poll complete");
@@ -154,7 +154,7 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
         let mut ping: BytesMut = ping.into();
         let _nr = 'send: loop {
             match session.try_write(&mut ping).expect("[Client] try_write") {
-                wolfssl::Poll::Pending => {
+                wolfssl::Poll::PendingRead | wolfssl::Poll::PendingWrite => {
                     println!("[Client] Write pending, polling sock");
                     run_io_loop(sock.as_ref(), "Client", &mut session).await;
                     println!("[Client] Poll complete");
@@ -171,7 +171,7 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
 
         let nr = 'recv: loop {
             match session.try_read(&mut buf).expect("[Client] try_read") {
-                wolfssl::Poll::Pending => {
+                wolfssl::Poll::PendingRead | wolfssl::Poll::PendingWrite => {
                     println!("[Client] Read pending, polling sock");
                     run_io_loop(sock.as_ref(), "Client", &mut session).await;
                     println!("[Client] Poll complete");
@@ -216,7 +216,7 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
     println!("[Server] Connecting...");
     'negotiate: loop {
         match session.try_negotiate().expect("[Server] try_negotiate") {
-            wolfssl::Poll::Pending => {
+            wolfssl::Poll::PendingRead | wolfssl::Poll::PendingWrite => {
                 println!("[Server] Negotiation pending, polling sock");
                 run_io_loop(sock.as_ref(), "Server", &mut session).await;
                 println!("[Server] Poll complete");
@@ -239,7 +239,7 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
         buf.clear();
         let nr = 'recv: loop {
             match session.try_read(&mut buf).expect("[Server] try_read") {
-                wolfssl::Poll::Pending => {
+                wolfssl::Poll::PendingRead | wolfssl::Poll::PendingWrite => {
                     println!("[Server] Read pending, polling sock");
                     run_io_loop(sock.as_ref(), "Server", &mut session).await;
                     println!("[Server] Poll complete");
@@ -259,7 +259,7 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
         let mut pong: BytesMut = ping.as_ref().into();
         let _nr = 'send: loop {
             match session.try_write(&mut pong).expect("[Server] try_write") {
-                wolfssl::Poll::Pending => {
+                wolfssl::Poll::PendingRead | wolfssl::Poll::PendingWrite => {
                     println!("[Server] Write pending, polling sock");
                     run_io_loop(sock.as_ref(), "Server", &mut session).await;
                     println!("[Server] Poll complete");

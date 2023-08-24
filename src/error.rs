@@ -7,8 +7,11 @@ use thiserror::Error;
 #[derive(Debug)]
 pub enum Poll<T> {
     /// Underlying IO operations are still ongoing. No output has been generated
-    /// yet.
-    Pending,
+    /// yet. A write is pending
+    PendingWrite,
+    /// Underlying IO operations are still ongoing. No output has been generated
+    /// yet. A write is pending
+    PendingRead,
     /// An output has been generated.
     Ready(T),
     /// When under secure renegotiation, WolfSSL can now sometimes emit an

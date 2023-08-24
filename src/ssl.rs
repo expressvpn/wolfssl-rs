@@ -178,9 +178,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         } {
             wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(())),
             x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
-                wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
-                    Ok(Poll::Pending)
-                }
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Ok(Poll::PendingRead),
+                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::PendingWrite),
                 wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
                     if self.is_secure_renegotiation_supported() =>
                 {
@@ -201,8 +200,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// Returns `Poll::Ready(false)` if the connection has only been
     /// shutdown from this end. If you intend to reuse the connection
     /// then you must call `try_shutdown` again. You do not need to
-    /// poll for new I/O first, `Poll::Pending` will be returned if
-    /// I/O is required.
+    /// poll for new I/O first, `Poll::Pending{Read,Write}` will be
+    /// returned if I/O is required.
     ///
     /// If there is no intent to reuse the connection, you do not need
     /// to await for a response from the other side and
@@ -217,9 +216,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(true)),
             wolfssl_sys::WOLFSSL_SHUTDOWN_NOT_DONE => Ok(Poll::Ready(false)),
             x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
-                wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
-                    Ok(Poll::Pending)
-                }
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Ok(Poll::PendingRead),
+                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::PendingWrite),
                 wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
                     if self.is_secure_renegotiation_supported() =>
                 {
@@ -278,9 +276,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             }
             x @ (0 | wolfssl_sys::WOLFSSL_FATAL_ERROR) => match self.get_error(x) {
                 wolfssl_sys::WOLFSSL_ERROR_NONE => Ok(Poll::Ready(0)),
-                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE | wolfssl_sys::WOLFSSL_ERROR_WANT_READ => {
-                    Ok(Poll::Pending)
-                }
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Ok(Poll::PendingRead),
+                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::PendingWrite),
                 wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
                     if self.is_secure_renegotiation_supported() =>
                 {
@@ -324,9 +321,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 Ok(Poll::Ready(x as usize))
             }
             x @ (0 | wolfssl_sys::WOLFSSL_FATAL_ERROR) => match self.get_error(x) {
-                wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
-                    Ok(Poll::Pending)
-                }
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Ok(Poll::PendingRead),
+                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::PendingWrite),
                 wolfssl_sys::WOLFSSL_ERROR_NONE => Ok(Poll::Ready(0)),
                 wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
                     if self.is_secure_renegotiation_supported() =>
@@ -386,9 +382,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         } {
             wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(())),
             x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
-                wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
-                    Ok(Poll::Pending)
-                }
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Ok(Poll::PendingRead),
+                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::PendingWrite),
                 wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
                     if self.is_secure_renegotiation_supported() =>
                 {
@@ -414,7 +409,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         } {
             wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(())),
             e @ wolfssl_sys::BAD_FUNC_ARG => unreachable!("{e:?}"),
-            wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::Pending),
+            wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::PendingWrite),
+
             e => unreachable!("Received unknown code {e}"),
         }
     }
@@ -547,9 +543,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             e @ wolfssl_sys::NOT_COMPILED_IN => unreachable!("{e:?}"),
             wolfssl_sys::WOLFSSL_SUCCESS => Poll::Ready(false),
             x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
-                wolfssl_sys::WOLFSSL_ERROR_WANT_READ | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => {
-                    Poll::Pending
-                }
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Poll::PendingRead,
+                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Poll::PendingWrite,
                 _ => Poll::Ready(true),
             },
             e => unreachable!("{e:?}"),
@@ -613,7 +608,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         match self.try_read(&mut buf) {
             Ok(Poll::Ready(_)) => Ok(buf.freeze()),
             Err(Error::Fatal(e) | Error::AppData(e)) => Err(Error::AppData(e)),
-            Ok(Poll::Pending) => {
+            Ok(Poll::PendingRead | Poll::PendingWrite) => {
                 unreachable!("App data is ready, so why are we waiting?")
             }
             // Lightway Core (C) does recurse, but only seems to
@@ -942,7 +937,7 @@ mod tests {
                 Ok(Poll::Ready(_)) => {
                     break;
                 }
-                Ok(Poll::Pending) => {}
+                Ok(Poll::PendingRead | Poll::PendingWrite) => {}
                 Ok(Poll::AppData(_)) => {
                     panic!("Should not receive AppData from anywhere")
                 }
@@ -953,7 +948,7 @@ mod tests {
             // functionality. Lets send some app data while a secure
             // renegotiation is ongoing.
             match client.ssl.try_write(&mut bytes) {
-                Ok(Poll::Ready(_) | Poll::Pending) => {}
+                Ok(Poll::Ready(_) | Poll::PendingRead | Poll::PendingWrite) => {}
                 Ok(Poll::AppData(_)) => {
                     panic!("Should not receive AppData from anywhere")
                 }
@@ -967,7 +962,7 @@ mod tests {
             // otherwise lose it.
             let mut server_bytes = BytesMut::with_capacity(TEST.len());
             match server.ssl.try_read(&mut server_bytes) {
-                Ok(Poll::Ready(_) | Poll::Pending) => {}
+                Ok(Poll::Ready(_) | Poll::PendingRead | Poll::PendingWrite) => {}
                 Ok(Poll::AppData(b)) => {
                     assert_eq!(b, TEST);
                     // `server_bytes` should not have been modified if appdata
@@ -998,7 +993,7 @@ mod tests {
         // to send a key update message.
         match client.ssl.try_trigger_update_key() {
             Ok(Poll::Ready(_)) => {}
-            Ok(Poll::Pending) => {
+            Ok(Poll::PendingRead | Poll::PendingWrite) => {
                 panic!("Should not be pending any data")
             }
             Ok(Poll::AppData(_)) => {
@@ -1021,7 +1016,7 @@ mod tests {
         //
         // This will cause the server to send its own key update message.
         match server.ssl.try_read(&mut BytesMut::with_capacity(0)) {
-            Ok(Poll::Pending) => {}
+            Ok(Poll::PendingRead | Poll::PendingWrite) => {}
             Ok(Poll::Ready(_)) => {
                 panic!("There should be no data to read")
             }
@@ -1038,7 +1033,7 @@ mod tests {
         // The client also reads no application data, but this will trigger the
         // same key update machinery to occur on the client side.
         match client.ssl.try_read(&mut BytesMut::with_capacity(0)) {
-            Ok(Poll::Pending) => {}
+            Ok(Poll::PendingRead | Poll::PendingWrite) => {}
             Ok(Poll::Ready(_)) => {
                 panic!("There should be no data to read")
             }
@@ -1106,7 +1101,7 @@ mod tests {
 
         // Initiate something that requires a handshake
         match client.ssl.try_rehandshake() {
-            Ok(Poll::Ready(_) | Poll::Pending) => {}
+            Ok(Poll::Ready(_) | Poll::PendingRead | Poll::PendingWrite) => {}
             e => panic!("{e:?}"),
         }
 
@@ -1115,7 +1110,7 @@ mod tests {
 
         // Ask for a handshake again.
         match client.ssl.try_rehandshake() {
-            Ok(Poll::Ready(_) | Poll::Pending) => {}
+            Ok(Poll::Ready(_) | Poll::PendingRead | Poll::PendingWrite) => {}
             e => panic!("{e:?}"),
         }
 
