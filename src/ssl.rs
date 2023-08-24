@@ -1,12 +1,9 @@
-mod data_buffer;
-
 use crate::{
-    callback::{wolf_tls_read_cb, wolf_tls_write_cb, IOCallbacks},
+    callback::{IOCallbackResult, IOCallbacks},
     context::Context,
     error::{Error, Poll, PollResult, Result},
     Protocol, TLS_MAX_RECORD_SIZE,
 };
-pub use data_buffer::DataBuffer;
 
 use bytes::{Buf, Bytes, BytesMut};
 use parking_lot::Mutex;
@@ -16,6 +13,32 @@ use std::{
     ptr::NonNull,
     time::Duration,
 };
+
+/// Convert a [`std::io::ErrorKind`] into WOLFSSL_CBIO error as descibed in [`EmbedReceive`][0].
+///
+/// `would_block` is returned if the variant is
+/// [`std::io::ErrorKind::WouldBlock`], since wolfssl has different
+/// error names (although under the hood the value is the same). Note
+/// that the application is expected to have returned
+/// [`IOCallbackResult::WouldBlock`] in this case so we shouldn't be
+/// here in the first place, but be tollerant in this case.
+///
+/// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-embedreceive
+fn io_errorkind_into_wolfssl_cbio_error(
+    kind: std::io::ErrorKind,
+    would_block: ::std::os::raw::c_int,
+) -> ::std::os::raw::c_int {
+    use std::io::ErrorKind::*;
+    match kind {
+        // Note that WouldBlock also covers EAGAIN errors under the hood.
+        WouldBlock => would_block,
+        TimedOut => wolfssl_sys::IOerrors_WOLFSSL_CBIO_ERR_TIMEOUT,
+        ConnectionReset => wolfssl_sys::IOerrors_WOLFSSL_CBIO_ERR_CONN_RST,
+        Interrupted => wolfssl_sys::IOerrors_WOLFSSL_CBIO_ERR_ISR,
+        ConnectionAborted => wolfssl_sys::IOerrors_WOLFSSL_CBIO_ERR_CONN_CLOSE,
+        _ => wolfssl_sys::IOerrors_WOLFSSL_CBIO_ERR_GENERAL,
+    }
+}
 
 /// Stores configurations we want to initialize a [`Session`] with.
 pub struct SessionConfig<IOCB: IOCallbacks> {
@@ -38,7 +61,8 @@ pub struct SessionConfig<IOCB: IOCallbacks> {
 }
 
 impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
-    /// Creates a default [`Self`] with no configuration
+    /// Creates a default [`Self`]. A set of IO callbacks implementing
+    /// [`IOCallbacks`] must be provided.
     pub fn new(io: IOCB) -> Self {
         Self {
             io,
@@ -81,12 +105,8 @@ pub struct Session<IOCB: IOCallbacks> {
 
     ssl: Mutex<NonNull<wolfssl_sys::WOLFSSL>>,
 
-    // A `Box` because we need a stable pointer address
-    callback_read_buffer: Box<DataBuffer>,
-    callback_write_buffer: Box<DataBuffer>,
-
     /// Box so we have a stable address to pass to FFI.
-    _io: Box<IOCB>,
+    io: Box<IOCB>,
 }
 
 impl<IOCB: IOCallbacks> Session<IOCB> {
@@ -99,9 +119,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         let mut session = Self {
             protocol: ctx.protocol(),
             ssl: Mutex::new(NonNull::new(ptr)?),
-            callback_read_buffer: Box::new(DataBuffer::with_capacity(TLS_MAX_RECORD_SIZE)),
-            callback_write_buffer: Box::new(DataBuffer::with_capacity(TLS_MAX_RECORD_SIZE)),
-            _io: Box::new(config.io),
+            io: Box::new(config.io),
         };
 
         session.register_io_context();
@@ -163,12 +181,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// The distinction is important because it takes more than one invocation
     /// to successfully form a secure session.
     ///
-    /// This method will trigger WolfSSL's IO callbacks, so the caller is
-    /// responsible for:
-    /// - Sending the resulting data that is generated (collected via
-    ///   [`Self::io_write_out`]) to the destination.
-    /// - Making the response data from the destination visible to this session
-    ///   via [`Self::io_read_in`].
+    /// This method will trigger WolfSSL's IO callbacks
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_negotiate
     pub fn try_negotiate(&mut self) -> PollResult<()> {
@@ -229,17 +242,6 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         }
     }
 
-    /// Extracts data wolfSSL wants sent over the network, if there is any.
-    pub fn io_write_out(&mut self) -> Bytes {
-        self.callback_write_buffer.split().freeze()
-    }
-
-    /// Makes external data visible to the WolfSSL Custom IO read callback the
-    /// next time it is called.
-    pub fn io_read_in(&mut self, b: Bytes) {
-        self.callback_read_buffer.extend_from_slice(&b)
-    }
-
     /// Invokes [`wolfSSL_write`][0] *once*.
     ///
     /// Given a buffer, consumes as much of it as possible, writing into the
@@ -250,10 +252,6 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     ///
     /// It is not guaranteed that the entire buffer will be consumed, since we
     /// only invoke `wolfSSL_write` once.
-    ///
-    /// This functionally means that the next invocation of
-    /// [`Self::io_write_out`] will return a non-empty buffer. The caller must
-    /// then manually handle the data transfer.
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_write
     //
@@ -293,7 +291,6 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     ///
     /// This can be thought of as the inverse to [`Self::try_write`]:
     /// - It reads data from WolfSSL into a buffer.
-    /// - To progress, it requires data to be fed in via [`Self::io_read_in`].
     /// - It appends data to the given buffer, up to its given capacity.
     ///   - It does not alter existing data inside the buffer.
     ///
@@ -551,6 +548,63 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         }
     }
 
+    unsafe extern "C" fn io_recv_shim(
+        _ssl: *mut wolfssl_sys::WOLFSSL,
+        buf: *mut ::std::os::raw::c_char,
+        sz: ::std::os::raw::c_int,
+        ctx: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int {
+        debug_assert!(!_ssl.is_null());
+        debug_assert!(!buf.is_null());
+        debug_assert!(!ctx.is_null());
+
+        // SAFETY:
+        // We know that this pointer is to the contents of a `Box`
+        // owned by the `Session`. See `register_io_context` below for
+        // an argument as to why IO will be stopped (by releasing
+        // `WOLFSSL`) before that box is dropped.
+        let io = unsafe { &*(ctx as *mut IOCB) };
+
+        let buf = std::slice::from_raw_parts_mut(buf as *mut u8, sz as usize);
+
+        match io.recv(buf) {
+            IOCallbackResult::Ok(nr) => nr as std::os::raw::c_int,
+            IOCallbackResult::WouldBlock => wolfssl_sys::IOerrors_WOLFSSL_CBIO_ERR_WANT_READ,
+            IOCallbackResult::Err(err) => io_errorkind_into_wolfssl_cbio_error(
+                err.kind(),
+                wolfssl_sys::IOerrors_WOLFSSL_CBIO_ERR_WANT_READ,
+            ),
+        }
+    }
+
+    unsafe extern "C" fn io_send_shim(
+        _ssl: *mut wolfssl_sys::WOLFSSL,
+        buf: *mut ::std::os::raw::c_char,
+        sz: ::std::os::raw::c_int,
+        ctx: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int {
+        debug_assert!(!_ssl.is_null());
+        debug_assert!(!buf.is_null());
+        debug_assert!(!ctx.is_null());
+
+        // We know that this pointer is to the contents of a `Box`
+        // owned by the `Session`. See `register_io_context` below for
+        // an argument as to why IO will be stopped (by releasing
+        // `WOLFSSL`) before that box is dropped.
+        let io = unsafe { &*(ctx as *mut IOCB) };
+
+        let buf = std::slice::from_raw_parts(buf as *mut u8, sz as usize);
+
+        match io.send(buf) {
+            IOCallbackResult::Ok(nr) => nr as std::os::raw::c_int,
+            IOCallbackResult::WouldBlock => wolfssl_sys::IOerrors_WOLFSSL_CBIO_ERR_WANT_WRITE,
+            IOCallbackResult::Err(err) => io_errorkind_into_wolfssl_cbio_error(
+                err.kind(),
+                wolfssl_sys::IOerrors_WOLFSSL_CBIO_ERR_WANT_WRITE,
+            ),
+        }
+    }
+
     /// Registers a context that will be visible within the custom IO callbacks
     /// tied to this `WOLFSSL` session.
     ///
@@ -565,16 +619,26 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     fn register_io_context(&mut self) {
         let ssl = self.ssl.lock();
 
+        // SAFETY:
+        // The functions here are 'static so must live longer than `self.ssl`.
         unsafe {
-            wolfssl_sys::wolfSSL_SSLSetIORecv(ssl.as_ptr(), Some(wolf_tls_read_cb));
-            wolfssl_sys::wolfSSL_SSLSetIOSend(ssl.as_ptr(), Some(wolf_tls_write_cb));
+            wolfssl_sys::wolfSSL_SSLSetIORecv(ssl.as_ptr(), Some(Self::io_recv_shim));
+            wolfssl_sys::wolfSSL_SSLSetIOSend(ssl.as_ptr(), Some(Self::io_send_shim));
         }
 
-        let read_buf = self.callback_read_buffer.as_mut() as *mut _ as *mut std::ffi::c_void;
-        let write_buf = self.callback_write_buffer.as_mut() as *mut _ as *mut std::ffi::c_void;
+        let io = &mut *self.io as *mut IOCB as *mut std::ffi::c_void;
+
+        // SAFETY:
+        // `io` here is behind a `Box<>` (`self.io`) so the address is stable.
+        //
+        // We free `self.ssl` (the `wolfssl_sys::WOLFSSL`) on drop of
+        // `self` so we release (and thus quiesce) any use of the io
+        // callbacks before `io` can be dropped.
+        //
+        // Therefore `io` here is valid for as long as it needs to be.
         unsafe {
-            wolfssl_sys::wolfSSL_SetIOReadCtx(ssl.as_ptr(), read_buf);
-            wolfssl_sys::wolfSSL_SetIOWriteCtx(ssl.as_ptr(), write_buf);
+            wolfssl_sys::wolfSSL_SetIOReadCtx(ssl.as_ptr(), io);
+            wolfssl_sys::wolfSSL_SetIOWriteCtx(ssl.as_ptr(), io);
         }
     }
 
@@ -717,17 +781,6 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     }
 }
 
-#[cfg(test)]
-impl<IOCB: IOCallbacks> Session<IOCB> {
-    pub fn read_buffer(&self) -> &DataBuffer {
-        self.callback_read_buffer.as_ref()
-    }
-
-    pub fn write_buffer(&self) -> &DataBuffer {
-        self.callback_write_buffer.as_ref()
-    }
-}
-
 impl<IOCB: IOCallbacks> Drop for Session<IOCB> {
     /// Invokes [`wolfSSL_free`][0]
     ///
@@ -745,6 +798,7 @@ mod tests {
         TLS_MAX_RECORD_SIZE,
     };
 
+    use std::rc::Rc;
     use std::sync::OnceLock;
 
     use test_case::test_case;
@@ -766,13 +820,68 @@ mod tests {
 
     static INIT_ENV_LOGGER: OnceLock<()> = OnceLock::new();
 
+    // Panics if any I/O is attempted, use for tests where no I/O is expected
     struct NoIOCallbacks;
 
-    impl IOCallbacks for NoIOCallbacks {}
+    impl IOCallbacks for NoIOCallbacks {
+        fn recv(&self, _buf: &mut [u8]) -> IOCallbackResult<usize> {
+            panic!("Unexpected recv on NoIOCallbacks")
+        }
+
+        fn send(&self, _buf: &[u8]) -> IOCallbackResult<usize> {
+            panic!("Unexpected send on NoIOCallbacks")
+        }
+    }
+
+    struct TestIOCallbacks {
+        r: Rc<Mutex<BytesMut>>,
+        w: Rc<Mutex<BytesMut>>,
+    }
+
+    impl TestIOCallbacks {
+        fn pair() -> (Self, Self) {
+            let left_to_right = Rc::new(Mutex::new(Default::default()));
+            let right_to_left = Rc::new(Mutex::new(Default::default()));
+
+            let left = TestIOCallbacks {
+                r: right_to_left.clone(),
+                w: left_to_right.clone(),
+            };
+
+            let right = TestIOCallbacks {
+                r: left_to_right.clone(),
+                w: right_to_left.clone(),
+            };
+
+            (left, right)
+        }
+    }
+
+    impl IOCallbacks for TestIOCallbacks {
+        fn recv(&self, buf: &mut [u8]) -> IOCallbackResult<usize> {
+            let mut r = self.r.lock();
+            if r.len() == 0 {
+                return IOCallbackResult::WouldBlock;
+            }
+
+            let n = std::cmp::min(buf.len(), r.len());
+            buf[..n].copy_from_slice(&r[..n]);
+            r.advance(n);
+            IOCallbackResult::Ok(n)
+        }
+
+        fn send(&self, buf: &[u8]) -> IOCallbackResult<usize> {
+            let mut w = self.w.lock();
+            w.extend_from_slice(buf);
+            IOCallbackResult::Ok(buf.len()) // extend_from_slice expands w if needed
+        }
+    }
 
     struct TestClient {
         _ctx: Context,
-        ssl: Session<NoIOCallbacks>,
+        ssl: Session<TestIOCallbacks>,
+        read_buffer: Rc<Mutex<BytesMut>>,
+        write_buffer: Rc<Mutex<BytesMut>>,
     }
 
     fn make_connected_clients() -> (TestClient, TestClient) {
@@ -801,29 +910,39 @@ mod tests {
             .unwrap()
             .build();
 
+        let (client_io, server_io) = TestIOCallbacks::pair();
+
+        let client_read_buffer = client_io.r.clone();
+        let client_write_buffer = client_io.w.clone();
+        let server_read_buffer = server_io.r.clone();
+        let server_write_buffer = server_io.w.clone();
+
         let client_ssl = client_ctx
-            .new_session(SessionConfig::new(NoIOCallbacks))
+            .new_session(SessionConfig::new(client_io))
             .unwrap();
         let server_ssl = server_ctx
-            .new_session(SessionConfig::new(NoIOCallbacks))
+            .new_session(SessionConfig::new(server_io))
             .unwrap();
 
         let mut client = TestClient {
             _ctx: client_ctx,
             ssl: client_ssl,
+            read_buffer: client_read_buffer,
+            write_buffer: client_write_buffer,
         };
 
         let mut server = TestClient {
             _ctx: server_ctx,
             ssl: server_ssl,
+            read_buffer: server_read_buffer,
+            write_buffer: server_write_buffer,
         };
 
         for _ in 0..7 {
             let _ = client.ssl.try_negotiate().unwrap();
             let _ = server.ssl.try_negotiate().unwrap();
-
-            client.ssl.io_read_in(server.ssl.io_write_out());
-            server.ssl.io_read_in(client.ssl.io_write_out());
+            // Progress is made because one of the above will have
+            // written and the other will have PendingRead...
         }
 
         assert!(client.ssl.is_init_finished());
@@ -857,11 +976,11 @@ mod tests {
                     "Bytes should have been consumed by WolfSSL"
                 );
                 assert!(
-                    !client.ssl.write_buffer().is_empty(),
+                    !client.write_buffer.lock().is_empty(),
                     "The write buffer should be populated as a result"
                 );
                 assert!(
-                    client.ssl.read_buffer().is_empty(),
+                    client.read_buffer.lock().is_empty(),
                     "The read buffer should _not_ be populated as a result"
                 );
                 assert_eq!(
@@ -896,8 +1015,6 @@ mod tests {
         let Ok(Poll::Ready(_)) = client.ssl.try_write(&mut client_bytes) else {
             panic!("Unusual write behavior for this payload");
         };
-
-        server.ssl.io_read_in(client.ssl.io_write_out());
 
         let mut server_bytes = BytesMut::with_capacity(text.len());
 
@@ -955,8 +1072,6 @@ mod tests {
                 Err(e) => panic!("{e}"),
             };
 
-            server.ssl.io_read_in(client.ssl.io_write_out());
-
             // We should expect to see on the server side that some application
             // data has been discovered, and that we should get it out or
             // otherwise lose it.
@@ -971,8 +1086,6 @@ mod tests {
                 }
                 Err(e) => panic!("{e}"),
             };
-
-            client.ssl.io_read_in(server.ssl.io_write_out());
         }
 
         assert!(!client.ssl.is_secure_renegotiation_pending());
@@ -1007,16 +1120,13 @@ mod tests {
             "Client should be expecting a response containing decryption keys"
         );
 
-        let client_send_data = client.ssl.io_write_out();
-        assert!(!client_send_data.is_empty());
-        server.ssl.io_read_in(client_send_data);
-
         // The server reads no application data, but this internally triggers
         // some wolfSSL machinery to deal with the key update.
         //
         // This will cause the server to send its own key update message.
         match server.ssl.try_read(&mut BytesMut::with_capacity(0)) {
-            Ok(Poll::PendingRead | Poll::PendingWrite) => {}
+            Ok(Poll::PendingRead) => {}
+            Ok(Poll::PendingWrite) => panic!("Should be nothing to write"),
             Ok(Poll::Ready(_)) => {
                 panic!("There should be no data to read")
             }
@@ -1026,14 +1136,11 @@ mod tests {
             Err(e) => panic!("{e}"),
         };
 
-        let server_send_data = server.ssl.io_write_out();
-        assert!(!server_send_data.is_empty());
-        client.ssl.io_read_in(server_send_data);
-
         // The client also reads no application data, but this will trigger the
         // same key update machinery to occur on the client side.
         match client.ssl.try_read(&mut BytesMut::with_capacity(0)) {
-            Ok(Poll::PendingRead | Poll::PendingWrite) => {}
+            Ok(Poll::PendingRead) => {}
+            Ok(Poll::PendingWrite) => panic!("Should be nothing to write"),
             Ok(Poll::Ready(_)) => {
                 panic!("There should be no data to read")
             }
@@ -1076,7 +1183,7 @@ mod tests {
     fn dtls_timeout(should_timeout: bool) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let (mut client, mut server) = make_connected_clients_with_protocol(
+        let (mut client, mut _server) = make_connected_clients_with_protocol(
             Protocol::DtlsClientV1_2,
             Protocol::DtlsServerV1_2,
         );
@@ -1106,7 +1213,6 @@ mod tests {
         }
 
         std::thread::sleep(dtls_timeout);
-        server.ssl.io_read_in(client.ssl.io_write_out());
 
         // Ask for a handshake again.
         match client.ssl.try_rehandshake() {
