@@ -24,6 +24,9 @@ cargo test
 cargo clippy
 ```
 
+## Building with Earthly
+There is also an `Earthfile` provided so that you can build the crate in [Earthly](https://earthly.dev):
 
-
-
+```
+earthly +build-crate
+```
