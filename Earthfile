@@ -11,9 +11,8 @@ build-deps:
 
 copy-src:
     FROM +build-deps
-    COPY Cargo.toml ./
-    COPY --dir src ./
-    COPY --dir tests ./
+    COPY Cargo.toml Cargo.lock ./
+    COPY --dir src tests ./
 
 build-dev:
     FROM +copy-src
