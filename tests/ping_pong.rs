@@ -1,3 +1,5 @@
+#![deny(unsafe_code)] // unsafety should all be in the library.
+
 use wolfssl::{ContextBuilder, Protocol, RootCertificate, Secret, Session, SessionConfig};
 
 use async_trait::async_trait;
