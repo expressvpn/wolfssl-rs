@@ -28,24 +28,22 @@ impl<IOCB: SockIO> Clone for SockIOCallbacks<IOCB> {
 }
 
 impl<IOCB: SockIO> SockIOCallbacks<IOCB> {
-    async fn wait_read(&self, who: &'static str, what: &'static str) {
-        println!("[{who}] {what}: Poll for read");
-        let readiness = self
-            .0
-            .ready(tokio::io::Interest::READABLE)
-            .await
-            .unwrap_or_else(|_| panic!("[{who}] {what}: Poll for read"));
-        println!("[{who}] {what}: Socket is ready: {readiness:?}");
+    async fn poll(&self, interest: tokio::io::Interest) {
+        let _ = self.0.ready(interest).await.unwrap();
     }
+}
 
-    async fn wait_write(&self, who: &'static str, what: &'static str) {
-        println!("[{who}] {what}: Poll for write");
-        let readiness = self
-            .0
-            .ready(tokio::io::Interest::WRITABLE)
-            .await
-            .unwrap_or_else(|_| panic!("[{who}] {what}: Poll for write"));
-        println!("[{who}] {what}: Socket is ready: {readiness:?}");
+macro_rules! retry_io {
+    { $iocb:expr, $f:expr } => {
+        loop {
+            match $f {
+                Ok(wolfssl::Poll::PendingRead) => $iocb.poll(tokio::io::Interest::READABLE).await,
+                Ok(wolfssl::Poll::PendingWrite) => $iocb.poll(tokio::io::Interest::WRITABLE).await,
+                Ok(wolfssl::Poll::Ready(ok)) => break Ok(ok),
+                Ok(wolfssl::Poll::AppData(_)) => panic!("Unexpected/Unhandled AppData"),
+                Err(err) => break Err(err),
+            };
+        }
     }
 }
 
@@ -119,17 +117,7 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
         .expect("[Client] Create Client SSL session");
 
     println!("[Client] Connecting...");
-    'negotiate: loop {
-        match session.try_negotiate().expect("[Client] try_negotiate") {
-            wolfssl::Poll::PendingRead => io.wait_read("Client", "Negotiate").await,
-            wolfssl::Poll::PendingWrite => io.wait_write("Client", "Negotiate").await,
-            wolfssl::Poll::Ready(_) => {
-                println!("[Client] Negotiation complete!");
-                break 'negotiate;
-            }
-            wolfssl::Poll::AppData(_b) => todo!("[Client] Handle App Data"),
-        }
-    }
+    retry_io! { io, session.try_negotiate() }.expect("[Client] try_negotiate");
 
     assert!(session.is_init_finished());
 
@@ -141,31 +129,11 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
         println!("[Client] Send {ping}");
 
         let mut ping: BytesMut = ping.into();
-        let _nr = 'send: loop {
-            match session.try_write(&mut ping).expect("[Client] try_write") {
-                wolfssl::Poll::PendingRead => io.wait_read("Client", "Write").await,
-                wolfssl::Poll::PendingWrite => io.wait_write("Client", "Write").await,
-                wolfssl::Poll::Ready(nr) => {
-                    println!("[Client] Write {nr} complete!");
-                    break 'send nr;
-                }
-                wolfssl::Poll::AppData(_b) => todo!("[Client] Handle App Data"),
-            }
-        };
+        let _nr = retry_io! { io, session.try_write(&mut ping) }.expect("[Client] try_write");
 
         buf.clear();
 
-        let nr = 'recv: loop {
-            match session.try_read(&mut buf).expect("[Client] try_read") {
-                wolfssl::Poll::PendingRead => io.wait_read("Client", "Read").await,
-                wolfssl::Poll::PendingWrite => io.wait_write("Client", "Read").await,
-                wolfssl::Poll::Ready(nr) => {
-                    println!("[Client] Read {nr} complete!");
-                    break 'recv nr;
-                }
-                wolfssl::Poll::AppData(_b) => todo!("[Client] Handle App Data"),
-            }
-        };
+        let nr = retry_io! { io,  session.try_read(&mut buf) }.expect("[Client] try_read");
         let pong = String::from_utf8_lossy(&buf[..nr]);
         println!("[Client] Got pong: {pong}");
     }
@@ -197,17 +165,7 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
         .expect("[Server] Create Server SSL session");
 
     println!("[Server] Connecting...");
-    'negotiate: loop {
-        match session.try_negotiate().expect("[Server] try_negotiate") {
-            wolfssl::Poll::PendingRead => io.wait_read("Server", "Negotiate").await,
-            wolfssl::Poll::PendingWrite => io.wait_write("Server", "Negotiate").await,
-            wolfssl::Poll::Ready(_) => {
-                println!("[Server] Negotiation complete!");
-                break 'negotiate;
-            }
-            wolfssl::Poll::AppData(_b) => todo!("[Server] Handle App Data"),
-        }
-    }
+    retry_io! { io, session.try_negotiate() }.expect("[Server] try_negotiate");
 
     assert!(session.is_init_finished());
 
@@ -215,39 +173,19 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
 
     println!("[Server] Starting ping/pong loop");
 
-    'pingpong: loop {
+    loop {
         buf.clear();
-        let nr = 'recv: loop {
-            match session.try_read(&mut buf).expect("[Server] try_read") {
-                wolfssl::Poll::PendingRead => io.wait_read("Server", "Read").await,
-                wolfssl::Poll::PendingWrite => io.wait_write("Server", "Read").await,
-                wolfssl::Poll::Ready(nr) => {
-                    println!("[Server] Read {nr} complete!");
-                    break 'recv nr;
-                }
-                wolfssl::Poll::AppData(_b) => todo!("[Server] Handle App Data"),
-            }
-        };
+        let nr = retry_io! { io, session.try_read(&mut buf) }.expect("[Server] try_read");
         let ping = String::from_utf8_lossy(&buf[..nr]);
         println!("[Server] Got ping: {ping}");
 
         // We don't reuse buf since we don't want to mess with truncate and reexpand.
 
         let mut pong: BytesMut = ping.as_ref().into();
-        let _nr = 'send: loop {
-            match session.try_write(&mut pong).expect("[Server] try_write") {
-                wolfssl::Poll::PendingRead => io.wait_read("Server", "Write").await,
-                wolfssl::Poll::PendingWrite => io.wait_write("Server", "Write").await,
-                wolfssl::Poll::Ready(nr) => {
-                    println!("[Server] Write {nr} complete!");
-                    break 'send nr;
-                }
-                wolfssl::Poll::AppData(_b) => todo!("[Server] Handle App Data"),
-            }
-        };
+        let _nr = retry_io! { io, session.try_write(&mut pong) }.expect("[Server] try_write");
 
         if ping == "QUIT" {
-            break 'pingpong;
+            break;
         }
     }
 
