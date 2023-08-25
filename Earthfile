@@ -1,5 +1,5 @@
 VERSION 0.7
-FROM rust:1.71
+FROM rust:1.72
 
 WORKDIR /wolfssl-sys
 
