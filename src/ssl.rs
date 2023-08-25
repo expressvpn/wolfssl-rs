@@ -1,7 +1,7 @@
 mod data_buffer;
 
 use crate::{
-    callback::IOCallbacks,
+    callback::{wolf_tls_read_cb, wolf_tls_write_cb, IOCallbacks},
     context::Context,
     error::{Error, Poll, PollResult, Result},
     Protocol, TLS_MAX_RECORD_SIZE,
@@ -559,13 +559,22 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// Registers a context that will be visible within the custom IO callbacks
     /// tied to this `WOLFSSL` session.
     ///
-    /// This is done via [`wolfSSL_SetIOReadCtx`][0] and
-    /// [`wolfSSL_SetIOWriteCtx`][1].
+    /// This is done via `wolfSSL_SSLSetIORecv` and
+    /// `wolfSSL_SSLSetIOSend` (see [`wolfSSL_CTX_SetIORecv`][0] for
+    /// related docs) [`wolfSSL_SetIOReadCtx`][1] and
+    /// [`wolfSSL_SetIOWriteCtx`][2].
     ///
-    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-wolfssl_setioreadctx
-    /// [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-wolfssl_setiowritectx
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-wolfssl_ctx_setiorecv
+    /// [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-wolfssl_setioreadctx
+    /// [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-wolfssl_setiowritectx
     fn register_io_context(&mut self) {
         let ssl = self.ssl.lock();
+
+        unsafe {
+            wolfssl_sys::wolfSSL_SSLSetIORecv(ssl.as_ptr(), Some(wolf_tls_read_cb));
+            wolfssl_sys::wolfSSL_SSLSetIOSend(ssl.as_ptr(), Some(wolf_tls_write_cb));
+        }
+
         let read_buf = self.callback_read_buffer.as_mut() as *mut _ as *mut std::ffi::c_void;
         let write_buf = self.callback_write_buffer.as_mut() as *mut _ as *mut std::ffi::c_void;
         unsafe {

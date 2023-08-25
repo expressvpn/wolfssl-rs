@@ -1,5 +1,5 @@
 use crate::{
-    callback::{wolf_tls_read_cb, wolf_tls_write_cb, IOCallbacks},
+    callback::IOCallbacks,
     error::{Error, Result},
     ssl::{Session, SessionConfig},
     Protocol, RootCertificate, Secret,
@@ -242,21 +242,10 @@ impl ContextBuilder {
     }
 
     /// Finalizes a `WolfContext`.
-    pub fn build(mut self) -> Context {
-        self.register_io_callbacks();
+    pub fn build(self) -> Context {
         Context {
             protocol: self.protocol,
             ctx: Mutex::new(self.ctx),
-        }
-    }
-}
-
-impl ContextBuilder {
-    fn register_io_callbacks(&mut self) {
-        let ctx = self.ctx;
-        unsafe {
-            wolfssl_sys::wolfSSL_CTX_SetIORecv(ctx.as_ptr(), Some(wolf_tls_read_cb));
-            wolfssl_sys::wolfSSL_CTX_SetIOSend(ctx.as_ptr(), Some(wolf_tls_write_cb));
         }
     }
 }
