@@ -1,4 +1,6 @@
-use wolfssl::{ContextBuilder, Protocol, RootCertificate, Secret, Session, SessionConfig};
+#![deny(unsafe_code)] // unsafety should all be in the library.
+
+use wolfssl::{ContextBuilder, IOCallbacks, Protocol, RootCertificate, Secret, SessionConfig};
 
 use async_trait::async_trait;
 use bytes::BytesMut;
@@ -14,6 +16,57 @@ trait SockIO {
 
     fn try_recv(&self, buf: &mut [u8]) -> std::io::Result<usize>;
     fn try_send(&self, buf: &[u8]) -> std::io::Result<usize>;
+}
+
+struct SockIOCallbacks<IOCB: SockIO>(std::rc::Rc<IOCB>);
+
+// `#[derive(Clone)]` insists on `IOCB` being `Clone`, which isn't needed due to our `Rc`
+impl<IOCB: SockIO> Clone for SockIOCallbacks<IOCB> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<IOCB: SockIO> SockIOCallbacks<IOCB> {
+    async fn poll(&self, interest: tokio::io::Interest) {
+        let _ = self.0.ready(interest).await.unwrap();
+    }
+}
+
+macro_rules! retry_io {
+    { $iocb:expr, $f:expr } => {
+        loop {
+            match $f {
+                Ok(wolfssl::Poll::PendingRead) => $iocb.poll(tokio::io::Interest::READABLE).await,
+                Ok(wolfssl::Poll::PendingWrite) => $iocb.poll(tokio::io::Interest::WRITABLE).await,
+                Ok(wolfssl::Poll::Ready(ok)) => break Ok(ok),
+                Ok(wolfssl::Poll::AppData(_)) => panic!("Unexpected/Unhandled AppData"),
+                Err(err) => break Err(err),
+            };
+        }
+    }
+}
+
+impl<IOCB: SockIO> IOCallbacks for SockIOCallbacks<IOCB> {
+    fn recv(&self, buf: &mut [u8]) -> wolfssl::IOCallbackResult<usize> {
+        match self.0.try_recv(buf) {
+            Ok(nr) => wolfssl::IOCallbackResult::Ok(nr),
+            Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) => {
+                wolfssl::IOCallbackResult::WouldBlock
+            }
+            Err(err) => wolfssl::IOCallbackResult::Err(err),
+        }
+    }
+
+    fn send(&self, buf: &[u8]) -> wolfssl::IOCallbackResult<usize> {
+        match self.0.try_send(buf) {
+            Ok(nr) => wolfssl::IOCallbackResult::Ok(nr),
+            Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) => {
+                wolfssl::IOCallbackResult::WouldBlock
+            }
+            Err(err) => wolfssl::IOCallbackResult::Err(err),
+        }
+    }
 }
 
 #[async_trait]
@@ -46,57 +99,9 @@ impl SockIO for tokio::net::UnixStream {
     }
 }
 
-async fn run_io_loop<S: SockIO>(sock: &S, who: &'static str, sess: &mut Session) {
-    let wr_buf = sess.io_write_out();
-
-    let interest = if wr_buf.is_empty() {
-        println!("[{who}] Polling for READ");
-        tokio::io::Interest::READABLE
-    } else {
-        println!("[{who}] Polling for READ|WRITE");
-        tokio::io::Interest::READABLE | tokio::io::Interest::WRITABLE
-    };
-
-    let readiness = sock
-        .ready(interest)
-        .await
-        .unwrap_or_else(|_| panic!("[{who}] Poll for readiness"));
-
-    println!("[{who}] Socket is ready for {readiness:?}");
-    if readiness.is_readable() {
-        let mut rd_buf = BytesMut::zeroed(1900); // TODO: less allocating all the time...
-        match sock.try_recv(&mut rd_buf[..]) {
-            Ok(nr) => {
-                println!(
-                    "[{who}] Received {nr} bytes into {} byte buffer",
-                    rd_buf.len()
-                );
-                rd_buf.truncate(nr);
-                sess.io_read_in(rd_buf.into());
-            }
-            Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) => {
-                println!("[{who}] Receive would block!");
-                // ignored
-            }
-            Err(_err) => todo!("[{who}] recv error handling"),
-        }
-    }
-    if readiness.is_writable() {
-        // wr_buf should be non-empty per checks above...
-        match sock.try_send(&wr_buf[..]) {
-            Ok(nr) => {
-                println!("[{who}] Sent {nr} bytes from {} byte buffer", wr_buf.len());
-                assert!(nr == wr_buf.len(), "cannot handle partial write");
-            }
-            Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) => {
-                todo!("[{who}] Send would block, need to deal with content of wr_bufm not lose it");
-            }
-            Err(err) => todo!("[{who}] send error handling: {err}"),
-        }
-    }
-}
-
 async fn client<S: SockIO>(sock: S, protocol: Protocol) {
+    let sock = std::rc::Rc::new(sock);
+
     let ca_cert = RootCertificate::Asn1Buffer(CA_CERT);
 
     let ctx = ContextBuilder::new(protocol)
@@ -105,26 +110,14 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
         .expect("[Client] add root certificate")
         .build();
 
-    let session_config = SessionConfig::new().with_dtls_nonblocking(true);
+    let io = SockIOCallbacks(sock);
+    let session_config = SessionConfig::new(io.clone()).with_dtls_nonblocking(true);
     let mut session = ctx
         .new_session(session_config)
         .expect("[Client] Create Client SSL session");
 
     println!("[Client] Connecting...");
-    'negotiate: loop {
-        match session.try_negotiate().expect("[Client] try_negotiate") {
-            wolfssl::Poll::Pending => {
-                println!("[Client] Negotiation pending, polling sock");
-                run_io_loop(&sock, "Client", &mut session).await;
-                println!("[Client] Poll complete");
-            }
-            wolfssl::Poll::Ready(_) => {
-                println!("[Client] Negotiation complete!");
-                break 'negotiate;
-            }
-            wolfssl::Poll::AppData(_b) => todo!("[Client] Handle App Data"),
-        }
-    }
+    retry_io! { io, session.try_negotiate() }.expect("[Client] try_negotiate");
 
     assert!(session.is_init_finished());
 
@@ -136,37 +129,11 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
         println!("[Client] Send {ping}");
 
         let mut ping: BytesMut = ping.into();
-        let _nr = 'send: loop {
-            match session.try_write(&mut ping).expect("[Client] try_write") {
-                wolfssl::Poll::Pending => {
-                    println!("[Client] Write pending, polling sock");
-                    run_io_loop(&sock, "Client", &mut session).await;
-                    println!("[Client] Poll complete");
-                }
-                wolfssl::Poll::Ready(nr) => {
-                    println!("[Client] Write {nr} complete!");
-                    break 'send nr;
-                }
-                wolfssl::Poll::AppData(_b) => todo!("[Client] Handle App Data"),
-            }
-        };
+        let _nr = retry_io! { io, session.try_write(&mut ping) }.expect("[Client] try_write");
 
         buf.clear();
 
-        let nr = 'recv: loop {
-            match session.try_read(&mut buf).expect("[Client] try_read") {
-                wolfssl::Poll::Pending => {
-                    println!("[Client] Read pending, polling sock");
-                    run_io_loop(&sock, "Client", &mut session).await;
-                    println!("[Client] Poll complete");
-                }
-                wolfssl::Poll::Ready(nr) => {
-                    println!("[Client] Read {nr} complete!");
-                    break 'recv nr;
-                }
-                wolfssl::Poll::AppData(_b) => todo!("[Client] Handle App Data"),
-            }
-        };
+        let nr = retry_io! { io,  session.try_read(&mut buf) }.expect("[Client] try_read");
         let pong = String::from_utf8_lossy(&buf[..nr]);
         println!("[Client] Got pong: {pong}");
     }
@@ -175,6 +142,8 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
 }
 
 async fn server<S: SockIO>(sock: S, protocol: Protocol) {
+    let sock = std::rc::Rc::new(sock);
+
     let ca_cert = RootCertificate::Asn1Buffer(CA_CERT);
     let cert = Secret::Asn1Buffer(SERVER_CERT);
     let key = Secret::Asn1Buffer(SERVER_KEY);
@@ -189,26 +158,14 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
         .expect("[Server] add private key")
         .build();
 
-    let session_config = SessionConfig::new().with_dtls_nonblocking(true);
+    let io = SockIOCallbacks(sock);
+    let session_config = SessionConfig::new(io.clone()).with_dtls_nonblocking(true);
     let mut session = ctx
         .new_session(session_config)
         .expect("[Server] Create Server SSL session");
 
     println!("[Server] Connecting...");
-    'negotiate: loop {
-        match session.try_negotiate().expect("[Server] try_negotiate") {
-            wolfssl::Poll::Pending => {
-                println!("[Server] Negotiation pending, polling sock");
-                run_io_loop(&sock, "Server", &mut session).await;
-                println!("[Server] Poll complete");
-            }
-            wolfssl::Poll::Ready(_) => {
-                println!("[Server] Negotiation complete!");
-                break 'negotiate;
-            }
-            wolfssl::Poll::AppData(_b) => todo!("[Server] Handle App Data"),
-        }
-    }
+    retry_io! { io, session.try_negotiate() }.expect("[Server] try_negotiate");
 
     assert!(session.is_init_finished());
 
@@ -216,62 +173,31 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
 
     println!("[Server] Starting ping/pong loop");
 
-    'pingpong: loop {
+    loop {
         buf.clear();
-        let nr = 'recv: loop {
-            match session.try_read(&mut buf).expect("[Server] try_read") {
-                wolfssl::Poll::Pending => {
-                    println!("[Server] Read pending, polling sock");
-                    run_io_loop(&sock, "Server", &mut session).await;
-                    println!("[Server] Poll complete");
-                }
-                wolfssl::Poll::Ready(nr) => {
-                    println!("[Server] Read {nr} complete!");
-                    break 'recv nr;
-                }
-                wolfssl::Poll::AppData(_b) => todo!("[Server] Handle App Data"),
-            }
-        };
+        let nr = retry_io! { io, session.try_read(&mut buf) }.expect("[Server] try_read");
         let ping = String::from_utf8_lossy(&buf[..nr]);
         println!("[Server] Got ping: {ping}");
 
         // We don't reuse buf since we don't want to mess with truncate and reexpand.
 
         let mut pong: BytesMut = ping.as_ref().into();
-        let _nr = 'send: loop {
-            match session.try_write(&mut pong).expect("[Server] try_write") {
-                wolfssl::Poll::Pending => {
-                    println!("[Server] Write pending, polling sock");
-                    run_io_loop(&sock, "Server", &mut session).await;
-                    println!("[Server] Poll complete");
-                }
-                wolfssl::Poll::Ready(nr) => {
-                    println!("[Server] Write {nr} complete!");
-                    break 'send nr;
-                }
-                wolfssl::Poll::AppData(_b) => todo!("[Server] Handle App Data"),
-            }
-        };
+        let _nr = retry_io! { io, session.try_write(&mut pong) }.expect("[Server] try_write");
 
         if ping == "QUIT" {
-            break 'pingpong;
+            break;
         }
     }
 
     println!("[Server] Finished");
-    // After we finish `session.callback_write_buffer` contains the
-    // server's final message to the client, but nothing ever triggers
-    // consuming (i.e. actually sending) that because we've told
-    // WolfSSL we've taken it.
-    //
-    // Run a spurious I/O loop. The correct fix is to not tell WolfSSL
-    // we've sent something we haven't in our callbacks.
-    run_io_loop(&sock, "Server(EXTRA)", &mut session).await;
 }
 
 #[tokio::test]
 async fn dtls() {
     use Protocol::*;
+
+    #[cfg(feature = "debug")]
+    wolfssl::enable_debugging(true);
 
     // Communicate over a local datagram socket for simplicity
     let (client_sock, server_sock) = UnixDatagram::pair().expect("UnixDatagram");
@@ -286,6 +212,9 @@ async fn dtls() {
 #[tokio::test]
 async fn tls() {
     use Protocol::*;
+
+    #[cfg(feature = "debug")]
+    wolfssl::enable_debugging(true);
 
     // Communicate over a local stream socket for simplicity
     let (client_sock, server_sock) = UnixStream::pair().expect("UnixStream");
