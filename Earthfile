@@ -41,3 +41,9 @@ lint:
     FROM +copy-src
     RUN rustup component add clippy
     RUN cargo clippy --all-features --all-targets -- -D warnings
+
+
+check-license:
+    RUN cargo install --locked cargo-deny
+    COPY --dir src tests Cargo.toml Cargo.lock deny.toml ./
+    RUN cargo deny --all-features check bans license sources
