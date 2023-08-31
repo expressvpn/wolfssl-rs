@@ -1,0 +1,79 @@
+name: Weekly `cargo update`
+on:
+  schedule:
+    - cron:  '18 5 * * 3' # 5:18 AM UTC on Wednesdays
+  workflow_dispatch:
+  push:
+
+jobs:
+  cargo-update:
+    runs-on: ubuntu-latest
+    environment: expressvpn_iat_automation_githubiatuser_gpg_key
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Import GPG Key
+      uses: crazy-max/ghaction-import-gpg@v5
+      with:
+        gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+        passphrase: ${{ secrets.GPG_PASSPHRASE }}
+        git_user_signingkey: true
+        git_commit_gpgsign: true
+
+    - uses: Swatinem/rust-cache@v2
+    - run: rustup show
+
+    # Updates indirect and direct dependencies according to semver
+    # constraints from `*/Cargo.toml`.
+    - name: Update cargo dependencies
+      id: update
+      run: |
+        cargo update 2>&1 | tee /tmp/update.log
+
+        title="[auto] Update cargo dependencies"
+        body=$(
+            echo '```console'
+            echo '$ cargo update'
+            cat /tmp/update.log
+            echo '```'
+        )
+
+        # Outputs:
+        # ... PR title
+        echo PRTITLE="$title" >> "$GITHUB_OUTPUT"
+
+        # ... PR body
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        echo "PRBODY<<$EOF" >> "$GITHUB_OUTPUT"
+        echo "$body"        >> "$GITHUB_OUTPUT"
+        echo "$EOF"         >> "$GITHUB_OUTPUT"
+
+        # ... commit message
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        echo "COMMITMSG<<$EOF" >> "$GITHUB_OUTPUT"
+        echo "$title"          >> "$GITHUB_OUTPUT"
+        echo ""                >> "$GITHUB_OUTPUT"
+        echo "$body"           >> "$GITHUB_OUTPUT"
+        echo "$EOF"            >> "$GITHUB_OUTPUT"
+
+    - uses: peter-evans/create-pull-request@v5
+      id: pr
+      with:
+        token: ${{ secrets.SERVICE_ACCOUNT_PAT }}
+        delete-branch: true
+        committer: ExpressVPN Automation Bot <143369453+expressvpn-iat-bot@users.noreply.github.com>
+        author: ExpressVPN Automation Bot <143369453+expressvpn-iat-bot@users.noreply.github.com>
+        commit-message: ${{ steps.update.outputs.COMMITMSG }}
+        branch: gha/cargo-update
+        title: ${{ steps.update.outputs.PRTITLE }}
+        body: ${{ steps.update.outputs.PRBODY }}
+
+    - run: cargo install --locked cargo-outdated
+
+    # Checks for dependencies which can be upgraded but require a
+    # semver bump in `*/Cargo.toml`. Will fail if there are available
+    # updates.
+    - name: Check for outdated dependencies
+      run: |
+        git checkout ${{ steps.pr.outputs.pull-request-head-sha }}
+        cargo outdated --root-deps-only --exit-code 1
