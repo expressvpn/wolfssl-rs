@@ -98,12 +98,38 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
     }
 }
 
+// Wrap a valid pointer to a [`wolfssl_sys::WOLFSSL`] such that we can
+// add traits such as `Send`.
+struct WolfsslPointer(NonNull<wolfssl_sys::WOLFSSL>);
+
+impl std::ops::Deref for WolfsslPointer {
+    type Target = NonNull<wolfssl_sys::WOLFSSL>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+// SAFETY: Per [Library Design][] under "Thread Safety"
+//
+// > A client may share an WOLFSSL object across multiple threads but
+// > access must be synchronized, i.e., trying to read/write at the same
+// > time from two different threads with the same SSL pointer is not
+// > supported.
+//
+// This is consistent with the requirements for `Send`. The required
+// syncronization is handled by wrapping the type in a `Mutex` if
+// required.
+//
+// [Library Design]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html
+unsafe impl Send for WolfsslPointer {}
+
 /// Wraps a `WOLFSSL` pointer, as well as the additional fields needed to
 /// write into, and read from, wolfSSL's custom IO callbacks.
 pub struct Session<IOCB: IOCallbacks> {
     protocol: Protocol,
 
-    ssl: Mutex<NonNull<wolfssl_sys::WOLFSSL>>,
+    ssl: Mutex<WolfsslPointer>,
 
     /// Box so we have a stable address to pass to FFI.
     io: Box<IOCB>,
@@ -118,7 +144,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
 
         let mut session = Self {
             protocol: ctx.protocol(),
-            ssl: Mutex::new(NonNull::new(ptr)?),
+            ssl: Mutex::new(WolfsslPointer(NonNull::new(ptr)?)),
             io: Box::new(config.io),
         };
 

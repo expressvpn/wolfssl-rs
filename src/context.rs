@@ -245,21 +245,57 @@ impl ContextBuilder {
     pub fn build(self) -> Context {
         Context {
             protocol: self.protocol,
-            ctx: Mutex::new(self.ctx),
+            ctx: Mutex::new(ContextPointer(self.ctx)),
         }
     }
 }
 
+// Wrap a valid pointer to a [`wolfssl_sys::WOLFSSL_CONTEXT`] such that we can
+// add traits such as `Send`.
+pub(crate) struct ContextPointer(NonNull<wolfssl_sys::WOLFSSL_CTX>);
+
+impl std::ops::Deref for ContextPointer {
+    type Target = NonNull<wolfssl_sys::WOLFSSL_CTX>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+// SAFETY: Per [Library Design][] under "Thread Safety"
+//
+// > Besides sharing WOLFSSL pointers, users must also take care to
+// > completely initialize an WOLFSSL_CTX before passing the structure to
+// > wolfSSL_new(). The same WOLFSSL_CTX can create multiple WOLFSSL
+// > structs but the WOLFSSL_CTX is only read during wolfSSL_new()
+// > creation and any future (or simultaneous changes) to the WOLFSSL_CTX
+// > will not be reflected once the WOLFSSL object is created.
+//
+// > Again, multiple threads should synchronize writing access to a
+// > WOLFSSL_CTX and it is advised that a single thread initialize the
+// > WOLFSSL_CTX to avoid the synchronization and update problem
+// > described above.
+//
+// This is consistent with the requirements for `Send`.
+//
+// The required syncronization when setting up the context is handled
+// by the fact that [`ContextBuilder`] is not `Send`. In addition
+// neither [`WolfSslContext`] nor [`Context`] have any methods which
+// offer writeable access.
+//
+// [Library Design]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html
+unsafe impl Send for ContextPointer {}
+
 /// A wrapper around a `WOLFSSL_CTX`.
 pub struct Context {
     protocol: Protocol,
-    ctx: Mutex<NonNull<wolfssl_sys::WOLFSSL_CTX>>,
+    ctx: Mutex<ContextPointer>,
 }
 
 impl Context {
     /// Gets the underlying [`wolfssl_sys::WOLFSSL_CTX`] pointer that this is
     /// managing.
-    pub fn ctx(&self) -> MutexGuard<NonNull<wolfssl_sys::WOLFSSL_CTX>> {
+    pub(crate) fn ctx(&self) -> MutexGuard<ContextPointer> {
         self.ctx.lock()
     }
 
