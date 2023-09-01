@@ -1,4 +1,5 @@
 /// Result type to be returned by methods on [`IOCallbacks`]
+#[derive(Debug)]
 pub enum IOCallbackResult<T> {
     /// Success
     Ok(T),
