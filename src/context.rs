@@ -4,7 +4,6 @@ use crate::{
     ssl::{Session, SessionConfig},
     Protocol, RootCertificate, Secret,
 };
-use parking_lot::{Mutex, MutexGuard};
 use std::ptr::NonNull;
 
 /// Produces a [`Context`] once built.
@@ -245,7 +244,7 @@ impl ContextBuilder {
     pub fn build(self) -> Context {
         Context {
             protocol: self.protocol,
-            ctx: Mutex::new(ContextPointer(self.ctx)),
+            ctx: ContextPointer(self.ctx),
         }
     }
 }
@@ -289,14 +288,19 @@ unsafe impl Send for ContextPointer {}
 /// A wrapper around a `WOLFSSL_CTX`.
 pub struct Context {
     protocol: Protocol,
-    ctx: Mutex<ContextPointer>,
+    ctx: ContextPointer,
 }
 
 impl Context {
     /// Gets the underlying [`wolfssl_sys::WOLFSSL_CTX`] pointer that this is
     /// managing.
-    pub(crate) fn ctx(&self) -> MutexGuard<ContextPointer> {
-        self.ctx.lock()
+    ///
+    /// # Safety:
+    ///
+    /// You must only use the resulting pointer for read operations
+    /// (e.g. `wolfSSL_new`).
+    pub(crate) unsafe fn ctx(&self) -> &ContextPointer {
+        &self.ctx
     }
 
     /// Returns the Context's [`Protocol`].
@@ -318,7 +322,7 @@ impl Drop for Context {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_free
     fn drop(&mut self) {
-        unsafe { wolfssl_sys::wolfSSL_CTX_free(self.ctx.lock().as_ptr()) }
+        unsafe { wolfssl_sys::wolfSSL_CTX_free(self.ctx.as_ptr()) }
     }
 }
 
