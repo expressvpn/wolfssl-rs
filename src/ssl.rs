@@ -98,12 +98,38 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
     }
 }
 
+// Wrap a valid pointer to a [`wolfssl_sys::WOLFSSL`] such that we can
+// add traits such as `Send`.
+struct WolfsslPointer(NonNull<wolfssl_sys::WOLFSSL>);
+
+impl std::ops::Deref for WolfsslPointer {
+    type Target = NonNull<wolfssl_sys::WOLFSSL>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+// SAFETY: Per [Library Design][] under "Thread Safety"
+//
+// > A client may share an WOLFSSL object across multiple threads but
+// > access must be synchronized, i.e., trying to read/write at the same
+// > time from two different threads with the same SSL pointer is not
+// > supported.
+//
+// This is consistent with the requirements for `Send`. The required
+// syncronization is handled by wrapping the type in a `Mutex` if
+// required.
+//
+// [Library Design]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html
+unsafe impl Send for WolfsslPointer {}
+
 /// Wraps a `WOLFSSL` pointer, as well as the additional fields needed to
 /// write into, and read from, wolfSSL's custom IO callbacks.
 pub struct Session<IOCB: IOCallbacks> {
     protocol: Protocol,
 
-    ssl: Mutex<NonNull<wolfssl_sys::WOLFSSL>>,
+    ssl: Mutex<WolfsslPointer>,
 
     /// Box so we have a stable address to pass to FFI.
     io: Box<IOCB>,
@@ -118,7 +144,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
 
         let mut session = Self {
             protocol: ctx.protocol(),
-            ssl: Mutex::new(NonNull::new(ptr)?),
+            ssl: Mutex::new(WolfsslPointer(NonNull::new(ptr)?)),
             io: Box::new(config.io),
         };
 
@@ -184,7 +210,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// This method will trigger WolfSSL's IO callbacks
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_negotiate
-    pub fn try_negotiate(&mut self) -> PollResult<()> {
+    pub fn try_negotiate(&self) -> PollResult<()> {
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_negotiate(ssl.as_ptr())
@@ -221,7 +247,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// `Poll::Ready(false)` can be ignored.
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_shutdown
-    pub fn try_shutdown(&mut self) -> PollResult<bool> {
+    pub fn try_shutdown(&self) -> PollResult<bool> {
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_shutdown(ssl.as_ptr())
@@ -259,7 +285,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     // opportunity to update its internal state (for example, if it needs to
     // update encryption keys). This can be seen in
     // [`Self::trigger_update_keys`].
-    pub fn try_write(&mut self, data_in: &mut BytesMut) -> PollResult<usize> {
+    pub fn try_write(&self, data_in: &mut BytesMut) -> PollResult<usize> {
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_write(
@@ -298,7 +324,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     //
     // Like [`Self::try_write`], we call through to `wolfSSL_read` even if there
     // is no space to allow WolfSSL's internal state to advance.
-    pub fn try_read(&mut self, data_out: &mut BytesMut) -> PollResult<usize> {
+    pub fn try_read(&self, data_out: &mut BytesMut) -> PollResult<usize> {
         let buf = data_out.spare_capacity_mut();
 
         match unsafe {
@@ -368,7 +394,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// Is a no-op unless the session supports secure renegotiation.
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html?query=wolfssl_rehandshake#function-wolfssl_rehandshake
-    pub fn try_rehandshake(&mut self) -> PollResult<()> {
+    pub fn try_rehandshake(&self) -> PollResult<()> {
         if !self.is_secure_renegotiation_supported() {
             return Ok(Poll::Ready(()));
         }
@@ -395,7 +421,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// Invokes [`wolfSSL_update_keys`][0] *once*
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_update_keys
-    pub fn try_trigger_update_key(&mut self) -> PollResult<()> {
+    pub fn try_trigger_update_key(&self) -> PollResult<()> {
         if !self.protocol.is_tls_13() {
             return Ok(Poll::Ready(()));
         }
@@ -664,7 +690,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     // It's implied that the data has already arrived and `wolfSSL_read` will
     // not return a `WANT_READ` or similar error code, so if we see them we will
     // convert it to an error.
-    fn handle_app_data(&mut self) -> Result<Bytes> {
+    fn handle_app_data(&self) -> Result<Bytes> {
         debug_assert!(self.is_secure_renegotiation_supported());
 
         let mut buf = BytesMut::with_capacity(TLS_MAX_RECORD_SIZE);
@@ -687,7 +713,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// Invokes [`wolfSSL_set_using_nonblock`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_set_using_nonblock
-    fn dtls_set_nonblock_use(&mut self, is_nonblock: bool) {
+    fn dtls_set_nonblock_use(&self, is_nonblock: bool) {
         if !self.is_dtls() {
             log::debug!("Session is not configured for DTLS");
             return;
@@ -705,7 +731,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// what values `mtu` can be.
     ///
     /// I can't find online documentation for `wolfSSL_dtls_set_mtu`.
-    fn dtls_set_mtu(&mut self, mtu: c_ushort) {
+    fn dtls_set_mtu(&self, mtu: c_ushort) {
         if !self.is_dtls() {
             log::debug!("Session is not configured for DTLS");
             return;
@@ -749,7 +775,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// Invokes [`wolfSSL_UseSNI`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_usesni
-    fn set_server_name_indication(&mut self, sni: &String) -> Result<()> {
+    fn set_server_name_indication(&self, sni: &String) -> Result<()> {
         let bytes = sni.as_bytes();
         match unsafe {
             let ssl = self.ssl.lock();
@@ -766,7 +792,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         }
     }
 
-    fn set_domain_name_to_check(&mut self, domain_name: &str) -> Result<()> {
+    fn set_domain_name_to_check(&self, domain_name: &str) -> Result<()> {
         let domain_name = std::ffi::CString::new(domain_name.to_string())
             .expect("Input string '{domain_name:?}' contains an interior NULL");
 
@@ -924,14 +950,14 @@ mod tests {
             .new_session(SessionConfig::new(server_io))
             .unwrap();
 
-        let mut client = TestClient {
+        let client = TestClient {
             _ctx: client_ctx,
             ssl: client_ssl,
             read_buffer: client_read_buffer,
             write_buffer: client_write_buffer,
         };
 
-        let mut server = TestClient {
+        let server = TestClient {
             _ctx: server_ctx,
             ssl: server_ssl,
             read_buffer: server_read_buffer,
@@ -964,7 +990,7 @@ mod tests {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
         const TEXT: &str = "Hello World";
 
-        let (mut client, _server) = make_connected_clients();
+        let (client, _server) = make_connected_clients();
 
         let mut bytes = BytesMut::from(TEXT.as_bytes());
 
@@ -1006,7 +1032,7 @@ mod tests {
 
         let text = "A".repeat(len);
 
-        let (mut client, mut server) = make_connected_clients();
+        let (client, server) = make_connected_clients();
 
         let mut client_bytes = BytesMut::from(text.as_bytes());
 
@@ -1035,7 +1061,7 @@ mod tests {
     fn try_rehandshake() {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let (mut client, mut server) = make_connected_clients_with_protocol(
+        let (client, server) = make_connected_clients_with_protocol(
             Protocol::DtlsClientV1_2,
             Protocol::DtlsServerV1_2,
         );
@@ -1096,7 +1122,7 @@ mod tests {
     fn try_trigger_update_keys() {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let (mut client, mut server) =
+        let (client, server) =
             make_connected_clients_with_protocol(Protocol::TlsClientV1_3, Protocol::TlsServerV1_3);
 
         assert!(client.ssl.protocol.is_tls_13());
@@ -1183,7 +1209,7 @@ mod tests {
     fn dtls_timeout(should_timeout: bool) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let (mut client, mut _server) = make_connected_clients_with_protocol(
+        let (client, _server) = make_connected_clients_with_protocol(
             Protocol::DtlsClientV1_2,
             Protocol::DtlsServerV1_2,
         );
@@ -1242,7 +1268,7 @@ mod tests {
             .unwrap()
             .build();
 
-        let mut ssl = client_ctx
+        let ssl = client_ctx
             .new_session(SessionConfig::new(NoIOCallbacks))
             .unwrap();
 

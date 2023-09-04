@@ -112,7 +112,7 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol) {
 
     let io = SockIOCallbacks(sock);
     let session_config = SessionConfig::new(io.clone()).with_dtls_nonblocking(true);
-    let mut session = ctx
+    let session = ctx
         .new_session(session_config)
         .expect("[Client] Create Client SSL session");
 
@@ -160,7 +160,7 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
 
     let io = SockIOCallbacks(sock);
     let session_config = SessionConfig::new(io.clone()).with_dtls_nonblocking(true);
-    let mut session = ctx
+    let session = ctx
         .new_session(session_config)
         .expect("[Server] Create Server SSL session");
 
