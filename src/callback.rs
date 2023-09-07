@@ -12,8 +12,8 @@ pub enum IOCallbackResult<T> {
 
 /// The application provided IO callbacks documented at
 /// [`EmbedRecieve`][0] (whose inputs and outputs we need to
-/// emulate). See also [`wolfSSL_CTX_SetIORecv`][0] which is the best
-/// docs for `wolfSSL_CTX_SetIORecv` and `wolfSSL_CTX_SetIOSend`,
+/// emulate). See also [`wolfSSL_CTX_SetIORecv`][1] which is the best
+/// docs for `wolfSSL_SSLSetIORecv` and `wolfSSL_SSLSetIOSend`,
 /// which are what we actually use.
 ///
 /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-embedreceive
