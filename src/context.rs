@@ -279,7 +279,7 @@ impl std::ops::Deref for ContextPointer {
 //
 // The required syncronization when setting up the context is handled
 // by the fact that [`ContextBuilder`] is not `Send`. In addition
-// neither [`WolfSslContext`] nor [`Context`] have any methods which
+// neither [`ContextPointer`] nor [`Context`] have any methods which
 // offer writeable access.
 //
 // [Library Design]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html
