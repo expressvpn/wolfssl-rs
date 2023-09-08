@@ -1,6 +1,7 @@
 //! The `wolfssl` crate is designed to be a Rust layer built on top of
 //! the `wolfssl-sys` crate (a C passthrough crate).
 
+#![warn(clippy::undocumented_unsafe_blocks)]
 #![warn(missing_docs)]
 
 mod callback;
@@ -37,6 +38,7 @@ const TLS_MAX_RECORD_SIZE: usize = 2usize.pow(14) + 1;
 ///
 /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_init
 pub fn wolf_init() -> Result<()> {
+    #[allow(clippy::undocumented_unsafe_blocks)]
     match unsafe { wolfssl_sys::wolfSSL_Init() } {
         wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
         e => Err(Error::fatal(e)),
@@ -47,6 +49,7 @@ pub fn wolf_init() -> Result<()> {
 ///
 /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_cleanup
 pub fn wolf_cleanup() -> Result<()> {
+    #[allow(clippy::undocumented_unsafe_blocks)]
     match unsafe { wolfssl_sys::wolfSSL_Cleanup() } {
         wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
         e => Err(Error::fatal(e)),
@@ -60,6 +63,7 @@ pub fn wolf_cleanup() -> Result<()> {
 #[cfg(feature = "debug")]
 pub fn enable_debugging(on: bool) {
     if on {
+        #[allow(clippy::undocumented_unsafe_blocks)]
         match unsafe { wolfssl_sys::wolfSSL_Debugging_ON() } {
             0 => {}
             // This wrapper function is only enabled if we built wolfssl-sys with debugging on.
@@ -69,7 +73,10 @@ pub fn enable_debugging(on: bool) {
             e => unreachable!("{e:?}"),
         }
     } else {
-        unsafe { wolfssl_sys::wolfSSL_Debugging_OFF() }
+        #[allow(clippy::undocumented_unsafe_blocks)]
+        unsafe {
+            wolfssl_sys::wolfSSL_Debugging_OFF()
+        }
     }
 }
 
@@ -102,6 +109,7 @@ impl Protocol {
     /// Converts a [`Self`] into a [`wolfssl_sys::WOLFSSL_METHOD`]
     /// compatible with [`wolfssl_sys::wolfSSL_CTX_new`]
     pub fn into_method_ptr(self) -> Option<NonNull<wolfssl_sys::WOLFSSL_METHOD>> {
+        #[allow(clippy::undocumented_unsafe_blocks)]
         let ptr = match self {
             Self::DtlsClient => unsafe { wolfssl_sys::wolfDTLS_client_method() },
             Self::DtlsClientV1_2 => unsafe { wolfssl_sys::wolfDTLSv1_2_client_method() },

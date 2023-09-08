@@ -1,3 +1,5 @@
+#![allow(clippy::undocumented_unsafe_blocks)]
+
 use crate::{
     callback::{IOCallbackResult, IOCallbacks},
     context::Context,

@@ -1,3 +1,4 @@
+#![allow(clippy::undocumented_unsafe_blocks)]
 use std::ffi::c_int;
 
 use bytes::Bytes;

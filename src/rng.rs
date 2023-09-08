@@ -1,3 +1,4 @@
+#![allow(clippy::undocumented_unsafe_blocks)]
 use crate::error::{Error, Result};
 
 /// Provides a way to extract random values from WolfSSL.
