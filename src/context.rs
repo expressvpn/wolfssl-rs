@@ -279,11 +279,18 @@ impl std::ops::Deref for ContextPointer {
 //
 // The required syncronization when setting up the context is handled
 // by the fact that [`ContextBuilder`] is not `Send`. In addition
-// neither [`WolfSslContext`] nor [`Context`] have any methods which
+// neither [`ContextPointer`] nor [`Context`] have any methods which
 // offer writeable access.
 //
 // [Library Design]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html
 unsafe impl Send for ContextPointer {}
+
+// SAFETY: Per documentation quoted for `Send` above: once built the
+// underlying `WOLFSSL_CONTEXT` is considered read-only. Our
+// `ContextBuilder` enforces that the `Context` is completely built
+// before a `Context` can be obtained and there are no mutable APIs on
+// `Context` object once it is built.
+unsafe impl Sync for ContextPointer {}
 
 /// A wrapper around a `WOLFSSL_CTX`.
 pub struct Context {
