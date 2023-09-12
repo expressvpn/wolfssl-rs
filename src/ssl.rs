@@ -941,7 +941,7 @@ mod tests {
         server_protocol: Protocol,
     ) -> (TestClient, TestClient) {
         let client_ctx = ContextBuilder::new(client_protocol)
-            .unwrap_or_else(|| panic!("new({client_protocol:?})"))
+            .unwrap_or_else(|e| panic!("new({client_protocol:?}): {e}"))
             .with_root_certificate(RootCertificate::Asn1Buffer(CA_CERT))
             .unwrap()
             .with_secure_renegotiation()
@@ -949,7 +949,7 @@ mod tests {
             .build();
 
         let server_ctx = ContextBuilder::new(server_protocol)
-            .unwrap_or_else(|| panic!("new({server_protocol:?})"))
+            .unwrap_or_else(|e| panic!("new({server_protocol:?}): {e}"))
             .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
             .unwrap()
             .with_private_key(Secret::Asn1Buffer(SERVER_KEY))

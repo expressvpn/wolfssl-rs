@@ -5,6 +5,7 @@ use crate::{
     NewSessionError, Protocol, RootCertificate, Secret,
 };
 use std::ptr::NonNull;
+use thiserror::Error;
 
 /// Produces a [`Context`] once built.
 #[derive(Debug)]
@@ -13,17 +14,31 @@ pub struct ContextBuilder {
     protocol: Protocol,
 }
 
+/// Error creating a [`ContextBuilder`] object.
+#[derive(Error, Debug)]
+pub enum NewContextBuilderError {
+    /// Failed to turn `Protocol` into a `wolfssl_sys::WOLFSSL_METHOD`
+    #[error("Failed to obtain WOLFSSL_METHOD")]
+    MethodFailed,
+
+    /// `wolfSSL_CTX_new` failed
+    #[error("Failed to allocate WolfSSL Context")]
+    CreateFailed,
+}
+
 impl ContextBuilder {
     /// Invokes [`wolfSSL_CTX_new`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_new
-    pub fn new(protocol: Protocol) -> Option<Self> {
-        let method_fn = protocol.into_method_ptr()?;
+    pub fn new(protocol: Protocol) -> std::result::Result<Self, NewContextBuilderError> {
+        let method_fn = protocol
+            .into_method_ptr()
+            .ok_or(NewContextBuilderError::MethodFailed)?;
 
         let ctx = unsafe { wolfssl_sys::wolfSSL_CTX_new(method_fn.as_ptr()) };
-        let ctx = NonNull::new(ctx)?;
+        let ctx = NonNull::new(ctx).ok_or(NewContextBuilderError::CreateFailed)?;
 
-        Some(Self { ctx, protocol })
+        Ok(Self { ctx, protocol })
     }
 
     /// Wraps [`wolfSSL_CTX_load_verify_buffer`][0] and [`wolfSSL_CTX_load_verify_locations`][1]
