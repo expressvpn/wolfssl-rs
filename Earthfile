@@ -42,6 +42,10 @@ lint:
     RUN rustup component add clippy
     RUN cargo clippy --all-features --all-targets -- -D warnings
 
+fmt:
+    FROM +copy-src
+    RUN rustup component add rustfmt
+    RUN cargo fmt --check
 
 check-license:
     RUN cargo install --locked cargo-deny
