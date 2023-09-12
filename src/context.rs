@@ -2,7 +2,7 @@ use crate::{
     callback::IOCallbacks,
     error::{Error, Result},
     ssl::{Session, SessionConfig},
-    Protocol, RootCertificate, Secret,
+    NewSessionError, Protocol, RootCertificate, Secret,
 };
 use std::ptr::NonNull;
 
@@ -319,7 +319,7 @@ impl Context {
     pub fn new_session<IOCB: IOCallbacks>(
         &self,
         config: SessionConfig<IOCB>,
-    ) -> Option<Session<IOCB>> {
+    ) -> std::result::Result<Session<IOCB>, NewSessionError> {
         Session::new_from_context(self, config)
     }
 }
