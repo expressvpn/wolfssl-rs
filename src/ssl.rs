@@ -7,6 +7,7 @@ use crate::{
 
 use bytes::{Buf, Bytes, BytesMut};
 use parking_lot::Mutex;
+use thiserror::Error;
 
 use std::{
     ffi::{c_int, c_uchar, c_ushort, c_void},
@@ -135,16 +136,33 @@ pub struct Session<IOCB: IOCallbacks> {
     io: Box<IOCB>,
 }
 
+/// Error creating a [`Session`] object.
+#[derive(Error, Debug)]
+pub enum NewSessionError {
+    /// `wolfSSL_new` failed
+    #[error("Failed to allocate WolfSSL Session")]
+    CreateFailed,
+
+    /// A setup operation on the WolfSSL Session
+    #[error("Failed to setup SSL session context: {0}: {1}")]
+    SetupFailed(&'static str, Error),
+}
+
 impl<IOCB: IOCallbacks> Session<IOCB> {
     /// Invokes [`wolfSSL_new`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
-    pub fn new_from_context(ctx: &Context, config: SessionConfig<IOCB>) -> Option<Self> {
+    pub fn new_from_context(
+        ctx: &Context,
+        config: SessionConfig<IOCB>,
+    ) -> std::result::Result<Self, NewSessionError> {
         let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.ctx().as_ptr()) };
 
         let mut session = Self {
             protocol: ctx.protocol(),
-            ssl: Mutex::new(WolfsslPointer(NonNull::new(ptr)?)),
+            ssl: Mutex::new(WolfsslPointer(
+                NonNull::new(ptr).ok_or(NewSessionError::CreateFailed)?,
+            )),
             io: Box::new(config.io),
         };
 
@@ -159,14 +177,18 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         }
 
         if let Some(sni) = config.server_name_indicator {
-            session.set_server_name_indication(&sni).ok()?;
+            session
+                .set_server_name_indication(&sni)
+                .map_err(|e| NewSessionError::SetupFailed("set_server_name_indication", e))?;
         }
 
         if let Some(name) = config.checked_domain_name {
-            session.set_domain_name_to_check(&name).ok()?;
+            session
+                .set_domain_name_to_check(&name)
+                .map_err(|e| NewSessionError::SetupFailed("set_domain_name_to_check", e))?;
         }
 
-        Some(session)
+        Ok(session)
     }
 
     /// Gets the current cipher of the session.
@@ -919,7 +941,7 @@ mod tests {
         server_protocol: Protocol,
     ) -> (TestClient, TestClient) {
         let client_ctx = ContextBuilder::new(client_protocol)
-            .unwrap_or_else(|| panic!("new({client_protocol:?})"))
+            .unwrap_or_else(|e| panic!("new({client_protocol:?}): {e}"))
             .with_root_certificate(RootCertificate::Asn1Buffer(CA_CERT))
             .unwrap()
             .with_secure_renegotiation()
@@ -927,7 +949,7 @@ mod tests {
             .build();
 
         let server_ctx = ContextBuilder::new(server_protocol)
-            .unwrap_or_else(|| panic!("new({server_protocol:?})"))
+            .unwrap_or_else(|e| panic!("new({server_protocol:?}): {e}"))
             .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
             .unwrap()
             .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
