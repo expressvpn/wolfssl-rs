@@ -6,50 +6,18 @@ on:
 
 jobs:
   ci:
-    needs: [test, build, fmt, lint, cargo-deny]
     runs-on: ubuntu-latest
-    steps:
-      - shell: bash
-        run: |
-          echo "Build success"
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: earthly/actions-setup@v1
-        with:
-          version: v0.7.15
-      - uses: actions/checkout@v3
-      - name: Run Tests
-        run: earthly --ci +run-tests
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: earthly/actions-setup@v1
-        with:
-          version: v0.7.15
-      - uses: actions/checkout@v3
-      - name: Build crate
-        run: earthly --ci +build-release
-  fmt:
-    runs-on: ubuntu-latest
+    environment: earthly_visit_temp
     env:
+      EARTHLY_TOKEN: "${{ secrets.EARTHLY_TOKEN }}"
       FORCE_COLOR: 1
     steps:
       - uses: earthly/actions-setup@v1
         with:
-          version: v0.7.15
+          version: v0.7.17
       - uses: actions/checkout@v3
-      - name: Check code formatting
-        run: earthly --ci +fmt
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: earthly/actions-setup@v1
-        with:
-          version: v0.7.15
-      - uses: actions/checkout@v3
-      - name: Lint crate
-        run: earthly --ci +lint
+      - name: Run +ci on earthly satellites
+        run: earthly --org expressvpn --satellite wolfssl --ci +ci
   cargo-deny:
     runs-on: ubuntu-latest
     steps:
