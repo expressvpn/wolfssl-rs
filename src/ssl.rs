@@ -1,5 +1,3 @@
-#![allow(clippy::undocumented_unsafe_blocks)]
-
 use crate::{
     callback::{IOCallbackResult, IOCallbacks},
     context::Context,
@@ -158,6 +156,10 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         ctx: &Context,
         config: SessionConfig<IOCB>,
     ) -> std::result::Result<Self, NewSessionError> {
+        // SAFETY: [`wolfSSL_new`][0] ([also][1]) needs a valid `wolfssl_sys::WOLFSSL_CTX` pointer as per documentation
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
+        // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#gaa37dc22775da8f6a3b5c149d5dfd6e1c
         let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.ctx().as_ptr()) };
 
         let mut session = Self {
@@ -196,8 +198,19 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// Gets the current cipher of the session.
     /// If the cipher name is "None", return None.
     pub fn get_current_cipher_name(&self) -> Option<String> {
+        // SAFETY: [`wolfSSL_get_current_cipher`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        // Return value is the pointer inside the ssl session. Caller can read it safely
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_get_current_cipher
+        // [1]: https://www.wolfssl.com/doxygen/group__IO.html#ga0a2985d2088f0b331a4949860fda400d
         let cipher = unsafe { wolfssl_sys::wolfSSL_get_current_cipher(self.ssl.lock().as_ptr()) };
         let cipher = if !cipher.is_null() {
+            // SAFETY: Documentation for [`wolfSSL_CIPHER_get_name`][0] ([also][1]) is not clear about the memory usage
+            // From implementation, return value is the pointer to static buffer. Caller can read it safely
+            //
+            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_cipher_get_name
+            // [1]: https://www.wolfssl.com/doxygen/group__IO.html#ga1d77df578e8cebd9d75d2211b927d868
             let name = unsafe {
                 let name = wolfssl_sys::wolfSSL_CIPHER_get_name(cipher);
                 std::ffi::CStr::from_ptr(name).to_str().ok()?.to_string()
@@ -219,6 +232,13 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_is_init_finished
     pub fn is_init_finished(&self) -> bool {
+        // SAFETY: [`wolfSSL_is_init_finished`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        // Documentation for return values seems incorrect though, having same text for both success and error case.
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_is_init_finished
+        // [1]: https://www.wolfssl.com/doxygen/group__TLS.html#gaa0bd0ae911e350d1e64b0cc9d3c8292b
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe { wolfssl_sys::wolfSSL_is_init_finished(self.ssl.lock().as_ptr()) } {
             0 => false,
             1 => true,
@@ -235,6 +255,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_negotiate
     pub fn try_negotiate(&self) -> PollResult<()> {
+        // SAFETY: [`wolfSSL_negotiate`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_negotiate
+        // [1]: https://www.wolfssl.com/doxygen/group__IO.html#gaf6780235ee9a7abe3f704a585eb77849
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_negotiate(ssl.as_ptr())
@@ -272,6 +298,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_shutdown
     pub fn try_shutdown(&self) -> PollResult<bool> {
+        // SAFETY: [`wolfSSL_shutdown`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_shutdown
+        // [1]: https://www.wolfssl.com/doxygen/group__TLS.html#ga51f54ec99e4d87f4b25a92fe031439ae
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_shutdown(ssl.as_ptr())
@@ -310,6 +342,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     // update encryption keys). This can be seen in
     // [`Self::trigger_update_keys`].
     pub fn try_write(&self, data_in: &mut BytesMut) -> PollResult<usize> {
+        // SAFETY: [`wolfSSL_write`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_write
+        // [1]: https://www.wolfssl.com/doxygen/group__IO.html#gad6cbb3cb90e4d606e9507e4ec06197df
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_write(
@@ -351,6 +389,13 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     pub fn try_read(&self, data_out: &mut BytesMut) -> PollResult<usize> {
         let buf = data_out.spare_capacity_mut();
 
+        // SAFETY: [`wolfSSL_read`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        // The input `buf` is a valid mutable buffer, with proper length.
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_read
+        // [1]: https://www.wolfssl.com/doxygen/group__IO.html#ga80c3ccd3c0441c77307df3afe88a5c35
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_read(
@@ -360,8 +405,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             )
         } {
             x if x > 0 => {
-                // Now that we've initialized this memory segment, update the
-                // length to account for the initialized bits
+                // SAFETY: Now that we've initialized this memory segment, it is safe to update the
+                // length to account for the initialized data
                 unsafe {
                     data_out.set_len(data_out.len() + x as usize);
                 }
@@ -387,6 +432,9 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// Only some D/TLS connections support secure renegotiation, so this method
     /// checks if it's something we can do here.
     pub fn is_secure_renegotiation_supported(&self) -> bool {
+        // SAFETY: No documentation available for `wolfSSL_SSL_get_secure_renegotiation_support`
+        // But based on the implementation, it is safe to call the api as long as the `ssl` pointer points
+        // to valid `WOLFSSL` struct
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_SSL_get_secure_renegotiation_support(ssl.as_ptr())
@@ -400,9 +448,11 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// Checks if there is an ongoing secure renegotiation triggered by
     /// [`Self::try_rehandshake`].
     //
-    // NOTE (pangt): I can't find online documentation on
-    // `wolfSSL_SSL_renegotiate_pending`, so no links to it.
+    // NOTE: No documentation found for `wolfSSL_SSL_renegotiate_pending`
     pub fn is_secure_renegotiation_pending(&self) -> bool {
+        // SAFETY: No documentation available for `wolfSSL_SSL_renegotiate_pending`
+        // But based on the implementation, it is safe to call the api as long as the `ssl` pointer points
+        // to valid `WOLFSSL` struct
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_SSL_renegotiate_pending(ssl.as_ptr())
@@ -423,6 +473,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             return Ok(Poll::Ready(()));
         }
 
+        // SAFETY: [`wolfSSL_Rehandshake`][0] ([also][1]) expects valid pointer to `WOLFSSL` and since the `WOLFSSL` struct
+        // can be used in multiple threads based on [`Library design`][2], protected by a mutex lock
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_rehandshake
+        // [1]: https://www.wolfssl.com/doxygen/group__IO.html#ga7ba02472014a68d0717ca9243d9dd646
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_Rehandshake(ssl.as_ptr())
@@ -450,6 +506,17 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             return Ok(Poll::Ready(()));
         }
 
+        if !self.is_init_finished() {
+            return Ok(Poll::Ready(()));
+        }
+
+        // SAFETY: [`wolfSSL_update_keys`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        // Other requirements including the protocol version and handshake completed which is checked above
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_update_keys
+        // [1]: https://www.wolfssl.com/doxygen/group__IO.html#ga38ef7eb0a15b65f3b68d2490dd0535a0
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_update_keys(ssl.as_ptr())
@@ -472,12 +539,20 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_key_update_response
     pub fn is_update_keys_pending(&self) -> bool {
+        // TODO: Check whether we need to enable for DTLS1.3
         if !self.protocol.is_tls_13() {
             return false;
         }
 
         let mut required = std::mem::MaybeUninit::<c_int>::uninit();
 
+        // SAFETY: [`wolfSSL_key_update_response`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        // Other requirements including the protocol version TLS 1.3 is checked above
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_key_update_response
+        // [1]: https://www.wolfssl.com/doxygen/group__IO.html#ga2f38357d4d7fba294745516caa8f4180
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_key_update_response(ssl.as_ptr(), required.as_mut_ptr())
@@ -488,6 +563,10 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             e => unreachable!("{e:?}"),
         }
 
+        // SAFETY: Based on `wolfSSL_key_update_response`][0], required will be populated if the api returns success.
+        // So safety to call `assume_init()` on success case. On error case we paniced above!
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_key_update_response
         match unsafe { required.assume_init() } {
             1 => true,
             0 => false,
@@ -508,6 +587,13 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             log::debug!("Session is not configured for DTLS");
         }
 
+        // SAFETY: [`wolfSSL_dtls_get_current_timeout`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        // Other requirements including the protocol version DTLS is checked above
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls_get_current_timeout
+        // [1]: https://www.wolfssl.com/doxygen/ssl_8h.html#a07da5ada53a2a68ee8e7a6dab9b5f429
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_dtls_get_current_timeout(ssl.as_ptr())
@@ -538,6 +624,13 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             log::debug!("Session is not configured for DTLS");
         }
 
+        // SAFETY: [`wolfSSL_dtls_set_timeout_init`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        // Other requirements including the protocol version DTLS is checked above
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_dtls_set_timeout_init
+        // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#ga1dd3c408c996a80b9abfae8f74645d21
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_dtls_set_timeout_init(ssl.as_ptr(), time.as_secs() as c_int)
@@ -565,6 +658,13 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             log::debug!("Session is not configured for DTLS");
         }
 
+        // SAFETY: [`wolfSSL_dtls_set_timeout_max`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        // Other requirements including the protocol version DTLS is checked above
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls_set_timeout_max
+        // [1]: https://www.wolfssl.com/doxygen/ssl_8h.html#a10d57d8c34afabdf6242b9cb164485be
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_dtls_set_timeout_max(ssl.as_ptr(), time.as_secs() as c_int)
@@ -583,6 +683,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             log::debug!("Session is not configured for DTLS");
         }
 
+        // SAFETY: [`wolfSSL_dtls_got_timeout`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls_got_timeout
+        // [1]: https://www.wolfssl.com/doxygen/ssl_8h.html#a86c630a78e966b768332c5b19e485a51
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_dtls_got_timeout(ssl.as_ptr())
@@ -637,7 +743,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         debug_assert!(!buf.is_null());
         debug_assert!(!ctx.is_null());
 
-        // We know that this pointer is to the contents of a `Box`
+        // SAFETY: We know that this pointer is to the contents of a `Box`
         // owned by the `Session`. See `register_io_context` below for
         // an argument as to why IO will be stopped (by releasing
         // `WOLFSSL`) before that box is dropped.
@@ -700,6 +806,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Debug.html#function_wolfssl_get_error
     fn get_error(&self, ret: c_int) -> c_int {
         let ssl = self.ssl.lock();
+        // SAFETY: [`wolfSSL_get_error`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_get_error
+        // [1]: https://www.wolfssl.com/doxygen/group__Debug.html#gaafd5671d443fa684913ba5955a4eb591
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         unsafe { wolfssl_sys::wolfSSL_get_error(ssl.as_ptr(), ret) }
     }
 
@@ -743,6 +855,13 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             return;
         }
 
+        // SAFETY: [`wolfSSL_dtls_set_using_nonblock`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        // Other requirements including the protocol version DTLS is checked above
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls_set_using_nonblock
+        // [1]: https://www.wolfssl.com/doxygen/ssl_8h.html#a585412eb9473686f4d65b971c8afc223
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_dtls_set_using_nonblock(ssl.as_ptr(), is_nonblock as c_int)
@@ -753,8 +872,6 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     ///
     /// Refer to [`SessionConfig::dtls_mtu`] for documentation of constraints on
     /// what values `mtu` can be.
-    ///
-    /// I can't find online documentation for `wolfSSL_dtls_set_mtu`.
     fn dtls_set_mtu(&self, mtu: c_ushort) {
         if !self.is_dtls() {
             log::debug!("Session is not configured for DTLS");
@@ -771,6 +888,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             return;
         }
 
+        // SAFETY: No documentation found for `wolfSSL_dtls_set_mtu` api,
+        // From implementation, the api expects valid pointer to `WOLFSSL`
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_dtls_set_mtu(ssl.as_ptr(), mtu)
@@ -786,6 +905,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls
     fn is_dtls(&self) -> bool {
+        // SAFETY: [`wolfSSL_dtls`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls
+        // [1]: https://www.wolfssl.com/doxygen/ssl_8h.html#a298a34e67ad57069d88f6e626df139a1
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_dtls(ssl.as_ptr())
@@ -801,6 +926,13 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_usesni
     fn set_server_name_indication(&self, sni: &String) -> Result<()> {
         let bytes = sni.as_bytes();
+        // SAFETY: [`wolfSSL_UseSNI`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        // Api also takes `data` and `size` to get the SNI name, so null terminated string is not required
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_usesni
+        // [1]: https://www.wolfssl.com/doxygen/ssl_8h.html#a871070b101b579dc4663217b1c3fbcd4
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_UseSNI(
@@ -820,6 +952,14 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         let domain_name = std::ffi::CString::new(domain_name.to_string())
             .expect("Input string '{domain_name:?}' contains an interior NULL");
 
+        // SAFETY: [`wolfSSL_check_domain_name`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        // Documentation does not state explicitly that `dn` (domain name) should be a null terminated string
+        // Based on example (and of course no `size` arg), we are constructing Cstring
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_check_domain_name
+        // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#gab9b75f5fb10ce88f0026c57716858074
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe {
             let ssl = self.ssl.lock();
             wolfssl_sys::wolfSSL_check_domain_name(ssl.as_ptr(), domain_name.as_c_str().as_ptr())
@@ -836,6 +976,12 @@ impl<IOCB: IOCallbacks> Drop for Session<IOCB> {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_free
     fn drop(&mut self) {
+        // SAFETY: [`wolfSSL_free`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_free
+        // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#ga640f0a9e17f4727e996fc8bab4eee3c6
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         unsafe { wolfssl_sys::wolfSSL_free(self.ssl.lock().as_ptr()) }
     }
 }
