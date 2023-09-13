@@ -5,6 +5,13 @@ on:
   pull_request: null # target every PR
 
 jobs:
+  ci:
+    needs: [test, build, fmt, lint, cargo-deny]
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        run: |
+          echo "Build success"
   test:
     runs-on: ubuntu-latest
     steps:
