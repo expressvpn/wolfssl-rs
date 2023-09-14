@@ -17,6 +17,10 @@ pub struct ContextBuilder {
 /// Error creating a [`ContextBuilder`] object.
 #[derive(Error, Debug)]
 pub enum NewContextBuilderError {
+    /// Failed to initialize WolfSSL
+    #[error("Failed to initialize WolfSSL: {0}")]
+    InitFailed(Error),
+
     /// Failed to turn `Protocol` into a `wolfssl_sys::WOLFSSL_METHOD`
     #[error("Failed to obtain WOLFSSL_METHOD")]
     MethodFailed,
@@ -31,6 +35,8 @@ impl ContextBuilder {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_new
     pub fn new(protocol: Protocol) -> std::result::Result<Self, NewContextBuilderError> {
+        crate::wolf_init().map_err(NewContextBuilderError::InitFailed)?;
+
         let method_fn = protocol
             .into_method_ptr()
             .ok_or(NewContextBuilderError::MethodFailed)?;
@@ -451,7 +457,6 @@ impl Drop for Context {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wolf_init;
     use test_case::test_case;
 
     #[test_case(Protocol::DtlsClient)]
@@ -465,13 +470,12 @@ mod tests {
     #[test_case(Protocol::TlsServerV1_2)]
     #[test_case(Protocol::TlsServerV1_3)]
     fn wolfssl_context_new(protocol: Protocol) {
-        wolf_init().unwrap();
+        crate::wolf_init().unwrap();
         let _ = protocol.into_method_ptr().unwrap();
     }
 
     #[test]
     fn new() {
-        wolf_init().unwrap();
         ContextBuilder::new(Protocol::DtlsClient).unwrap();
     }
 
