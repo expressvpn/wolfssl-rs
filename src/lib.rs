@@ -38,11 +38,21 @@ const TLS_MAX_RECORD_SIZE: usize = 2usize.pow(14) + 1;
 ///
 /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_init
 pub fn wolf_init() -> Result<()> {
-    #[allow(clippy::undocumented_unsafe_blocks)]
-    match unsafe { wolfssl_sys::wolfSSL_Init() } {
-        wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
-        e => Err(Error::fatal(e)),
-    }
+    static ONCE: std::sync::OnceLock<Result<()>> = std::sync::OnceLock::new();
+
+    ONCE.get_or_init(|| {
+        // SAFETY: [`wolfSSL_Init`][0] ([also][1]) must be called once
+        // per application, this is enforced using the `ONCE:
+        // OnceLock`.
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_init
+        // [1]: https://www.wolfssl.com/doxygen/group__TLS.html#ga789ef74e34df659a62f06da2ea709737
+        match unsafe { wolfssl_sys::wolfSSL_Init() } {
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
+            e => Err(Error::fatal(e)),
+        }
+    })
+    .clone()
 }
 
 /// Wraps [`wolfSSL_Debugging_ON`][0] and [`wolfSSL_Debugging_OFF`][1]
