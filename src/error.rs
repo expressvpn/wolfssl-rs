@@ -94,6 +94,16 @@ pub type Result<T> = std::result::Result<T, Error>;
 // `wolfSSL_get_error`, which returns a `c_int`
 fn wolf_error_string(raw_err: std::ffi::c_ulong) -> String {
     let mut buffer = vec![0u8; wolfssl_sys::WOLFSSL_MAX_ERROR_SZ as usize];
+
+    // SAFETY:
+    // [`wolfSSL_ERR_error_string()`][0] ([also][1]) is documented to store at most `WOLFSSL_MAX_ERROR_SZ` bytes,
+    // so `buffer` is appropriately sized.
+    // Note that `wolfSSL_ERR_error_string()` is documented to use a static buffer (shared between threads,
+    // and thus non-reentrant) on failure, however it only does so if no buffer is provided as an argument.
+    // Since we provide a buffer we assume the static buffer can never be used in practice.
+    //
+    // [0]: https://www.wolfssl.com/doxygen/group__Debug.html#ga91d8474ba8abcf3fe594928056834993
+    // [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Debug.html#function-wolfssl_err_error_string
     unsafe {
         wolfssl_sys::wolfSSL_ERR_error_string(
             raw_err,

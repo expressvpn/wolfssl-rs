@@ -35,6 +35,10 @@ impl ContextBuilder {
             .into_method_ptr()
             .ok_or(NewContextBuilderError::MethodFailed)?;
 
+        // SAFETY: [`wolfSSL_CTX_new`][0] is documented to get pointer to a valid `WOLFSSL_METHOD` structure which is created using one of the `wolfSSLvXX_XXXX_method()`.
+        // `Protocol::into_method_ptr` function returns a pointer `wolfSSLvXX_XXXX_method()`
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_new
         let ctx = unsafe { wolfssl_sys::wolfSSL_CTX_new(method_fn.as_ptr()) };
         let ctx = NonNull::new(ctx).ok_or(NewContextBuilderError::CreateFailed)?;
 
@@ -52,6 +56,12 @@ impl ContextBuilder {
         };
 
         let result = match root {
+            // SAFETY: [`wolfSSL_CTX_load_verify_buffer`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
+            // The pointer given as the `in` argument must point to a region of `sz` bytes.
+            // The values passed here are valid since they are derived from the same byte slice.
+            //
+            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_load_verify_buffer
+            // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#gaa5a28f0ac25d9abeb72fcee81bbf647b
             RootCertificate::Asn1Buffer(buf) => unsafe {
                 wolfSSL_CTX_load_verify_buffer(
                     self.ctx.as_ptr(),
@@ -60,6 +70,12 @@ impl ContextBuilder {
                     WOLFSSL_FILETYPE_ASN1,
                 )
             },
+            // SAFETY: [`wolfSSL_CTX_load_verify_buffer`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
+            // The pointer given as the `in` argument must point to a region of `sz` bytes.
+            // The values passed here are valid since they are derived from the same byte slice.
+            //
+            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_load_verify_buffer
+            // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#gaa5a28f0ac25d9abeb72fcee81bbf647b
             RootCertificate::PemBuffer(buf) => unsafe {
                 wolfSSL_CTX_load_verify_buffer(
                     self.ctx.as_ptr(),
@@ -76,6 +92,12 @@ impl ContextBuilder {
                 let path = std::ffi::CString::new(path)
                     .or(Err(Error::fatal(wolfssl_sys::WOLFSSL_BAD_PATH)))?;
                 if is_dir {
+                    // SAFETY: [`wolfSSL_CTX_load_verify_locations`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
+                    // If not NULL, then the pointer passed as the path argument must be a valid NULL-terminated C-style string,
+                    // which is guaranteed by the use of `std::ffi::CString::as_c_str()` here.
+                    //
+                    // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_load_verify_locations
+                    // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#gaf592c652b5d7a599ee511a394dfc488e
                     unsafe {
                         wolfSSL_CTX_load_verify_locations(
                             self.ctx.as_ptr(),
@@ -84,6 +106,12 @@ impl ContextBuilder {
                         )
                     }
                 } else {
+                    // SAFETY: [`wolfSSL_CTX_load_verify_locations`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
+                    // If not NULL, then the pointer passed as the path argument must be a valid NULL-terminated C-style string,
+                    // which is guaranteed by the use of `std::ffi::CString::as_c_str()` here.
+                    //
+                    // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_load_verify_locations
+                    // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#gaf592c652b5d7a599ee511a394dfc488e
                     unsafe {
                         wolfSSL_CTX_load_verify_locations(
                             self.ctx.as_ptr(),
@@ -109,6 +137,12 @@ impl ContextBuilder {
         let cipher_list = std::ffi::CString::new(cipher_list)
             .or(Err(Error::fatal(wolfssl_sys::WOLFSSL_FAILURE)))?;
 
+        // SAFETY: [`wolfSSL_CTX_set_cipher_list`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()` and
+        // `list` parameter which should be a null terminated C string pointer which is guaranteed by
+        // the use of `std::ffi::CString::as_c_str()` here.
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_ctx_set_cipher_list
+        // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#gafa55814f56bd7a36f4035d71b2b31832
         let result = unsafe {
             wolfssl_sys::wolfSSL_CTX_set_cipher_list(
                 self.ctx.as_ptr(),
@@ -134,6 +168,12 @@ impl ContextBuilder {
         };
 
         let result = match secret {
+            // SAFETY: [`wolfSSL_CTX_use_certificate_buffer`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
+            // The pointer given as the `in` argument must point to a region of `sz` bytes.
+            // The values passed here are valid since they are derived from the same byte slice.
+            //
+            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_certificate_buffer
+            // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#gae424b3a63756ab805de5c43b67f4df4f
             Secret::Asn1Buffer(buf) => unsafe {
                 wolfSSL_CTX_use_certificate_buffer(
                     self.ctx.as_ptr(),
@@ -142,18 +182,32 @@ impl ContextBuilder {
                     WOLFSSL_FILETYPE_ASN1,
                 )
             },
-            Secret::Asn1File(path) => unsafe {
+            Secret::Asn1File(path) => {
                 let path = path
                     .to_str()
                     .ok_or(Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 let file = std::ffi::CString::new(path)
                     .or(Err(Error::fatal(wolfssl_sys::BAD_PATH_ERROR)))?;
-                wolfSSL_CTX_use_certificate_file(
-                    self.ctx.as_ptr(),
-                    file.as_c_str().as_ptr(),
-                    WOLFSSL_FILETYPE_ASN1,
-                )
-            },
+                // SAFETY: [`wolfSSL_CTX_use_certificate_file`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
+                // The pointer passed as the path argument must be a valid NULL-terminated C-style string,
+                // which is guaranteed by the use of `std::ffi::CString::as_c_str()` here.
+                //
+                // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_certificate_file
+                // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#ga5a31292b75b4caa4462a3305d2615beb
+                unsafe {
+                    wolfSSL_CTX_use_certificate_file(
+                        self.ctx.as_ptr(),
+                        file.as_c_str().as_ptr(),
+                        WOLFSSL_FILETYPE_ASN1,
+                    )
+                }
+            }
+            // SAFETY: [`wolfSSL_CTX_use_certificate_buffer`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
+            // The pointer given as the `in` argument must point to a region of `sz` bytes.
+            // The values passed here are valid since they are derived from the same byte slice.
+            //
+            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_certificate_buffer
+            // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#gae424b3a63756ab805de5c43b67f4df4f
             Secret::PemBuffer(buf) => unsafe {
                 wolfSSL_CTX_use_certificate_buffer(
                     self.ctx.as_ptr(),
@@ -162,18 +216,26 @@ impl ContextBuilder {
                     WOLFSSL_FILETYPE_PEM,
                 )
             },
-            Secret::PemFile(path) => unsafe {
+            Secret::PemFile(path) => {
                 let path = path
                     .to_str()
                     .ok_or(Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 let file = std::ffi::CString::new(path)
                     .or(Err(Error::fatal(wolfssl_sys::BAD_PATH_ERROR)))?;
-                wolfSSL_CTX_use_certificate_file(
-                    self.ctx.as_ptr(),
-                    file.as_c_str().as_ptr(),
-                    WOLFSSL_FILETYPE_PEM,
-                )
-            },
+                // SAFETY: [`wolfSSL_CTX_use_certificate_file`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
+                // The pointer passed as the path argument must be a valid NULL-terminated C-style string,
+                // which is guaranteed by the use of `std::ffi::CString::as_c_str()` here.
+                //
+                // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_certificate_file
+                // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#ga5a31292b75b4caa4462a3305d2615beb
+                unsafe {
+                    wolfSSL_CTX_use_certificate_file(
+                        self.ctx.as_ptr(),
+                        file.as_c_str().as_ptr(),
+                        WOLFSSL_FILETYPE_PEM,
+                    )
+                }
+            }
         };
 
         if result == wolfssl_sys::WOLFSSL_SUCCESS {
@@ -194,6 +256,12 @@ impl ContextBuilder {
         };
 
         let result = match secret {
+            // SAFETY: [`wolfSSL_CTX_use_PrivateKey_buffer`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
+            // The pointer given as the `in` argument must point to a region of `sz` bytes.
+            // The values passed here are valid since they are derived from the same byte slice.
+            //
+            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_privatekey_buffer
+            // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#gaf88bd3ade7faefb028679f48ef64a237
             Secret::Asn1Buffer(buf) => unsafe {
                 wolfSSL_CTX_use_PrivateKey_buffer(
                     self.ctx.as_ptr(),
@@ -202,18 +270,32 @@ impl ContextBuilder {
                     WOLFSSL_FILETYPE_ASN1,
                 )
             },
-            Secret::Asn1File(path) => unsafe {
+            Secret::Asn1File(path) => {
                 let path = path
                     .to_str()
                     .ok_or(Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 let file = std::ffi::CString::new(path)
                     .or(Err(Error::fatal(wolfssl_sys::BAD_PATH_ERROR)))?;
-                wolfSSL_CTX_use_PrivateKey_file(
-                    self.ctx.as_ptr(),
-                    file.as_c_str().as_ptr(),
-                    WOLFSSL_FILETYPE_ASN1,
-                )
-            },
+                // SAFETY: [`wolfSSL_CTX_use_PrivateKey_file`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
+                // The pointer passed as the path argument must be a valid NULL-terminated C-style string,
+                // which is guaranteed by the use of `std::ffi::CString::as_c_str()` here.
+                //
+                // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_privatekey_file
+                // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#gab80ef18b3232ebd19acab106b52feeb0
+                unsafe {
+                    wolfSSL_CTX_use_PrivateKey_file(
+                        self.ctx.as_ptr(),
+                        file.as_c_str().as_ptr(),
+                        WOLFSSL_FILETYPE_ASN1,
+                    )
+                }
+            }
+            // SAFETY: [`wolfSSL_CTX_use_PrivateKey_buffer`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
+            // The pointer given as the `in` argument must point to a region of `sz` bytes.
+            // The values passed here are valid since they are derived from the same byte slice.
+            //
+            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_privatekey_buffer
+            // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#gaf88bd3ade7faefb028679f48ef64a237
             Secret::PemBuffer(buf) => unsafe {
                 wolfSSL_CTX_use_PrivateKey_buffer(
                     self.ctx.as_ptr(),
@@ -222,18 +304,26 @@ impl ContextBuilder {
                     WOLFSSL_FILETYPE_PEM,
                 )
             },
-            Secret::PemFile(path) => unsafe {
+            Secret::PemFile(path) => {
                 let path = path
                     .to_str()
                     .ok_or(Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 let file = std::ffi::CString::new(path)
                     .or(Err(Error::fatal(wolfssl_sys::BAD_PATH_ERROR)))?;
-                wolfSSL_CTX_use_PrivateKey_file(
-                    self.ctx.as_ptr(),
-                    file.as_c_str().as_ptr(),
-                    WOLFSSL_FILETYPE_PEM,
-                )
-            },
+                // SAFETY: [`wolfSSL_CTX_use_PrivateKey_file`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
+                // The pointer passed as the path argument must be a valid NULL-terminated C-style string,
+                // which is guaranteed by the use of `std::ffi::CString::as_c_str()` here.
+                //
+                // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_privatekey_file
+                // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#gab80ef18b3232ebd19acab106b52feeb0
+                unsafe {
+                    wolfSSL_CTX_use_PrivateKey_file(
+                        self.ctx.as_ptr(),
+                        file.as_c_str().as_ptr(),
+                        WOLFSSL_FILETYPE_PEM,
+                    )
+                }
+            }
         };
 
         if result == wolfssl_sys::WOLFSSL_SUCCESS {
@@ -245,8 +335,10 @@ impl ContextBuilder {
 
     /// Wraps `wolfSSL_CTX_UseSecureRenegotiation`
     ///
-    // NOTE (pangt): I can't seem to find documentation online for this.
+    /// NOTE: No official documentation available for this api from wolfssl
     pub fn with_secure_renegotiation(self) -> Result<Self> {
+        // SAFETY: [`wolfSSL_CTX_UseSecureRenegotiation`][1] does not have proper documentation.
+        // Based on the implementation, the only requirement is the context which is passed to this api has to be a valid `WOLFSSL_CTX`
         let result = unsafe { wolfssl_sys::wolfSSL_CTX_UseSecureRenegotiation(self.ctx.as_ptr()) };
         if result == wolfssl_sys::WOLFSSL_SUCCESS {
             Ok(self)
@@ -344,6 +436,14 @@ impl Drop for Context {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_free
     fn drop(&mut self) {
+        // SAFETY: [`wolfSSL_CTX_free`][0] ([also][1]) takes pointer to `WOLFSSL_CTX` and frees it if the reference count becomes 0.
+        // Documentation is not clear about when this reference count will be incremented. From implementation, it is
+        // incremented in [`wolfSSL_set_SSL_CTX`][2] and [`wolfSSL_CTX_up_ref`][3], and we dont use these apis
+        //
+        // [0]: https://www.wolfssl.com/doxygen/group__Setup.html#gabe86939065276c9271a17d799860535d
+        // [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_free
+        // [2]: https://github.com/wolfSSL/wolfssl/blob/v5.6.3-stable/src/ssl.c#L31235
+        // [3]: https://github.com/wolfSSL/wolfssl/blob/v5.6.3-stable/src/ssl.c#L1357
         unsafe { wolfssl_sys::wolfSSL_CTX_free(self.ctx.as_ptr()) }
     }
 }

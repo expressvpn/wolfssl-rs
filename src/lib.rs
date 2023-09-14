@@ -1,6 +1,7 @@
 //! The `wolfssl` crate is designed to be a Rust layer built on top of
 //! the `wolfssl-sys` crate (a C passthrough crate).
 
+#![warn(clippy::undocumented_unsafe_blocks)]
 #![warn(missing_docs)]
 
 mod callback;
@@ -37,6 +38,7 @@ const TLS_MAX_RECORD_SIZE: usize = 2usize.pow(14) + 1;
 ///
 /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_init
 pub fn wolf_init() -> Result<()> {
+    #[allow(clippy::undocumented_unsafe_blocks)]
     match unsafe { wolfssl_sys::wolfSSL_Init() } {
         wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
         e => Err(Error::fatal(e)),
@@ -47,6 +49,7 @@ pub fn wolf_init() -> Result<()> {
 ///
 /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_cleanup
 pub fn wolf_cleanup() -> Result<()> {
+    #[allow(clippy::undocumented_unsafe_blocks)]
     match unsafe { wolfssl_sys::wolfSSL_Cleanup() } {
         wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
         e => Err(Error::fatal(e)),
@@ -60,6 +63,11 @@ pub fn wolf_cleanup() -> Result<()> {
 #[cfg(feature = "debug")]
 pub fn enable_debugging(on: bool) {
     if on {
+        // SAFETY: [`wolfSSL_Debugging_ON`][0] ([also][1]) requires `DEBUG_WOLFSSL` to be compiled in to succeed
+        // This function will be compiled only on enabling feature `debug`
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Debug.html#function-wolfssl_debugging_on
+        // [1]: https://www.wolfssl.com/doxygen/group__Debug.html#ga192a2501d23697c2b56ce26b1af0eb2c
         match unsafe { wolfssl_sys::wolfSSL_Debugging_ON() } {
             0 => {}
             // This wrapper function is only enabled if we built wolfssl-sys with debugging on.
@@ -69,6 +77,10 @@ pub fn enable_debugging(on: bool) {
             e => unreachable!("{e:?}"),
         }
     } else {
+        // SAFETY: [`wolfSSL_Debugging_OFF`][0] ([also][1]) has no safety concerns as per documentation
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Debug.html#function-wolfssl_debugging_off
+        // [1]: https://www.wolfssl.com/doxygen/group__Debug.html#gafa8dab742182b891d80300fb195399ce
         unsafe { wolfssl_sys::wolfSSL_Debugging_OFF() }
     }
 }
@@ -103,15 +115,31 @@ impl Protocol {
     /// compatible with [`wolfssl_sys::wolfSSL_CTX_new`]
     pub fn into_method_ptr(self) -> Option<NonNull<wolfssl_sys::WOLFSSL_METHOD>> {
         let ptr = match self {
+            // SAFETY: Per documentation [`wolfDTLS_client_method][0] and its sibling methods allocate memory for `WOLFSSL_METHOD` and initialize with proper values.
+            // The documentation is unclear about when to free the memory.
+            // Based on implementation[2], the api [`wolfSSL_CTX_new`][1] will consume this memory and thus take care of freeing it
+            //
+            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfsslv3_client_method
+            // [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_new
+            // [2]: https://github.com/wolfSSL/wolfssl/blob/v5.6.3-stable/src/internal.c#L2156
             Self::DtlsClient => unsafe { wolfssl_sys::wolfDTLS_client_method() },
+            // SAFETY: as above
             Self::DtlsClientV1_2 => unsafe { wolfssl_sys::wolfDTLSv1_2_client_method() },
+            // SAFETY: as above
             Self::DtlsServer => unsafe { wolfssl_sys::wolfDTLS_server_method() },
+            // SAFETY: as above
             Self::DtlsServerV1_2 => unsafe { wolfssl_sys::wolfDTLSv1_2_server_method() },
+            // SAFETY: as above
             Self::TlsClient => unsafe { wolfssl_sys::wolfTLS_client_method() },
+            // SAFETY: as above
             Self::TlsClientV1_2 => unsafe { wolfssl_sys::wolfTLSv1_2_client_method() },
+            // SAFETY: as above
             Self::TlsClientV1_3 => unsafe { wolfssl_sys::wolfTLSv1_3_client_method() },
+            // SAFETY: as above
             Self::TlsServer => unsafe { wolfssl_sys::wolfTLS_server_method() },
+            // SAFETY: as above
             Self::TlsServerV1_2 => unsafe { wolfssl_sys::wolfTLSv1_2_server_method() },
+            // SAFETY: as above
             Self::TlsServerV1_3 => unsafe { wolfssl_sys::wolfTLSv1_3_server_method() },
         };
 
