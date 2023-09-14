@@ -451,7 +451,7 @@ impl Drop for Context {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{wolf_cleanup, wolf_init};
+    use crate::wolf_init;
     use test_case::test_case;
 
     #[test_case(Protocol::DtlsClient)]
@@ -467,13 +467,12 @@ mod tests {
     fn wolfssl_context_new(protocol: Protocol) {
         wolf_init().unwrap();
         let _ = protocol.into_method_ptr().unwrap();
-        wolf_cleanup().unwrap();
     }
 
     #[test]
     fn new() {
+        wolf_init().unwrap();
         ContextBuilder::new(Protocol::DtlsClient).unwrap();
-        wolf_cleanup().unwrap();
     }
 
     #[test]
@@ -489,8 +488,6 @@ mod tests {
             .unwrap()
             .with_root_certificate(cert)
             .unwrap();
-
-        wolf_cleanup().unwrap();
     }
 
     #[test]
@@ -501,8 +498,6 @@ mod tests {
             // we built wolfssl with.
             .with_cipher_list("TLS13-CHACHA20-POLY1305-SHA256")
             .unwrap();
-
-        wolf_cleanup().unwrap();
     }
 
     #[test]
@@ -518,8 +513,6 @@ mod tests {
             .unwrap()
             .with_certificate(cert)
             .unwrap();
-
-        wolf_cleanup().unwrap();
     }
 
     #[test]
@@ -535,8 +528,6 @@ mod tests {
             .unwrap()
             .with_private_key(key)
             .unwrap();
-
-        wolf_cleanup().unwrap();
     }
 
     #[test]
@@ -545,8 +536,6 @@ mod tests {
             .unwrap()
             .with_secure_renegotiation()
             .unwrap();
-
-        wolf_cleanup().unwrap();
     }
 
     #[test]

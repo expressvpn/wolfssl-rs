@@ -45,17 +45,6 @@ pub fn wolf_init() -> Result<()> {
     }
 }
 
-/// Wraps [`wolfSSL_Cleanup`][0]
-///
-/// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_cleanup
-pub fn wolf_cleanup() -> Result<()> {
-    #[allow(clippy::undocumented_unsafe_blocks)]
-    match unsafe { wolfssl_sys::wolfSSL_Cleanup() } {
-        wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
-        e => Err(Error::fatal(e)),
-    }
-}
-
 /// Wraps [`wolfSSL_Debugging_ON`][0] and [`wolfSSL_Debugging_OFF`][1]
 ///
 /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Debug.html#function-wolfssl_debugging_on
@@ -181,10 +170,5 @@ mod tests {
     #[test]
     fn wolf_init_test() {
         wolf_init().unwrap();
-    }
-
-    #[test]
-    fn wolf_cleanup_test() {
-        wolf_cleanup().unwrap();
     }
 }
