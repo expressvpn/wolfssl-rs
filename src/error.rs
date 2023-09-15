@@ -20,7 +20,7 @@ pub enum Poll<T> {
     AppData(Bytes),
 }
 
-#[derive(Error, Debug)]
+#[derive(Clone, Error, Debug)]
 /// The failure result of an operation.
 pub enum Error {
     /// During secure renegotiation, if application data is found, we must call
@@ -41,7 +41,7 @@ impl Error {
 }
 
 /// Extracts an error message given a wolfssl error enum.
-#[derive(Error, Debug)]
+#[derive(Clone, Error, Debug)]
 #[error("code: {code}, what: {what}")]
 pub struct FatalError {
     what: String,
