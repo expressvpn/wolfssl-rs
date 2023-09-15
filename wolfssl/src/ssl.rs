@@ -77,6 +77,30 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
         }
     }
 
+    /// When `cond` is True call `func` on `Self`
+    pub fn when<F>(self, cond: bool, func: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        if cond {
+            func(self)
+        } else {
+            self
+        }
+    }
+
+    /// When `maybe` is Some(_) call `func` on `Self` and the contained value
+    pub fn when_some<F, T>(self, maybe: Option<T>, func: F) -> Self
+    where
+        F: FnOnce(Self, T) -> Self,
+    {
+        if let Some(t) = maybe {
+            func(self, t)
+        } else {
+            self
+        }
+    }
+
     /// Sets [`Self::dtls_use_nonblock`]
     pub fn with_dtls_nonblocking(mut self, is_nonblocking: bool) -> Self {
         self.dtls_use_nonblock = Some(is_nonblocking);
