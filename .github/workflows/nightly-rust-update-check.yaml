@@ -1,0 +1,42 @@
+name: Nightly Rust release checks
+on:
+  schedule:
+    - cron:  '09 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  check-for-updated-rust:
+    runs-on: ubuntu-latest
+    environment: expressvpn_iat_automation_githubiatuser_gpg_key
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Import GPG Key
+      uses: crazy-max/ghaction-import-gpg@v5
+      with:
+        gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+        passphrase: ${{ secrets.GPG_PASSPHRASE }}
+        git_user_signingkey: true
+        git_commit_gpgsign: true
+
+    - name: Check for Rust update
+      id: check-version
+      run: |
+        rustup install stable
+        stable=$(rustup run stable rustc -V | sed -E -e 's/^rustc ([0-9\.]+) \(.*\)$/\1/g')
+        echo "Latest stable rust is ${stable}"
+
+        echo rust="$stable" >> "$GITHUB_OUTPUT"
+
+    - name: Update Rust version in Earthfile
+      run: sed -i -E 's/^(\s*FROM rust):(:?[0-9\.]+)$/\1:${{ steps.check-version.outputs.rust }}/g' Earthfile
+
+    - uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.SERVICE_ACCOUNT_PAT }}
+        delete-branch: true
+        committer: ExpressVPN Automation Bot <143369453+expressvpn-iat-bot@users.noreply.github.com>
+        author: ExpressVPN Automation Bot <143369453+expressvpn-iat-bot@users.noreply.github.com>
+        commit-message: "[auto] Update Rust toolchain to ${{ steps.check-version.outputs.rust }}"
+        branch: gha/rust-toolchain-update
+        title: "[auto] Update Rust toolchain to ${{ steps.check-version.outputs.rust }}"
