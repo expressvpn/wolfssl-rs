@@ -246,6 +246,16 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         }
     }
 
+    /// Get a reference to the IOCB embedded in this session
+    pub fn io_cb(&self) -> &IOCB {
+        self.io.as_ref()
+    }
+
+    /// Get a mutable reference to the IOCB embedded in this session
+    pub fn io_cb_mut(&mut self) -> &mut IOCB {
+        self.io.as_mut()
+    }
+
     /// Invokes [`wolfSSL_negotiate`][0] *once*.
     ///
     /// The distinction is important because it takes more than one invocation
