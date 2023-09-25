@@ -10,8 +10,6 @@ use std::env;
 use std::path::PathBuf;
 use std::process::Command;
 
-static WOLFSSL_VERSION: &str = "wolfssl-5.6.0-stable";
-
 /**
  * Work around for bindgen creating duplicate values.
  */
@@ -29,13 +27,12 @@ impl bindgen::callbacks::ParseCallbacks for IgnoreMacros {
 }
 
 /**
- * Extract WolfSSL
+ * Copy WolfSSL
  */
-fn extract_wolfssl(dest: &str) -> std::io::Result<()> {
-    Command::new("tar")
-        .arg("-zxvf")
-        .arg(format!("vendor/{WOLFSSL_VERSION}.tar.gz"))
-        .arg("-C")
+fn copy_wolfssl(dest: &str) -> std::io::Result<()> {
+    Command::new("cp")
+        .arg("-rf")
+        .arg("wolfssl-src")
         .arg(dest)
         .status()
         .unwrap();
@@ -48,7 +45,7 @@ Builds WolfSSL
 */
 fn build_wolfssl(dest: &str) -> PathBuf {
     // Create the config
-    let mut conf = Config::new(format!("{dest}/{WOLFSSL_VERSION}"));
+    let mut conf = Config::new(format!("{dest}/wolfssl-src"));
     // Configure it
     conf.reconf("-ivf")
         // Only build the static library
@@ -128,7 +125,7 @@ fn main() -> std::io::Result<()> {
     let dst_string = env::var("OUT_DIR").unwrap();
 
     // Extract WolfSSL
-    extract_wolfssl(&dst_string)?;
+    copy_wolfssl(&dst_string)?;
 
     // Configure and build WolfSSL
     let dst = build_wolfssl(&dst_string);

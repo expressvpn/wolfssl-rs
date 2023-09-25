@@ -2,6 +2,7 @@
 
 members = [
     "wolfssl",
+    "wolfssl-sys",
 ]
 
 resolver = "2"

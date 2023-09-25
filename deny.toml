@@ -49,5 +49,4 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
   "https://github.com/open-quantum-safe/liboqs-rust",
-  "https://github.com/expressvpn/wolfssl-sys",
 ]

@@ -17,7 +17,7 @@ bytes = "1"
 log = "0.4"
 parking_lot = "0.12.1"
 thiserror = "1.0"
-wolfssl-sys = { git = "https://github.com/expressvpn/wolfssl-sys", features = ["postquantum"] }
+wolfssl-sys = { path = "../wolfssl-sys", features = ["postquantum"] }
 
 [dev-dependencies]
 async-trait = "0.1.73"
