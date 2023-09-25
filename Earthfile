@@ -1,7 +1,7 @@
 VERSION 0.7
 FROM rust:1.72.1
 
-WORKDIR /wolfssl-sys
+WORKDIR /wolfssl-rs
 
 build-deps:
     RUN apt-get update -qq
