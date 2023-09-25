@@ -19,6 +19,8 @@ jobs:
         with:
           version: v0.7.15
       - uses: actions/checkout@v3
+        with:
+          submodules: true
       - name: Run Tests
         run: earthly --ci +run-tests
   build:
@@ -28,6 +30,8 @@ jobs:
         with:
           version: v0.7.15
       - uses: actions/checkout@v3
+        with:
+          submodules: true
       - name: Build crate
         run: earthly --ci +build-release
   fmt:
@@ -39,6 +43,8 @@ jobs:
         with:
           version: v0.7.15
       - uses: actions/checkout@v3
+        with:
+          submodules: true
       - name: Check code formatting
         run: earthly --ci +fmt
   lint:
@@ -48,12 +54,16 @@ jobs:
         with:
           version: v0.7.15
       - uses: actions/checkout@v3
+        with:
+          submodules: true
       - name: Lint crate
         run: earthly --ci +lint
   cargo-deny:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          submodules: true
       - uses: EmbarkStudios/cargo-deny-action@v1
         with:
           command: check bans licenses sources
