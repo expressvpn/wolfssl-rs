@@ -1,0 +1,26 @@
+[package]
+name = "wolfssl"
+version = "0.1.0"
+edition = "2021"
+authors = ["pete.m@expressvpn.com", "pang.t@expressvpn.com", "brendan.h@expressvpn.com"]
+license = "GPL-2.0"
+description = "High-level bindings for WolfSSL"
+repository = "https://github.com/expressvpn/wolfssl"
+keywords = ["wolfssl", "vpn", "lightway", "post-quantum", "cryptography"]
+
+[features]
+default = []
+debug = ["wolfssl-sys/debug"] # Note that application code must also call wolfssl::enable_debugging(true)
+
+[dependencies]
+bytes = "1"
+log = "0.4"
+parking_lot = "0.12.1"
+thiserror = "1.0"
+wolfssl-sys = { git = "https://github.com/expressvpn/wolfssl-sys", features = ["postquantum"] }
+
+[dev-dependencies]
+async-trait = "0.1.73"
+env_logger = "0.10.0"
+test-case = "3.0"
+tokio = { version = "1.31.0", features = ["rt", "net", "macros"] }

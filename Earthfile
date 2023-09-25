@@ -11,8 +11,7 @@ build-deps:
 
 copy-src:
     FROM +build-deps
-    COPY Cargo.toml Cargo.lock ./
-    COPY --dir src tests ./
+    COPY --dir Cargo.toml Cargo.lock wolfssl ./
 
 build-dev:
     FROM +copy-src
@@ -49,5 +48,5 @@ fmt:
 
 check-license:
     RUN cargo install --locked cargo-deny
-    COPY --dir src tests Cargo.toml Cargo.lock deny.toml ./
+    COPY --dir Cargo.toml Cargo.lock deny.toml wolfssl ./
     RUN cargo deny --all-features check bans license sources
