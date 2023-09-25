@@ -94,9 +94,9 @@ impl ContextBuilder {
                 let is_dir = path.is_dir();
                 let path = path
                     .to_str()
-                    .ok_or(Error::fatal(wolfssl_sys::WOLFSSL_BAD_PATH))?;
+                    .ok_or_else(|| Error::fatal(wolfssl_sys::WOLFSSL_BAD_PATH))?;
                 let path = std::ffi::CString::new(path)
-                    .or(Err(Error::fatal(wolfssl_sys::WOLFSSL_BAD_PATH)))?;
+                    .map_err(|_| Error::fatal(wolfssl_sys::WOLFSSL_BAD_PATH))?;
                 if is_dir {
                     // SAFETY: [`wolfSSL_CTX_load_verify_locations`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
                     // If not NULL, then the pointer passed as the path argument must be a valid NULL-terminated C-style string,
@@ -141,7 +141,7 @@ impl ContextBuilder {
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_ctx_set_cipher_list
     pub fn with_cipher_list(self, cipher_list: &str) -> Result<Self> {
         let cipher_list = std::ffi::CString::new(cipher_list)
-            .or(Err(Error::fatal(wolfssl_sys::WOLFSSL_FAILURE)))?;
+            .map_err(|_| Error::fatal(wolfssl_sys::WOLFSSL_FAILURE))?;
 
         // SAFETY: [`wolfSSL_CTX_set_cipher_list`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()` and
         // `list` parameter which should be a null terminated C string pointer which is guaranteed by
@@ -191,9 +191,9 @@ impl ContextBuilder {
             Secret::Asn1File(path) => {
                 let path = path
                     .to_str()
-                    .ok_or(Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
+                    .ok_or_else(|| Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 let file = std::ffi::CString::new(path)
-                    .or(Err(Error::fatal(wolfssl_sys::BAD_PATH_ERROR)))?;
+                    .map_err(|_| Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 // SAFETY: [`wolfSSL_CTX_use_certificate_file`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
                 // The pointer passed as the path argument must be a valid NULL-terminated C-style string,
                 // which is guaranteed by the use of `std::ffi::CString::as_c_str()` here.
@@ -225,9 +225,9 @@ impl ContextBuilder {
             Secret::PemFile(path) => {
                 let path = path
                     .to_str()
-                    .ok_or(Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
+                    .ok_or_else(|| Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 let file = std::ffi::CString::new(path)
-                    .or(Err(Error::fatal(wolfssl_sys::BAD_PATH_ERROR)))?;
+                    .map_err(|_| Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 // SAFETY: [`wolfSSL_CTX_use_certificate_file`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
                 // The pointer passed as the path argument must be a valid NULL-terminated C-style string,
                 // which is guaranteed by the use of `std::ffi::CString::as_c_str()` here.
@@ -279,9 +279,9 @@ impl ContextBuilder {
             Secret::Asn1File(path) => {
                 let path = path
                     .to_str()
-                    .ok_or(Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
+                    .ok_or_else(|| Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 let file = std::ffi::CString::new(path)
-                    .or(Err(Error::fatal(wolfssl_sys::BAD_PATH_ERROR)))?;
+                    .map_err(|_| Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 // SAFETY: [`wolfSSL_CTX_use_PrivateKey_file`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
                 // The pointer passed as the path argument must be a valid NULL-terminated C-style string,
                 // which is guaranteed by the use of `std::ffi::CString::as_c_str()` here.
@@ -313,9 +313,9 @@ impl ContextBuilder {
             Secret::PemFile(path) => {
                 let path = path
                     .to_str()
-                    .ok_or(Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
+                    .ok_or_else(|| Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 let file = std::ffi::CString::new(path)
-                    .or(Err(Error::fatal(wolfssl_sys::BAD_PATH_ERROR)))?;
+                    .map_err(|_| Error::fatal(wolfssl_sys::BAD_PATH_ERROR))?;
                 // SAFETY: [`wolfSSL_CTX_use_PrivateKey_file`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
                 // The pointer passed as the path argument must be a valid NULL-terminated C-style string,
                 // which is guaranteed by the use of `std::ffi::CString::as_c_str()` here.
