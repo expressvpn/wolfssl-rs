@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["pete.m@expressvpn.com", "pang.t@expressvpn.com", "brendan.h@expressvpn.com"]
 license = "GPL-2.0"
 description = "High-level bindings for WolfSSL"
-repository = "https://github.com/expressvpn/wolfssl"
+repository = "https://github.com/expressvpn/wolfssl-rs"
 keywords = ["wolfssl", "vpn", "lightway", "post-quantum", "cryptography"]
 
 [features]

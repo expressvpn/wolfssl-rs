@@ -6,7 +6,7 @@ authors = ["pete.m@expressvpn.com"]
 license = "GPL-2.0"
 readme = "README.md"
 description = "System bindings for WolfSSL"
-repository = "https://github.com/expressvpn/wolfssl"
+repository = "https://github.com/expressvpn/wolfssl-rs"
 keywords = ["wolfssl", "vpn", "lightway", "post-quantum", "cryptography"]
 links = "wolfssl"
 
