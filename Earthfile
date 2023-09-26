@@ -6,6 +6,7 @@ WORKDIR /wolfssl-rs
 build-deps:
     RUN apt-get update -qq
     RUN apt-get install --no-install-recommends -qq autoconf autotools-dev libtool-bin clang cmake bsdmainutils
+    RUN rustup component add clippy
     RUN rustup component add rustfmt
 
 copy-src:
@@ -37,12 +38,10 @@ build-crate:
 
 lint:
     FROM +copy-src
-    RUN rustup component add clippy
     RUN cargo clippy --all-features --all-targets -- -D warnings
 
 fmt:
     FROM +copy-src
-    RUN rustup component add rustfmt
     RUN cargo fmt --check
 
 check-license:
