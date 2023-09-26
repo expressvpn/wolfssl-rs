@@ -6,12 +6,13 @@ WORKDIR /wolfssl-rs
 build-deps:
     RUN apt-get update -qq
     RUN apt-get install --no-install-recommends -qq autoconf autotools-dev libtool-bin clang cmake bsdmainutils
+    RUN cargo install --locked cargo-deny
     RUN rustup component add clippy
     RUN rustup component add rustfmt
 
 copy-src:
     FROM +build-deps
-    COPY --dir Cargo.toml Cargo.lock wolfssl wolfssl-sys ./
+    COPY --dir Cargo.toml Cargo.lock deny.toml wolfssl wolfssl-sys ./
 
 build-dev:
     FROM +copy-src
@@ -45,6 +46,5 @@ fmt:
     RUN cargo fmt --check
 
 check-license:
-    RUN cargo install --locked cargo-deny
-    COPY --dir Cargo.toml Cargo.lock deny.toml wolfssl wolfssl-sys ./
+    FROM +copy-src
     RUN cargo deny --all-features check bans license sources
