@@ -6,9 +6,10 @@ WORKDIR /wolfssl-rs
 build-deps:
     RUN apt-get update -qq
     RUN apt-get install --no-install-recommends -qq autoconf autotools-dev libtool-bin clang cmake bsdmainutils
-    RUN cargo install --locked cargo-deny
+    RUN cargo install --locked cargo-deny cargo-llvm-cov
     RUN rustup component add clippy
     RUN rustup component add rustfmt
+    RUN rustup component add llvm-tools-preview
 
 copy-src:
     FROM +build-deps
@@ -27,6 +28,16 @@ build-release:
 run-tests:
     FROM +copy-src
     RUN cargo test
+
+run-coverage:
+    FROM +copy-src
+    RUN cargo llvm-cov test
+
+    RUN mkdir /tmp/coverage
+
+    RUN cargo llvm-cov report --summary-only --output-path /tmp/coverage/summary.txt
+    RUN cargo llvm-cov report --html --output-dir /tmp/coverage/
+    SAVE ARTIFACT /tmp/coverage/*
 
 build:
     BUILD +run-tests
