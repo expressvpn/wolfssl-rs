@@ -803,7 +803,6 @@ dependencies = [
 [[package]]
 name = "wolfssl-sys"
 version = "0.1.15"
-source = "git+https://github.com/expressvpn/wolfssl-sys#8235ad6511594655b5746fb434b57f6f589d4d42"
 dependencies = [
  "autotools",
  "bindgen",

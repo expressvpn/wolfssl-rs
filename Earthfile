@@ -1,7 +1,7 @@
 VERSION 0.7
 FROM rust:1.72.1
 
-WORKDIR /wolfssl-sys
+WORKDIR /wolfssl-rs
 
 build-deps:
     RUN apt-get update -qq
@@ -11,8 +11,7 @@ build-deps:
 
 copy-src:
     FROM +build-deps
-    COPY Cargo.toml Cargo.lock ./
-    COPY --dir src tests ./
+    COPY --dir Cargo.toml Cargo.lock wolfssl wolfssl-sys ./
 
 build-dev:
     FROM +copy-src
@@ -49,5 +48,5 @@ fmt:
 
 check-license:
     RUN cargo install --locked cargo-deny
-    COPY --dir src tests Cargo.toml Cargo.lock deny.toml ./
+    COPY --dir Cargo.toml Cargo.lock deny.toml wolfssl wolfssl-sys ./
     RUN cargo deny --all-features check bans license sources
