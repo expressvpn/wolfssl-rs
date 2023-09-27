@@ -53,6 +53,8 @@ fn build_wolfssl(dest: &str) -> PathBuf {
         .disable_shared()
         // Enable TLS/1.3
         .enable("tls13", None)
+        // Enable DTLS/1.3
+        .enable("dtls13", None)
         // Disable old TLS versions
         .disable("oldtls", None)
         // Enable single threaded mode
