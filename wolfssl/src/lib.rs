@@ -93,10 +93,14 @@ pub enum Protocol {
     DtlsClient,
     /// `wolfDTLSv1_2_client_method`
     DtlsClientV1_2,
+    /// `wolfDTLSv1_3_client_method`
+    DtlsClientV1_3,
     /// `wolfDTLS_server_method`
     DtlsServer,
     /// `wolfDTLSv1_2_server_method`
     DtlsServerV1_2,
+    /// `wolfDTLSv1_3_server_method`
+    DtlsServerV1_3,
     /// `wolfTLS_client_method`
     TlsClient,
     /// `wolfTLSv1_2_client_method`
@@ -127,9 +131,13 @@ impl Protocol {
             // SAFETY: as above
             Self::DtlsClientV1_2 => unsafe { wolfssl_sys::wolfDTLSv1_2_client_method() },
             // SAFETY: as above
+            Self::DtlsClientV1_3 => unsafe { wolfssl_sys::wolfDTLSv1_3_client_method() },
+            // SAFETY: as above
             Self::DtlsServer => unsafe { wolfssl_sys::wolfDTLS_server_method() },
             // SAFETY: as above
             Self::DtlsServerV1_2 => unsafe { wolfssl_sys::wolfDTLSv1_2_server_method() },
+            // SAFETY: as above
+            Self::DtlsServerV1_3 => unsafe { wolfssl_sys::wolfDTLSv1_3_server_method() },
             // SAFETY: as above
             Self::TlsClient => unsafe { wolfssl_sys::wolfTLS_client_method() },
             // SAFETY: as above
