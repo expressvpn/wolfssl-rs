@@ -20,6 +20,11 @@ So we built one :)
 
 # Building and Running
 
+After cloning this repo, you'll also need to clone the submodules for the WolfSSL source code via:
+```
+git submodule update --init
+```
+
 Currently, the usual commands from `cargo` works perfectly fine. Common commands
 include the following:
 
