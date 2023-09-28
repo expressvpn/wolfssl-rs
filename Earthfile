@@ -59,6 +59,6 @@ fmt:
     FROM +copy-src
     DO rust-udc+CARGO --args="fmt --check"
 
-check-license:
+check-dependencies:
     FROM +copy-src
     DO rust-udc+CARGO --args="deny --all-features check bans license sources"
