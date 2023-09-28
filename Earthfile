@@ -5,13 +5,15 @@ WORKDIR /wolfssl-rs
 
 build-deps:
     RUN apt-get update -qq
-    RUN apt-get install --no-install-recommends -qq autoconf autotools-dev libtool-bin clang cmake
-    RUN apt-get -y install --no-install-recommends bsdmainutils
+    RUN apt-get install --no-install-recommends -qq autoconf autotools-dev libtool-bin clang cmake bsdmainutils
+    RUN cargo install --locked cargo-deny cargo-llvm-cov
+    RUN rustup component add clippy
     RUN rustup component add rustfmt
+    RUN rustup component add llvm-tools-preview
 
 copy-src:
     FROM +build-deps
-    COPY --dir Cargo.toml Cargo.lock wolfssl wolfssl-sys ./
+    COPY --dir Cargo.toml Cargo.lock deny.toml wolfssl wolfssl-sys ./
 
 build-dev:
     FROM +copy-src
@@ -27,6 +29,16 @@ run-tests:
     FROM +copy-src
     RUN cargo test
 
+run-coverage:
+    FROM +copy-src
+    RUN cargo llvm-cov test
+
+    RUN mkdir /tmp/coverage
+
+    RUN cargo llvm-cov report --summary-only --output-path /tmp/coverage/summary.txt
+    RUN cargo llvm-cov report --html --output-dir /tmp/coverage/
+    SAVE ARTIFACT /tmp/coverage/*
+
 build:
     BUILD +run-tests
     BUILD +build-release
@@ -38,15 +50,12 @@ build-crate:
 
 lint:
     FROM +copy-src
-    RUN rustup component add clippy
     RUN cargo clippy --all-features --all-targets -- -D warnings
 
 fmt:
     FROM +copy-src
-    RUN rustup component add rustfmt
     RUN cargo fmt --check
 
 check-license:
-    RUN cargo install --locked cargo-deny
-    COPY --dir Cargo.toml Cargo.lock deny.toml wolfssl wolfssl-sys ./
+    FROM +copy-src
     RUN cargo deny --all-features check bans license sources

@@ -6,7 +6,7 @@ on:
 
 jobs:
   ci:
-    needs: [test, build, fmt, lint, cargo-deny]
+    needs: [test, build, fmt, lint, coverage, cargo-deny]
     runs-on: ubuntu-latest
     steps:
       - shell: bash
@@ -23,6 +23,56 @@ jobs:
           submodules: true
       - name: Run Tests
         run: earthly --ci +run-tests
+  coverage:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_COLOR: 1
+    steps:
+      - uses: earthly/actions-setup@v1
+        with:
+          version: v0.7.19
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+      - name: Run Coverage
+        id: coverage
+        run: |
+          earthly --ci --artifact +run-coverage/* output/
+
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "summary<<$EOF"    >> "$GITHUB_OUTPUT"
+          cat output/summary.txt  >> "$GITHUB_OUTPUT"
+          echo ""                 >> "$GITHUB_OUTPUT"
+          echo "$EOF"             >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v3
+        with:
+          name: coverage
+          path: output/html
+          if-no-files-found: error
+      - uses: jwalton/gh-find-current-pr@v1
+        id: find-pr
+        with:
+          state: open
+      - name: Find Coverage Comment
+        if: steps.find-pr.outputs.number
+        uses: peter-evans/find-comment@v2
+        id: coverage-comment
+        with:
+          issue-number: ${{ steps.find-pr.outputs.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: 'Code coverage summary:'
+      - name: Create or update comment
+        if: steps.find-pr.outputs.number
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          comment-id: ${{ steps.coverage-comment.outputs.comment-id }}
+          issue-number: ${{ steps.find-pr.outputs.number }}
+          body: |
+            [Code coverage summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}):
+            ```
+            ${{ steps.coverage.outputs.summary }}
+            ```
+          edit-mode: replace
   build:
     runs-on: ubuntu-latest
     steps:
