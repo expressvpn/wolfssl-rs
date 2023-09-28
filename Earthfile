@@ -34,12 +34,12 @@ run-tests:
 
 run-coverage:
     FROM +copy-src
-    RUN rust-udc+CARGO --args="llvm-cov test"
+    DO rust-udc+CARGO --args="llvm-cov test"
 
     RUN mkdir /tmp/coverage
 
-    RUN rust-udc+CARGO --args="llvm-cov report --summary-only --output-path /tmp/coverage/summary.txt"
-    RUN rust-udc+CARGO --args="llvm-cov report --html --output-dir /tmp/coverage/"
+    DO rust-udc+CARGO --args="llvm-cov report --summary-only --output-path /tmp/coverage/summary.txt"
+    DO rust-udc+CARGO --args="llvm-cov report --html --output-dir /tmp/coverage/"
     SAVE ARTIFACT /tmp/coverage/*
 
 build:
