@@ -4,6 +4,7 @@ use wolfssl::{ContextBuilder, IOCallbacks, Protocol, RootCertificate, Secret, Se
 
 use async_trait::async_trait;
 use bytes::BytesMut;
+use test_case::test_case;
 use tokio::net::{UnixDatagram, UnixStream};
 
 const CA_CERT: &[u8] = &include!("data/ca_cert_der_2048");
@@ -192,18 +193,27 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol) {
     println!("[Server] Finished");
 }
 
-#[tokio::test]
-async fn dtls() {
-    use Protocol::*;
+#[test_case(Protocol::DtlsClientV1_2, Protocol::DtlsServerV1_3 => panics; "client_1.2_server_1.3")]
+#[test_case(Protocol::DtlsClientV1_2, Protocol::DtlsServerV1_2; "client_1.2_server_1.2")]
+#[test_case(Protocol::DtlsClientV1_2, Protocol::DtlsServer; "client_1.2_server")]
+#[test_case(Protocol::DtlsClientV1_3, Protocol::DtlsServerV1_3; "client_1.3_server_1.3")]
+#[test_case(Protocol::DtlsClientV1_3, Protocol::DtlsServerV1_2 => panics; "client_1.3_server_1.2")]
+#[test_case(Protocol::DtlsClientV1_3, Protocol::DtlsServer; "client_1.3_server")]
+#[test_case(Protocol::DtlsClient, Protocol::DtlsServerV1_3; "client_server_1.3")]
+// TODO: WolfSSL downgrade bug
+// #[test_case(Protocol::DtlsClient, Protocol::DtlsServerV1_2; "client_server_1.2")]
+#[test_case(Protocol::DtlsClient, Protocol::DtlsServer; "client_server")]
 
+#[tokio::test]
+async fn dtls(client_protocol: Protocol, server_protocol: Protocol) {
     #[cfg(feature = "debug")]
     wolfssl::enable_debugging(true);
 
     // Communicate over a local datagram socket for simplicity
     let (client_sock, server_sock) = UnixDatagram::pair().expect("UnixDatagram");
 
-    let client = client(client_sock, DtlsClientV1_2);
-    let server = server(server_sock, DtlsServerV1_2);
+    let client = client(client_sock, client_protocol);
+    let server = server(server_sock, server_protocol);
 
     // Note that this runs concurrently but not in parallel
     tokio::join!(client, server);
