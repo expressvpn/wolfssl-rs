@@ -71,6 +71,12 @@ fn build_wolfssl(dest: &str) -> PathBuf {
         .disable("sha3", None)
         // Disable DH key exchanges
         .disable("dh", None)
+        // Disable examples
+        .disable("examples", None)
+        // Disable benchmarks
+        .disable("benchmark", None)
+        // Disable sys ca certificate store
+        .disable("sys-ca-certs", None)
         // Enable elliptic curve exchanges
         .enable("supportedcurves", None)
         .enable("curve25519", None)
@@ -83,7 +89,10 @@ fn build_wolfssl(dest: &str) -> PathBuf {
         .cflag("-fPIC")
         .cflag("-DWOLFSSL_DTLS_ALLOW_FUTURE")
         .cflag("-DWOLFSSL_MIN_RSA_BITS=2048")
-        .cflag("-DWOLFSSL_MIN_ECC_BITS=256");
+        .cflag("-DWOLFSSL_MIN_ECC_BITS=256")
+        .cflag("-DUSE_CERT_BUFFERS_4096")
+        .cflag("-DUSE_CERT_BUFFERS_256")
+        .cflag("-DWOLFSSL_NO_SPHINCS");
 
     if cfg!(feature = "debug") {
         conf.enable("debug", None);
