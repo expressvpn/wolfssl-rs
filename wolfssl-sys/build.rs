@@ -8,7 +8,7 @@ use autotools::Config;
 use std::collections::HashSet;
 use std::env;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /**
  * Work around for bindgen creating duplicate values.
@@ -38,6 +38,37 @@ fn copy_wolfssl(dest: &str) -> std::io::Result<()> {
         .unwrap();
 
     Ok(())
+}
+
+const PATCHES: &[&str] = &[
+    "patches/0001-DoHelloVerifyRequest-only-do-DTLS-1.3-version-check.patch",
+    "patches/0002-DTLS-1.3-move-state-machine-forward-when-HVR-receive.patch",
+    "patches/0003-DtlsShouldDrop-don-t-ignore-app-data-sent-before-a-S.patch",
+    "patches/0004-Dtls13GetRnMask-Correctly-get-chacha-counter-on-BE-s.patch",
+    "patches/1000-Guard-away-properly-don-t-build-sphincs-code.patch",
+    "patches/1001-Allow-easily-disabling-of-SPHINCS.patch",
+    "patches/2000-Rename-utils.c-to-utils.h.patch",
+    "patches/2001-Merge-pull-request-6700-from-julek-wolfssl-dtls13-do.patch",
+];
+
+/**
+ * Apply patch to wolfssl-src
+ */
+fn apply_patch(dest: &str, patch: &str) {
+    let wolfssl_path = format!("{dest}/wolfssl-src");
+
+    let patch_buffer = Command::new("cat")
+        .arg(patch)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    Command::new("patch")
+        .arg("-d")
+        .arg(wolfssl_path)
+        .arg("-p1")
+        .stdin(Stdio::from(patch_buffer.stdout.unwrap()))
+        .status()
+        .unwrap();
 }
 
 /**
@@ -137,6 +168,9 @@ fn main() -> std::io::Result<()> {
 
     // Extract WolfSSL
     copy_wolfssl(&dst_string)?;
+
+    // Apply patches
+    PATCHES.iter().for_each(|&f| apply_patch(&dst_string, f));
 
     // Configure and build WolfSSL
     let dst = build_wolfssl(&dst_string);
