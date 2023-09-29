@@ -60,7 +60,7 @@ jobs:
         with:
           issue-number: ${{ steps.find-pr.outputs.number }}
           comment-author: 'github-actions[bot]'
-          body-includes: 'Code coverage summary:'
+          body-includes: 'Code coverage summary'
       - name: Create or update comment
         if: steps.find-pr.outputs.number
         uses: peter-evans/create-or-update-comment@v3
