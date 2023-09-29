@@ -219,18 +219,25 @@ async fn dtls(client_protocol: Protocol, server_protocol: Protocol) {
     tokio::join!(client, server);
 }
 
+#[test_case(Protocol::TlsClientV1_2, Protocol::TlsServerV1_3 => panics; "client_1.2_server_1.3")]
+#[test_case(Protocol::TlsClientV1_2, Protocol::TlsServerV1_2; "client_1.2_server_1.2")]
+#[test_case(Protocol::TlsClientV1_2, Protocol::TlsServer; "client_1.2_server")]
+#[test_case(Protocol::TlsClientV1_3, Protocol::TlsServerV1_3; "client_1.3_server_1.3")]
+#[test_case(Protocol::TlsClientV1_3, Protocol::TlsServerV1_2 => panics; "client_1.3_server_1.2")]
+#[test_case(Protocol::TlsClientV1_3, Protocol::TlsServer; "client_1.3_server")]
+#[test_case(Protocol::TlsClient, Protocol::TlsServerV1_3; "client_server_1.3")]
+#[test_case(Protocol::TlsClient, Protocol::TlsServerV1_2; "client_server_1.2")]
+#[test_case(Protocol::TlsClient, Protocol::TlsServer; "client_server")]
 #[tokio::test]
-async fn tls() {
-    use Protocol::*;
-
+async fn tls(client_protocol: Protocol, server_protocol: Protocol) {
     #[cfg(feature = "debug")]
     wolfssl::enable_debugging(true);
 
     // Communicate over a local stream socket for simplicity
     let (client_sock, server_sock) = UnixStream::pair().expect("UnixStream");
 
-    let client = client(client_sock, TlsClientV1_3);
-    let server = server(server_sock, TlsServerV1_3);
+    let client = client(client_sock, client_protocol);
+    let server = server(server_sock, server_protocol);
 
     // Note that this runs concurrently but not in parallel
     tokio::join!(client, server);
