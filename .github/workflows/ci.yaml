@@ -45,6 +45,8 @@ jobs:
         run: |
           earthly --ci --org expressvpn --satellite wolfssl-rs --artifact +run-coverage/* output/
 
+          cat output/summary.txt
+
           EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
           echo "summary<<$EOF"    >> "$GITHUB_OUTPUT"
           cat output/summary.txt  >> "$GITHUB_OUTPUT"
@@ -92,7 +94,7 @@ jobs:
               echo ":white_check_mark: Line coverage $lines_coverage% passes" >> "$GITHUB_OUTPUT"
           fi
 
-          echo "$EOF"            >> "$GITHUB_OUTPUT"
+          echo "$EOF" >> "$GITHUB_OUTPUT"
 
           echo "Setting output: failed: $FAILED"
           echo "failed=$FAILED" >> "$GITHUB_OUTPUT"
