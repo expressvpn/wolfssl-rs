@@ -6,7 +6,7 @@ on:
 
 jobs:
   ci:
-    needs: [test, build, fmt, lint, coverage, cargo-deny]
+    needs: [test, build, fmt, lint, coverage, check-dependencies]
     runs-on: ubuntu-latest
     steps:
       - shell: bash
@@ -14,18 +14,9 @@ jobs:
           echo "Build success"
   test:
     runs-on: ubuntu-latest
-    steps:
-      - uses: earthly/actions-setup@v1
-        with:
-          version: v0.7.15
-      - uses: actions/checkout@v3
-        with:
-          submodules: true
-      - name: Run Tests
-        run: earthly --ci +run-tests
-  coverage:
-    runs-on: ubuntu-latest
+    environment: earthly_visit_temp
     env:
+      EARTHLY_TOKEN: "${{ secrets.EARTHLY_TOKEN }}"
       FORCE_COLOR: 1
     steps:
       - uses: earthly/actions-setup@v1
@@ -34,10 +25,25 @@ jobs:
       - uses: actions/checkout@v3
         with:
           submodules: true
-      - name: Run Coverage
+      - name: +run-tests on Earthly satellite
+        run: earthly --ci --org expressvpn --satellite wolfssl-rs +run-tests
+  coverage:
+    runs-on: ubuntu-latest
+    environment: earthly_visit_temp
+    env:
+      EARTHLY_TOKEN: "${{ secrets.EARTHLY_TOKEN }}"
+      FORCE_COLOR: 1
+    steps:
+      - uses: earthly/actions-setup@v1
+        with:
+          version: v0.7.19
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+      - name: +run-coverage on Earthly satellite
         id: coverage
         run: |
-          earthly --ci --artifact +run-coverage/* output/
+          earthly --ci --org expressvpn --satellite wolfssl-rs --artifact +run-coverage/* output/
 
           EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
           echo "summary<<$EOF"    >> "$GITHUB_OUTPUT"
@@ -75,45 +81,61 @@ jobs:
           edit-mode: replace
   build:
     runs-on: ubuntu-latest
-    steps:
-      - uses: earthly/actions-setup@v1
-        with:
-          version: v0.7.15
-      - uses: actions/checkout@v3
-        with:
-          submodules: true
-      - name: Build crate
-        run: earthly --ci +build-release
-  fmt:
-    runs-on: ubuntu-latest
+    environment: earthly_visit_temp
     env:
+      EARTHLY_TOKEN: "${{ secrets.EARTHLY_TOKEN }}"
       FORCE_COLOR: 1
     steps:
       - uses: earthly/actions-setup@v1
         with:
-          version: v0.7.15
+          version: v0.7.19
       - uses: actions/checkout@v3
         with:
           submodules: true
-      - name: Check code formatting
-        run: earthly --ci +fmt
-  lint:
+      - name: Run +build-release on Earthly satellite
+        run: earthly --ci --org expressvpn --satellite wolfssl-rs +build-release
+  fmt:
     runs-on: ubuntu-latest
+    environment: earthly_visit_temp
+    env:
+      EARTHLY_TOKEN: "${{ secrets.EARTHLY_TOKEN }}"
+      FORCE_COLOR: 1
     steps:
       - uses: earthly/actions-setup@v1
         with:
-          version: v0.7.15
+          version: v0.7.19
       - uses: actions/checkout@v3
         with:
           submodules: true
-      - name: Lint crate
-        run: earthly --ci +lint
-  cargo-deny:
+      - name: Run +fmt on Earthly satellite
+        run: earthly --ci --org expressvpn --satellite wolfssl-rs +fmt
+  lint:
     runs-on: ubuntu-latest
+    environment: earthly_visit_temp
+    env:
+      EARTHLY_TOKEN: "${{ secrets.EARTHLY_TOKEN }}"
+      FORCE_COLOR: 1
     steps:
+      - uses: earthly/actions-setup@v1
+        with:
+          version: v0.7.19
       - uses: actions/checkout@v3
         with:
           submodules: true
-      - uses: EmbarkStudios/cargo-deny-action@v1
+      - name: Run +lint on Earthly satellite
+        run: earthly --ci --org expressvpn --satellite wolfssl-rs +lint
+  check-dependencies:
+    runs-on: ubuntu-latest
+    environment: earthly_visit_temp
+    env:
+      EARTHLY_TOKEN: "${{ secrets.EARTHLY_TOKEN }}"
+      FORCE_COLOR: 1
+    steps:
+      - uses: earthly/actions-setup@v1
         with:
-          command: check bans licenses sources
+          version: v0.7.19
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+      - name: Run +check-dependencies on Earthly satellite
+        run: earthly --ci --org expressvpn --satellite wolfssl-rs +check-dependencies
