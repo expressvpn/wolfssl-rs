@@ -714,6 +714,29 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         }
     }
 
+    /// Invokes [`wolfSSL_dtls13_use_quick_timeout`][0]
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls13_use_quick_timeout
+    pub fn dtls13_use_quick_timeout(&self) -> bool {
+        if !self.is_dtls() {
+            log::debug!("Session is not configured for DTLS");
+            return false;
+        }
+
+        let ssl = self.ssl.lock();
+        // SAFETY: [`wolfSSL_dtls13_use_quick_timeout`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls13_use_quick_timeout
+        // [1]: https://www.wolfssl.com/doxygen/ssl_8h.html#a61f3b53cb0397dd1debc8b8daaa490c2
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
+        match unsafe { wolfssl_sys::wolfSSL_dtls13_use_quick_timeout(ssl.as_ptr()) } {
+            0 => false,
+            1 => true,
+            e => unreachable!("{e:?}"),
+        }
+    }
+
     unsafe extern "C" fn io_recv_shim(
         _ssl: *mut wolfssl_sys::WOLFSSL,
         buf: *mut ::std::os::raw::c_char,
