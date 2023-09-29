@@ -2,7 +2,7 @@ use crate::{
     callback::{IOCallbackResult, IOCallbacks},
     context::Context,
     error::{Error, Poll, PollResult, Result},
-    Protocol, TLS_MAX_RECORD_SIZE,
+    Protocol, ProtocolVersion, TLS_MAX_RECORD_SIZE,
 };
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -193,6 +193,29 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         }
 
         Ok(session)
+    }
+
+    /// Gets the protocol version used for the session.
+    /// Invokes [`wolfSSL_version`][]
+    ///
+    /// No online documentation available for `wolfSSL_version`
+    pub fn version(&self) -> ProtocolVersion {
+        let ssl = self.ssl.lock();
+        // SAFETY: No documentation found for [`wolfSSL_version`][] api,
+        // From implementation, the api expects valid pointer to `WOLFSSL`
+        let version = unsafe { wolfssl_sys::wolfSSL_version(ssl.as_ptr()) };
+        match version as u32 {
+            wolfssl_sys::TLS1_VERSION => ProtocolVersion::TlsV1_0,
+            wolfssl_sys::TLS1_1_VERSION => ProtocolVersion::TlsV1_1,
+            wolfssl_sys::TLS1_2_VERSION => ProtocolVersion::TlsV1_2,
+            wolfssl_sys::TLS1_3_VERSION => ProtocolVersion::TlsV1_3,
+            wolfssl_sys::DTLS1_VERSION => ProtocolVersion::DtlsV1_0,
+            wolfssl_sys::DTLS1_2_VERSION => ProtocolVersion::DtlsV1_2,
+            wolfssl_sys::DTLS1_3_VERSION => ProtocolVersion::DtlsV1_3,
+            wolfssl_sys::SSL2_VERSION => ProtocolVersion::SslV2,
+            wolfssl_sys::SSL3_VERSION => ProtocolVersion::SslV3,
+            _ => ProtocolVersion::Unknown,
+        }
     }
 
     /// Gets the current cipher of the session.

@@ -86,6 +86,31 @@ pub fn enable_debugging(on: bool) {
     }
 }
 
+/// TLS/DTLS protocol versions
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum ProtocolVersion {
+    /// SSL 2.0
+    SslV2,
+    /// SSL 3.0
+    SslV3,
+    /// TLS 1.0
+    TlsV1_0,
+    /// TLS 1.1
+    TlsV1_1,
+    /// TLS 1.2
+    TlsV1_2,
+    /// TLS 1.3
+    TlsV1_3,
+    /// DTLS 1.0
+    DtlsV1_0,
+    /// DTLS 1.2
+    DtlsV1_2,
+    /// DTLS 1.3
+    DtlsV1_3,
+    /// Unknown protocol version
+    Unknown,
+}
+
 /// Corresponds to the various `wolf*_{client,server}_method()` APIs
 #[derive(Debug, Copy, Clone)]
 pub enum Protocol {
