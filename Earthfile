@@ -39,6 +39,7 @@ run-coverage:
     RUN mkdir /tmp/coverage
 
     DO rust-udc+CARGO --args="llvm-cov report --summary-only --output-path /tmp/coverage/summary.txt"
+    DO rust-udc+CARGO --args="llvm-cov report --json --output-path /tmp/coverage/coverage.json"
     DO rust-udc+CARGO --args="llvm-cov report --html --output-dir /tmp/coverage/"
     SAVE ARTIFACT /tmp/coverage/*
 

@@ -55,6 +55,48 @@ jobs:
           name: coverage
           path: output/html
           if-no-files-found: error
+      - name: Check coverage
+        id: coverage-check
+        run: |
+          REGIONS_SOFT_THRESHOLD=50
+          REGIONS_HARD_THRESHOLD=40
+          LINES_SOFT_THRESHOLD=65
+          LINES_HARD_THRESHOLD=60
+
+          regions_coverage=$(jq '.data[].totals.regions.percent | floor' output/coverage.json)
+          lines_coverage=$(jq '.data[].totals.lines.percent | floor' output/coverage.json)
+
+          echo "Regions: $regions_coverage% (soft: $REGIONS_SOFT_THRESHOLD%, hard: $REGIONS_HARD_THRESHOLD%)"
+          echo "Lines: $lines_coverage% (soft: $LINES_SOFT_THRESHOLD%, hard: $LINES_HARD_THRESHOLD%)"
+
+          FAILED=false
+
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "text<<$EOF" >> "$GITHUB_OUTPUT"
+
+          if [[ $regions_coverage -lt $REGIONS_HARD_THRESHOLD ]] ; then
+              echo ":x: Region coverage $regions_coverage% below hard threshold $REGIONS_HARD_THRESHOLD%" >> "$GITHUB_OUTPUT"
+              FAILED=true
+          elif [[ $regions_coverage -lt $REGIONS_SOFT_THRESHOLD ]] ; then
+              echo ":warning: Region coverage $regions_coverage% below soft threshold $REGIONS_SOFT_THRESHOLD%" >> "$GITHUB_OUTPUT"
+          else
+              echo ":white_check_mark: Region coverage $regions_coverage% passes" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ $lines_coverage -lt $LINES_HARD_THRESHOLD ]] ; then
+              echo ":x: Line coverage $lines_coverage% below hard threshold $LINES_HARD_THRESHOLD%" >> "$GITHUB_OUTPUT"
+              FAILED=true
+          elif [[ $lines_coverage -lt $LINES_SOFT_THRESHOLD ]] ; then
+              echo ":warning: Line coverage $lines_coverage% below soft threshold $LINES_SOFT_THRESHOLD%" >> "$GITHUB_OUTPUT"
+          else
+              echo ":white_check_mark: Line coverage $lines_coverage% passes" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "$EOF"            >> "$GITHUB_OUTPUT"
+
+          echo "Setting output: failed: $FAILED"
+          echo "failed=$FAILED" >> "$GITHUB_OUTPUT"
+
       - uses: jwalton/gh-find-current-pr@v1
         id: find-pr
         with:
@@ -78,7 +120,11 @@ jobs:
             ```
             ${{ steps.coverage.outputs.summary }}
             ```
+            ${{ steps.coverage-check.outputs.text }}
           edit-mode: replace
+      - name: Coverage check fails
+        if: steps.coverage-check.outputs.failed == 'true'
+        run: exit 1
   build:
     runs-on: ubuntu-latest
     environment: earthly_visit_temp
