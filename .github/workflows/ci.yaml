@@ -116,7 +116,7 @@ jobs:
           comment-id: ${{ steps.coverage-comment.outputs.comment-id }}
           issue-number: ${{ steps.find-pr.outputs.number }}
           body: |
-            [Code coverage summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}):
+            [Code coverage summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for ${{ github.sha }}:
             ```
             ${{ steps.coverage.outputs.summary }}
             ```
