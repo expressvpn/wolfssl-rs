@@ -360,8 +360,9 @@ checksum = "dd8b5dd2ae5ed71462c540258bedcb51965123ad7e7ccf4b9a8cafaa4a63576d"
 
 [[package]]
 name = "oqs-sys"
-version = "0.7.2"
-source = "git+https://github.com/open-quantum-safe/liboqs-rust?rev=10c540350d86fa71110b325f4883f421cb326970#10c540350d86fa71110b325f4883f421cb326970"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fa114149fb6e5362b9cf539de9305a6a3cf1556fbfa93b5053b4f70cf3adfb9"
 dependencies = [
  "bindgen",
  "build-deps",

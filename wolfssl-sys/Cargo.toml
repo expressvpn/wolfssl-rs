@@ -16,8 +16,7 @@ autotools = "0.2"
 build-target = "0.4.0"
 
 [dependencies.oqs-sys]
-git = "https://github.com/open-quantum-safe/liboqs-rust"
-rev = "10c540350d86fa71110b325f4883f421cb326970"
+version = "0.8.0"
 default-features = false
 features = ["kems", "sigs"]
 optional = true
