@@ -249,6 +249,26 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         }
     }
 
+    /// Gets the current curve of the session if ECDH was used,
+    /// otherwise `None`.
+    pub fn get_current_curve_name(&self) -> Option<String> {
+        // SAFETY: No online documentation available for
+        // `wolfSSL_get_curve_name`. In code documentation states:
+        //
+        // > Return the name of the curve used for key exchange as a printable string.
+        // >
+        // > ssl  The SSL/TLS object.
+        // > returns NULL if ECDH was not used, otherwise the name as a string.
+        let curve = unsafe { wolfssl_sys::wolfSSL_get_curve_name(self.ssl.lock().as_ptr()) };
+        if !curve.is_null() {
+            // SAFETY: Per above if `wolfSSL_get_curve_name` returns
+            // non-null then the result is a valid string.
+            unsafe { Some(std::ffi::CStr::from_ptr(curve).to_str().ok()?.to_string()) }
+        } else {
+            None
+        }
+    }
+
     /// Invokes [`wolfSSL_is_init_finished`][0]
     ///
     /// "Init" in this case is the formation of the TLS connection.
@@ -1528,6 +1548,20 @@ mod tests {
         assert_eq!(
             client.ssl.get_current_cipher_name().unwrap(),
             server.ssl.get_current_cipher_name().unwrap()
+        )
+    }
+
+    #[test]
+    fn get_current_curve_name() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let (client, server) = make_connected_clients();
+
+        // Both should have a curve and both should be the same
+        // curve.
+        assert_eq!(
+            dbg!(client.ssl.get_current_curve_name().unwrap()),
+            dbg!(server.ssl.get_current_curve_name().unwrap())
         )
     }
 }
