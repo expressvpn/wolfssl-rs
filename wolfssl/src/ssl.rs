@@ -2,7 +2,7 @@ use crate::{
     callback::{IOCallbackResult, IOCallbacks},
     context::Context,
     error::{Error, Poll, PollResult, Result},
-    Protocol, TLS_MAX_RECORD_SIZE,
+    Protocol, ProtocolVersion, TLS_MAX_RECORD_SIZE,
 };
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -193,6 +193,29 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         }
 
         Ok(session)
+    }
+
+    /// Gets the protocol version used for the session.
+    /// Invokes [`wolfSSL_version`][]
+    ///
+    /// No online documentation available for `wolfSSL_version`
+    pub fn version(&self) -> ProtocolVersion {
+        let ssl = self.ssl.lock();
+        // SAFETY: No documentation found for [`wolfSSL_version`][] api,
+        // From implementation, the api expects valid pointer to `WOLFSSL`
+        let version = unsafe { wolfssl_sys::wolfSSL_version(ssl.as_ptr()) };
+        match version as u32 {
+            wolfssl_sys::TLS1_VERSION => ProtocolVersion::TlsV1_0,
+            wolfssl_sys::TLS1_1_VERSION => ProtocolVersion::TlsV1_1,
+            wolfssl_sys::TLS1_2_VERSION => ProtocolVersion::TlsV1_2,
+            wolfssl_sys::TLS1_3_VERSION => ProtocolVersion::TlsV1_3,
+            wolfssl_sys::DTLS1_VERSION => ProtocolVersion::DtlsV1_0,
+            wolfssl_sys::DTLS1_2_VERSION => ProtocolVersion::DtlsV1_2,
+            wolfssl_sys::DTLS1_3_VERSION => ProtocolVersion::DtlsV1_3,
+            wolfssl_sys::SSL2_VERSION => ProtocolVersion::SslV2,
+            wolfssl_sys::SSL3_VERSION => ProtocolVersion::SslV3,
+            _ => ProtocolVersion::Unknown,
+        }
     }
 
     /// Gets the current cipher of the session.
@@ -712,6 +735,25 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             },
             e => unreachable!("{e:?}"),
         }
+    }
+
+    /// Invokes [`wolfSSL_dtls13_use_quick_timeout`][0]
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls13_use_quick_timeout
+    pub fn dtls13_use_quick_timeout(&self) -> bool {
+        if !self.is_dtls() {
+            log::debug!("Session is not configured for DTLS");
+            return false;
+        }
+
+        let ssl = self.ssl.lock();
+        // SAFETY: [`wolfSSL_dtls13_use_quick_timeout`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_dtls13_use_quick_timeout
+        // [1]: https://www.wolfssl.com/doxygen/ssl_8h.html#a61f3b53cb0397dd1debc8b8daaa490c2
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
+        0 != unsafe { wolfssl_sys::wolfSSL_dtls13_use_quick_timeout(ssl.as_ptr()) }
     }
 
     unsafe extern "C" fn io_recv_shim(
@@ -1453,5 +1495,25 @@ mod tests {
             .unwrap();
 
         ssl.dtls_set_mtu(mtu);
+    }
+
+    #[test]
+    fn dtls13_use_quick_timeout() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        // call before connection
+        let client_ctx = ContextBuilder::new(Protocol::DtlsClientV1_3)
+            .unwrap()
+            .build();
+
+        let ssl = client_ctx
+            .new_session(SessionConfig::new(NoIOCallbacks))
+            .unwrap();
+
+        assert!(!ssl.dtls13_use_quick_timeout());
+
+        // call after connection succeeds
+        let (client, _) = make_connected_clients();
+        assert!(!client.ssl.dtls13_use_quick_timeout());
     }
 }

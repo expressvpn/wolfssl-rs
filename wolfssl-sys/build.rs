@@ -7,6 +7,7 @@ extern crate bindgen;
 use autotools::Config;
 use std::collections::HashSet;
 use std::env;
+use std::fs::File;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -40,6 +41,35 @@ fn copy_wolfssl(dest: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+const PATCH_DIR: &str = "patches";
+const PATCHES: &[&str] = &[
+    "0001-DoHelloVerifyRequest-only-do-DTLS-1.3-version-check.patch",
+    "0002-DTLS-1.3-move-state-machine-forward-when-HVR-receive.patch",
+    "0003-DtlsShouldDrop-don-t-ignore-app-data-sent-before-a-S.patch",
+    "0004-Dtls13GetRnMask-Correctly-get-chacha-counter-on-BE-s.patch",
+    "1000-Guard-away-properly-don-t-build-sphincs-code.patch",
+    "1001-Allow-easily-disabling-of-SPHINCS.patch",
+    "2000-Rename-utils.c-to-utils.h.patch",
+    "2001-Merge-pull-request-6700-from-julek-wolfssl-dtls13-do.patch",
+];
+
+/**
+ * Apply patch to wolfssl-src
+ */
+fn apply_patch(dest: &str, patch: &str) {
+    let wolfssl_path = format!("{dest}/wolfssl-src");
+    let patch = format!("{}/{}", PATCH_DIR, patch);
+
+    let patch_buffer = File::open(patch).unwrap();
+    Command::new("patch")
+        .arg("-d")
+        .arg(wolfssl_path)
+        .arg("-p1")
+        .stdin(patch_buffer)
+        .status()
+        .unwrap();
+}
+
 /**
 Builds WolfSSL
 */
@@ -53,6 +83,8 @@ fn build_wolfssl(dest: &str) -> PathBuf {
         .disable_shared()
         // Enable TLS/1.3
         .enable("tls13", None)
+        // Enable DTLS/1.3
+        .enable("dtls13", None)
         // Disable old TLS versions
         .disable("oldtls", None)
         // Enable single threaded mode
@@ -69,6 +101,12 @@ fn build_wolfssl(dest: &str) -> PathBuf {
         .disable("sha3", None)
         // Disable DH key exchanges
         .disable("dh", None)
+        // Disable examples
+        .disable("examples", None)
+        // Disable benchmarks
+        .disable("benchmark", None)
+        // Disable sys ca certificate store
+        .disable("sys-ca-certs", None)
         // Enable elliptic curve exchanges
         .enable("supportedcurves", None)
         .enable("curve25519", None)
@@ -81,7 +119,10 @@ fn build_wolfssl(dest: &str) -> PathBuf {
         .cflag("-fPIC")
         .cflag("-DWOLFSSL_DTLS_ALLOW_FUTURE")
         .cflag("-DWOLFSSL_MIN_RSA_BITS=2048")
-        .cflag("-DWOLFSSL_MIN_ECC_BITS=256");
+        .cflag("-DWOLFSSL_MIN_ECC_BITS=256")
+        .cflag("-DUSE_CERT_BUFFERS_4096")
+        .cflag("-DUSE_CERT_BUFFERS_256")
+        .cflag("-DWOLFSSL_NO_SPHINCS");
 
     if cfg!(feature = "debug") {
         conf.enable("debug", None);
@@ -126,6 +167,10 @@ fn main() -> std::io::Result<()> {
 
     // Extract WolfSSL
     copy_wolfssl(&dst_string)?;
+
+    // Apply patches
+    PATCHES.iter().for_each(|&f| apply_patch(&dst_string, f));
+    println!("cargo:rerun-if-changed={}", PATCH_DIR);
 
     // Configure and build WolfSSL
     let dst = build_wolfssl(&dst_string);

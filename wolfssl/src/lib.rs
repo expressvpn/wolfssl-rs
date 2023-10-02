@@ -86,6 +86,31 @@ pub fn enable_debugging(on: bool) {
     }
 }
 
+/// TLS/DTLS protocol versions
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum ProtocolVersion {
+    /// SSL 2.0
+    SslV2,
+    /// SSL 3.0
+    SslV3,
+    /// TLS 1.0
+    TlsV1_0,
+    /// TLS 1.1
+    TlsV1_1,
+    /// TLS 1.2
+    TlsV1_2,
+    /// TLS 1.3
+    TlsV1_3,
+    /// DTLS 1.0
+    DtlsV1_0,
+    /// DTLS 1.2
+    DtlsV1_2,
+    /// DTLS 1.3
+    DtlsV1_3,
+    /// Unknown protocol version
+    Unknown,
+}
+
 /// Corresponds to the various `wolf*_{client,server}_method()` APIs
 #[derive(Debug, Copy, Clone)]
 pub enum Protocol {
@@ -93,10 +118,14 @@ pub enum Protocol {
     DtlsClient,
     /// `wolfDTLSv1_2_client_method`
     DtlsClientV1_2,
+    /// `wolfDTLSv1_3_client_method`
+    DtlsClientV1_3,
     /// `wolfDTLS_server_method`
     DtlsServer,
     /// `wolfDTLSv1_2_server_method`
     DtlsServerV1_2,
+    /// `wolfDTLSv1_3_server_method`
+    DtlsServerV1_3,
     /// `wolfTLS_client_method`
     TlsClient,
     /// `wolfTLSv1_2_client_method`
@@ -127,9 +156,13 @@ impl Protocol {
             // SAFETY: as above
             Self::DtlsClientV1_2 => unsafe { wolfssl_sys::wolfDTLSv1_2_client_method() },
             // SAFETY: as above
+            Self::DtlsClientV1_3 => unsafe { wolfssl_sys::wolfDTLSv1_3_client_method() },
+            // SAFETY: as above
             Self::DtlsServer => unsafe { wolfssl_sys::wolfDTLS_server_method() },
             // SAFETY: as above
             Self::DtlsServerV1_2 => unsafe { wolfssl_sys::wolfDTLSv1_2_server_method() },
+            // SAFETY: as above
+            Self::DtlsServerV1_3 => unsafe { wolfssl_sys::wolfDTLSv1_3_server_method() },
             // SAFETY: as above
             Self::TlsClient => unsafe { wolfssl_sys::wolfTLS_client_method() },
             // SAFETY: as above
