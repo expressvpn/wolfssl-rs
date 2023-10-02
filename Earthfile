@@ -55,6 +55,8 @@ build-crate:
 lint:
     FROM +copy-src
     DO rust-udc+CARGO --args="clippy --all-features --all-targets -- -D warnings"
+    ENV RUSTDOCFLAGS="-D warnings"
+    DO rust-udc+CARGO --args="doc --document-private-items"
 
 fmt:
     FROM +copy-src
