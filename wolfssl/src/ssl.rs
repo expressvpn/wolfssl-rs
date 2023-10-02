@@ -1516,4 +1516,18 @@ mod tests {
         let (client, _) = make_connected_clients();
         assert!(!client.ssl.dtls13_use_quick_timeout());
     }
+
+    #[test]
+    fn get_current_cipher_name() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let (client, server) = make_connected_clients();
+
+        // Both should have a cipher and both should be the same
+        // cipher.
+        assert_eq!(
+            client.ssl.get_current_cipher_name().unwrap(),
+            server.ssl.get_current_cipher_name().unwrap()
+        )
+    }
 }
