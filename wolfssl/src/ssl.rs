@@ -196,7 +196,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     }
 
     /// Gets the protocol version used for the session.
-    /// Invokes [`wolfSSL_version`][]
+    /// Invokes [`wolfssl_sys::wolfSSL_version`]
     ///
     /// No online documentation available for `wolfSSL_version`
     pub fn version(&self) -> ProtocolVersion {
