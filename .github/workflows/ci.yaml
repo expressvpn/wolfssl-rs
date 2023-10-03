@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v3
         with:
           submodules: true
-      - name: +run-tests on Earthly satellite
+      - name: Run +run-tests on Earthly satellite
         run: earthly --ci --org expressvpn --satellite wolfssl-rs +run-tests
   coverage:
     runs-on: ubuntu-latest
@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v3
         with:
           submodules: true
-      - name: +run-coverage on Earthly satellite
+      - name: Run +run-coverage on Earthly satellite
         id: coverage
         run: |
           earthly --ci --org expressvpn --satellite wolfssl-rs --artifact +run-coverage/* output/

@@ -41,10 +41,15 @@ cargo clippy
 ```
 
 ## Building with Earthly
-There is also an `Earthfile` provided so that you can build the crate in [Earthly](https://earthly.dev):
+There is also an `Earthfile` provided.  For example, here's how you can build the crate in [Earthly](https://earthly.dev):
 
 ```
 earthly +build-crate
+```
+
+For more information about the different Earthly targets available, run:
+```
+earthly doc
 ```
 ## Speeding up development with Earthly Satellites
 

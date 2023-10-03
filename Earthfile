@@ -18,20 +18,24 @@ copy-src:
     FROM +build-deps
     COPY --dir Cargo.toml Cargo.lock deny.toml wolfssl wolfssl-sys ./
 
+# build-dev builds with the Cargo dev profile and produces debug artifacts
 build-dev:
     FROM +copy-src
     DO rust-udc+CARGO --args="build"
     SAVE ARTIFACT target/debug /debug AS LOCAL artifacts/debug
 
+# build-release builds with the Cargo release profile and produces release artifacts
 build-release:
     FROM +copy-src
     DO rust-udc+CARGO --args="build --release"
     SAVE ARTIFACT target/release /release AS LOCAL artifacts/release
 
+# run-tests executes all unit and integration tests via Cargo
 run-tests:
     FROM +copy-src
     DO rust-udc+CARGO --args="test"
 
+# run-coverage generates a report of code coverage by unit and integration tests via cargo-llvm-cov
 run-coverage:
     FROM +copy-src
     DO rust-udc+CARGO --args="llvm-cov test"
@@ -43,23 +47,28 @@ run-coverage:
     DO rust-udc+CARGO --args="llvm-cov report --html --output-dir /tmp/coverage/"
     SAVE ARTIFACT /tmp/coverage/*
 
+# build runs tests and then creates a release build
 build:
     BUILD +run-tests
     BUILD +build-release
 
+# build-crate creates a .crate file for distribution of source code
 build-crate:
     FROM +copy-src
     DO rust-udc+CARGO --args="package"
     SAVE ARTIFACT target/package/*.crate /package/ AS LOCAL artifacts/crate/
 
+# lint runs cargo clippy on the source code
 lint:
     FROM +copy-src
     DO rust-udc+CARGO --args="clippy --all-features --all-targets -- -D warnings"
 
+# fmt checks whether Rust code is formatted according to style guidelines
 fmt:
     FROM +copy-src
     DO rust-udc+CARGO --args="fmt --check"
 
+# check-dependencies lints our dependencies via cargo-deny
 check-dependencies:
     FROM +copy-src
     DO rust-udc+CARGO --args="deny --all-features check bans license sources"
