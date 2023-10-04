@@ -62,6 +62,8 @@ build-crate:
 lint:
     FROM +copy-src
     DO rust-udc+CARGO --args="clippy --all-features --all-targets -- -D warnings"
+    ENV RUSTDOCFLAGS="-D warnings"
+    DO rust-udc+CARGO --args="doc --document-private-items"
 
 # fmt checks whether Rust code is formatted according to style guidelines
 fmt:
