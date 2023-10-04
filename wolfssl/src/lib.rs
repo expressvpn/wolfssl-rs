@@ -111,6 +111,24 @@ pub enum ProtocolVersion {
     Unknown,
 }
 
+impl ProtocolVersion {
+    /// Get a static string representation of the version.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProtocolVersion::SslV2 => "ssl_2",
+            ProtocolVersion::SslV3 => "ssl_3",
+            ProtocolVersion::TlsV1_0 => "tls_1_0",
+            ProtocolVersion::TlsV1_1 => "tls_1_1",
+            ProtocolVersion::TlsV1_2 => "tls_1_2",
+            ProtocolVersion::TlsV1_3 => "tls_1_3",
+            ProtocolVersion::DtlsV1_0 => "dtls_1_0",
+            ProtocolVersion::DtlsV1_2 => "dtls_1_2",
+            ProtocolVersion::DtlsV1_3 => "dtls_1_3",
+            ProtocolVersion::Unknown => "unknown",
+        }
+    }
+}
+
 /// Corresponds to the various `wolf*_{client,server}_method()` APIs
 #[derive(Debug, Copy, Clone)]
 pub enum Protocol {
@@ -211,9 +229,24 @@ pub enum Secret<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
 
     #[test]
     fn wolf_init_test() {
         wolf_init().unwrap();
+    }
+
+    #[test_case(ProtocolVersion::SslV2 => "ssl_2")]
+    #[test_case(ProtocolVersion::SslV3 => "ssl_3")]
+    #[test_case(ProtocolVersion::TlsV1_0 => "tls_1_0")]
+    #[test_case(ProtocolVersion::TlsV1_1 => "tls_1_1")]
+    #[test_case(ProtocolVersion::TlsV1_2 => "tls_1_2")]
+    #[test_case(ProtocolVersion::TlsV1_3 => "tls_1_3")]
+    #[test_case(ProtocolVersion::DtlsV1_0 => "dtls_1_0")]
+    #[test_case(ProtocolVersion::DtlsV1_2 => "dtls_1_2")]
+    #[test_case(ProtocolVersion::DtlsV1_3 => "dtls_1_3")]
+    #[test_case(ProtocolVersion::Unknown => "unknown")]
+    fn protocol_version_as_str(p: ProtocolVersion) -> &'static str {
+        p.as_str()
     }
 }
