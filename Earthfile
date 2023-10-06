@@ -1,6 +1,6 @@
 VERSION 0.7
-# Importing https://github.com/earthly/lib/tree/2.2.1/rust via commit hash pinning becuase git tags can be changed
-IMPORT github.com/earthly/lib/rust:794f789da87fc638cd322e9b60f82ad896282fb3 AS rust-udc
+# Importing https://github.com/earthly/lib/tree/2.2.4/rust via commit hash pinning because git tags can be changed
+IMPORT github.com/earthly/lib/rust:4cfebf74b5805ad943d325a94601e808afbf6e6f AS rust-udc
 
 FROM rust:1.73.0
 
@@ -21,13 +21,13 @@ copy-src:
 # build-dev builds with the Cargo dev profile and produces debug artifacts
 build-dev:
     FROM +copy-src
-    DO rust-udc+CARGO --args="build"
+    DO rust-udc+CARGO --args="build" --output="debug/[^/]+"
     SAVE ARTIFACT target/debug /debug AS LOCAL artifacts/debug
 
 # build-release builds with the Cargo release profile and produces release artifacts
 build-release:
     FROM +copy-src
-    DO rust-udc+CARGO --args="build --release"
+    DO rust-udc+CARGO --args="build --release" --output="release/[^/]+"
     SAVE ARTIFACT target/release /release AS LOCAL artifacts/release
 
 # run-tests executes all unit and integration tests via Cargo
@@ -55,7 +55,7 @@ build:
 # build-crate creates a .crate file for distribution of source code
 build-crate:
     FROM +copy-src
-    DO rust-udc+CARGO --args="package"
+    DO rust-udc+CARGO --args="package" --output="package/.*\.crate"
     SAVE ARTIFACT target/package/*.crate /package/ AS LOCAL artifacts/crate/
 
 # lint runs cargo clippy on the source code
