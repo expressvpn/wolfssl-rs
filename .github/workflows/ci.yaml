@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: earthly/actions-setup@v1
         with:
-          version: v0.7.19
+          version: v0.7.20
       - uses: actions/checkout@v3
         with:
           submodules: true
@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: earthly/actions-setup@v1
         with:
-          version: v0.7.19
+          version: v0.7.20
       - uses: actions/checkout@v3
         with:
           submodules: true
@@ -136,7 +136,7 @@ jobs:
     steps:
       - uses: earthly/actions-setup@v1
         with:
-          version: v0.7.19
+          version: v0.7.20
       - uses: actions/checkout@v3
         with:
           submodules: true
@@ -151,7 +151,7 @@ jobs:
     steps:
       - uses: earthly/actions-setup@v1
         with:
-          version: v0.7.19
+          version: v0.7.20
       - uses: actions/checkout@v3
         with:
           submodules: true
@@ -166,7 +166,7 @@ jobs:
     steps:
       - uses: earthly/actions-setup@v1
         with:
-          version: v0.7.19
+          version: v0.7.20
       - uses: actions/checkout@v3
         with:
           submodules: true
@@ -181,7 +181,7 @@ jobs:
     steps:
       - uses: earthly/actions-setup@v1
         with:
-          version: v0.7.19
+          version: v0.7.20
       - uses: actions/checkout@v3
         with:
           submodules: true
