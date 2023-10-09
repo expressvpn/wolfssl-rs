@@ -73,4 +73,4 @@ fmt:
 # check-dependencies lints our dependencies via cargo-deny
 check-dependencies:
     FROM +copy-src
-    DO rust-udc+CARGO --args="deny --all-features check bans license sources"
+    DO rust-udc+CARGO --args="deny --all-features check --deny warnings bans license sources"
