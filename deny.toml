@@ -37,11 +37,15 @@ exceptions = [
 ignore = true
 
 [bans]
-multiple-versions = "warn"
+multiple-versions = "deny"
 wildcards = "allow"
 highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
+skip = [
+    { name = "bindgen", version = "0.65.1" },
+    { name = "bitflags", version = "1.3.2" },
+]
 
 [sources]
 unknown-registry = "deny"
