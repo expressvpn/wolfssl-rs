@@ -16,7 +16,7 @@ build-deps:
 
 copy-src:
     FROM +build-deps
-    COPY --dir Cargo.toml Cargo.lock deny.toml wolfssl wolfssl-sys ./
+    COPY --keep-ts --dir Cargo.toml Cargo.lock deny.toml wolfssl wolfssl-sys ./
 
 # build-dev builds with the Cargo dev profile and produces debug artifacts
 build-dev:
