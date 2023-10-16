@@ -9,7 +9,7 @@ WORKDIR /wolfssl-rs
 build-deps:
     RUN apt-get update -qq
     RUN apt-get install --no-install-recommends -qq autoconf autotools-dev libtool-bin clang cmake bsdmainutils
-    RUN cargo install --locked cargo-deny cargo-llvm-cov
+    DO rust-udc+CARGO --keep_fingerprints=true --args="install --locked cargo-deny cargo-llvm-cov"
     RUN rustup component add clippy
     RUN rustup component add rustfmt
     RUN rustup component add llvm-tools-preview
