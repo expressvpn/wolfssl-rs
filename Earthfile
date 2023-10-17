@@ -1,6 +1,6 @@
 VERSION 0.7
-# Importing https://github.com/earthly/lib/tree/2.2.5/rust via commit hash pinning because git tags can be changed
-IMPORT github.com/earthly/lib/rust:7478ffcedbade1997ecdf375099c6a9dc7d3861f AS rust-udc
+# Importing https://github.com/earthly/lib/tree/2.2.6/rust via commit hash pinning because git tags can be changed
+IMPORT github.com/earthly/lib/rust:0b9edb9f116ebf6f9a7426e45593cec457503ed9 AS rust-udc
 
 FROM rust:1.73.0
 
