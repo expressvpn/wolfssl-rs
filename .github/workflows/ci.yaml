@@ -18,7 +18,6 @@ jobs:
       matrix:
         target: [run-tests, build-release, fmt, lint, check-dependencies]
     runs-on: ubuntu-latest
-    environment: earthly_visit_temp
     env:
       EARTHLY_TOKEN: "${{ secrets.EARTHLY_TOKEN }}"
       FORCE_COLOR: 1
@@ -33,7 +32,6 @@ jobs:
         run: earthly --ci --org expressvpn --satellite wolfssl-rs +${{ matrix.target }}
   coverage:
     runs-on: ubuntu-latest
-    environment: earthly_visit_temp
     env:
       EARTHLY_TOKEN: "${{ secrets.EARTHLY_TOKEN }}"
       FORCE_COLOR: 1
