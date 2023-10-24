@@ -202,6 +202,11 @@ impl Protocol {
     fn is_tls_13(&self) -> bool {
         matches!(self, Self::TlsClientV1_3 | Self::TlsServerV1_3)
     }
+
+    /// Checks if the protocol is compatible with DTLS 1.3
+    fn is_dtls_13(&self) -> bool {
+        matches!(self, Self::DtlsClientV1_3 | Self::DtlsServerV1_3)
+    }
 }
 
 /// Defines a CA certificate
