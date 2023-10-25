@@ -2,7 +2,7 @@ use crate::{
     callback::{IOCallbackResult, IOCallbacks},
     context::Context,
     error::{Error, Poll, PollResult, Result},
-    Protocol, ProtocolVersion, TLS_MAX_RECORD_SIZE,
+    CurveGroup, Protocol, ProtocolVersion, TLS_MAX_RECORD_SIZE,
 };
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -59,6 +59,8 @@ pub struct SessionConfig<IOCB: IOCallbacks> {
     /// If set, configures the session to check the given domain against the
     /// peer certificate during connection.
     pub checked_domain_name: Option<String>,
+    /// If set, specifies a curve group to use for key share
+    pub keyshare_group: Option<CurveGroup>,
 }
 
 impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
@@ -71,6 +73,7 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
             dtls_mtu: Default::default(),
             server_name_indicator: Default::default(),
             checked_domain_name: Default::default(),
+            keyshare_group: Default::default(),
         }
     }
 
@@ -95,6 +98,12 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
     /// Sets [`Self::checked_domain_name`]
     pub fn with_checked_domain_name(mut self, domain: &str) -> Self {
         self.checked_domain_name = Some(domain.to_string());
+        self
+    }
+
+    /// Sets [`Self::keyshare_group`]
+    pub fn with_keyshare_group(mut self, curve: CurveGroup) -> Self {
+        self.keyshare_group = Some(curve);
         self
     }
 }
@@ -190,6 +199,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             session
                 .set_domain_name_to_check(&name)
                 .map_err(|e| NewSessionError::SetupFailed("set_domain_name_to_check", e))?;
+        }
+
+        if let Some(curve) = config.keyshare_group {
+            session
+                .use_key_share_curve(curve)
+                .map_err(|e| NewSessionError::SetupFailed("use_key_share_curve", e))?;
         }
 
         Ok(session)
@@ -1037,6 +1052,27 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         } {
             wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
             x @ wolfssl_sys::WOLFSSL_FAILURE => Err(Error::fatal(self.get_error(x))),
+            e => unreachable!("{e:?}"),
+        }
+    }
+
+    ///  Invokes [`wolfSSL_UseKeyShare`][0]
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_usekeyshare
+    fn use_key_share_curve(&self, curve: CurveGroup) -> Result<()> {
+        // SAFETY: [`wolfSSL_UseKeyShare`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_usekeyshare
+        // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#gac2d00ac65513f10e0ccd1b67d9a99e3d
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_UseKeyShare(ssl.as_ptr(), curve.as_ffi() as wolfssl_sys::word16)
+        } {
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
+            wolfssl_sys::MEMORY_E => panic!("Memory Allocation Failed"),
+            e @ wolfssl_sys::BAD_FUNC_ARG => unreachable!("{e:?}"),
             e => unreachable!("{e:?}"),
         }
     }
