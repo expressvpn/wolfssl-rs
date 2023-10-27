@@ -38,13 +38,14 @@ run-tests:
 # run-coverage generates a report of code coverage by unit and integration tests via cargo-llvm-cov
 run-coverage:
     FROM +copy-src
-    DO rust-udc+CARGO --keep_fingerprints=true --args="llvm-cov test"
+    DO rust-udc+CARGO --keep_fingerprints=true --args="llvm-cov test" --output='llvm-cov-target/.*'
 
     RUN mkdir /tmp/coverage
 
-    DO rust-udc+CARGO --keep_fingerprints=true --args="llvm-cov report --summary-only --output-path /tmp/coverage/summary.txt"
-    DO rust-udc+CARGO --keep_fingerprints=true --args="llvm-cov report --json --output-path /tmp/coverage/coverage.json"
-    DO rust-udc+CARGO --keep_fingerprints=true --args="llvm-cov report --html --output-dir /tmp/coverage/"
+    RUN cargo llvm-cov report --summary-only --output-path /tmp/coverage/summary.txt
+    RUN cargo llvm-cov report --json --output-path /tmp/coverage/coverage.json
+    RUN cargo llvm-cov report --html --output-dir /tmp/coverage/
+
     SAVE ARTIFACT /tmp/coverage/*
 
 # build runs tests and then creates a release build
