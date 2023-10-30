@@ -555,7 +555,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_update_keys
     pub fn try_trigger_update_key(&self) -> PollResult<()> {
-        if !self.protocol.is_tls_13() {
+        if !self.protocol.is_tls_13() && !self.protocol.is_dtls_13() {
             return Ok(Poll::Ready(()));
         }
 
@@ -587,13 +587,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// Returns `true` if the client has sent a key update and is expecting a
     /// response, `false` otherwise.
     ///
-    /// Note that this is a TLS 1.3 only feature. If the session is not TLS 1.3
+    /// Note that this is a TLS/DTLS 1.3 only feature. If the session is not TLS/DTLS 1.3
     /// we will always return false.
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_key_update_response
     pub fn is_update_keys_pending(&self) -> bool {
-        // TODO: Check whether we need to enable for DTLS1.3
-        if !self.protocol.is_tls_13() {
+        if !self.protocol.is_tls_13() && !self.protocol.is_dtls_13() {
             return false;
         }
 
@@ -1360,15 +1359,15 @@ mod tests {
         assert!(!server.ssl.is_secure_renegotiation_pending());
     }
 
-    #[test]
-    fn try_trigger_update_keys() {
+    #[test_case(Protocol::TlsClientV1_3, Protocol::TlsServerV1_3; "tls1.3")]
+    #[test_case(Protocol::DtlsClientV1_3, Protocol::DtlsServerV1_3; "dtls1.3")]
+    fn try_trigger_update_keys(client: Protocol, server: Protocol) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let (client, server) =
-            make_connected_clients_with_protocol(Protocol::TlsClientV1_3, Protocol::TlsServerV1_3);
+        let (client, server) = make_connected_clients_with_protocol(client, server);
 
-        assert!(client.ssl.protocol.is_tls_13());
-        assert!(server.ssl.protocol.is_tls_13());
+        assert!(client.ssl.protocol.is_tls_13() || client.ssl.protocol.is_dtls_13());
+        assert!(server.ssl.protocol.is_tls_13() || server.ssl.protocol.is_dtls_13());
 
         // Trigger the wolfssl key update mechanism. This will cause the client
         // to send a key update message.
