@@ -75,6 +75,43 @@ jobs:
     # semver bump in `*/Cargo.toml`. Will fail if there are available
     # updates.
     - name: Check for outdated dependencies
+      id: outdated-check
+      shell: bash
       run: |
         git checkout ${{ steps.pr.outputs.pull-request-head-sha }}
-        cargo outdated --root-deps-only --exit-code 1
+
+        failed=false
+
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        echo "comment<<$EOF" >> "$GITHUB_OUTPUT"
+
+        if ! cargo outdated --root-deps-only --exit-code 1 | tee /tmp/workspace-outdated.log ; then
+            echo "Workspace dependencies are out of date"
+            failed=true
+
+            echo '# Workspace Outdated Dependencies'               >> "$GITHUB_OUTPUT"
+            echo '```console'                                      >> "$GITHUB_OUTPUT"
+            echo '$ cargo outdated --root-deps-only --exit-code 1' >> "$GITHUB_OUTPUT"
+            cat /tmp/workspace-outdated.log                        >> "$GITHUB_OUTPUT"
+            echo '```'                                             >> "$GITHUB_OUTPUT"
+        fi
+
+        echo "$EOF" >> "$GITHUB_OUTPUT"
+
+        echo "Setting output: failed: $failed"
+        echo "failed=$failed" >> "$GITHUB_OUTPUT"
+
+    # If there was no PR then there is nowhere to put a comment,
+    # given a weekly update cadence it's 99% likely there will be a
+    # comment.
+    - name: Outdated dependencies comment
+      if: steps.pr.outputs.pull-request-number && steps.outdated-check.outputs.failed == 'true'
+      uses: peter-evans/create-or-update-comment@v3
+      with:
+        issue-number: ${{ steps.pr.outputs.pull-request-number }}
+        body: ${{ steps.outdated-check.outputs.comment }}
+        edit-mode: replace
+
+    - name: Outdated check fails
+      if: steps.outdated-check.outputs.failed == 'true'
+      run: exit 1
