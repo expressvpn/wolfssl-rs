@@ -2,7 +2,7 @@ use crate::{
     callback::IOCallbacks,
     error::{Error, Result},
     ssl::{Session, SessionConfig},
-    NewSessionError, Protocol, RootCertificate, Secret,
+    CurveGroup, NewSessionError, Protocol, RootCertificate, Secret,
 };
 use std::ptr::NonNull;
 use thiserror::Error;
@@ -153,6 +153,35 @@ impl ContextBuilder {
             wolfssl_sys::wolfSSL_CTX_set_cipher_list(
                 self.ctx.as_ptr(),
                 cipher_list.as_c_str().as_ptr(),
+            )
+        };
+
+        if result == wolfssl_sys::WOLFSSL_SUCCESS {
+            Ok(self)
+        } else {
+            Err(Error::fatal(result))
+        }
+    }
+
+    /// Wraps [`wolfSSL_CTX_set_groups`][0]
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_set_groups
+    pub fn with_groups(self, groups: &[CurveGroup]) -> Result<Self> {
+        let mut ffi_curves = groups.iter().map(|g| g.as_ffi() as i32).collect::<Vec<_>>();
+
+        // SAFETY: [`wolfSSL_CTX_set_groups`][0] ([also][1]) requires
+        // a valid `ctx` pointer from `wolfSSL_CTX_new()` and `groups`
+        // parameter which should be a pointer to int with length
+        // corresponding to the `count` argument which is guaranteed
+        // by our use of a `Vec` here.
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_set_groups
+        // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#ga5bab039f79486d3ac31be72bc5f4e1e8
+        let result = unsafe {
+            wolfssl_sys::wolfSSL_CTX_set_groups(
+                self.ctx.as_ptr(),
+                ffi_curves.as_mut_ptr(),
+                ffi_curves.len() as i32,
             )
         };
 
