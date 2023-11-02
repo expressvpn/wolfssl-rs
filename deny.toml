@@ -43,7 +43,6 @@ highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
 skip = [
-    { name = "bindgen", version = "0.65.1" },
     { name = "syn", version = "1.0.109" },
     { name = "bitflags", version = "1.3.2" },
 ]
