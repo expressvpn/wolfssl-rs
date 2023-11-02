@@ -51,6 +51,30 @@ impl ContextBuilder {
         Ok(Self { ctx, protocol })
     }
 
+    /// When `cond` is True call fallible `func` on `Self`
+    pub fn try_when<F>(self, cond: bool, func: F) -> Result<Self>
+    where
+        F: FnOnce(Self) -> Result<Self>,
+    {
+        if cond {
+            func(self)
+        } else {
+            Ok(self)
+        }
+    }
+
+    /// When `maybe` is Some(_) call fallible `func` on `Self` and the contained value
+    pub fn try_when_some<F, T>(self, maybe: Option<T>, func: F) -> Result<Self>
+    where
+        F: FnOnce(Self, T) -> Result<Self>,
+    {
+        if let Some(t) = maybe {
+            func(self, t)
+        } else {
+            Ok(self)
+        }
+    }
+
     /// Wraps [`wolfSSL_CTX_load_verify_buffer`][0] and [`wolfSSL_CTX_load_verify_locations`][1]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_load_verify_buffer
@@ -506,6 +530,45 @@ mod tests {
     #[test]
     fn new() {
         ContextBuilder::new(Protocol::DtlsClient).unwrap();
+    }
+
+    #[test_case(true, true => true)]
+    #[test_case(true, false => panics "Fatal(FatalError")]
+    #[test_case(false, false => false)]
+    #[test_case(false, true => false)]
+    fn try_when(whether: bool, ok: bool) -> bool {
+        let mut called = false;
+        let _ = ContextBuilder::new(Protocol::TlsClient)
+            .unwrap()
+            .try_when(whether, |b| {
+                called = true;
+                if ok {
+                    Ok(b)
+                } else {
+                    Err(Error::fatal(wolfssl_sys::WOLFSSL_FAILURE))
+                }
+            })
+            .unwrap();
+        called
+    }
+
+    #[test_case(Some(true) => true)]
+    #[test_case(Some(false) => panics "Fatal(FatalError")]
+    #[test_case(None => false)]
+    fn try_some(whether: Option<bool>) -> bool {
+        let mut called = false;
+        let _ = ContextBuilder::new(Protocol::TlsClient)
+            .unwrap()
+            .try_when_some(whether, |b, ok| {
+                called = true;
+                if ok {
+                    Ok(b)
+                } else {
+                    Err(Error::fatal(wolfssl_sys::WOLFSSL_FAILURE))
+                }
+            })
+            .unwrap();
+        called
     }
 
     #[test]
