@@ -220,7 +220,7 @@ async fn dtls(
     exp_protocol_version: ProtocolVersion,
 ) {
     #[cfg(feature = "debug")]
-    wolfssl::enable_debugging(true);
+    wolfssl::debug::enable_debugging(true);
 
     // Communicate over a local datagram socket for simplicity
     let (client_sock, server_sock) = UnixDatagram::pair().expect("UnixDatagram");
@@ -248,7 +248,7 @@ async fn tls(
     exp_protocol_version: ProtocolVersion,
 ) {
     #[cfg(feature = "debug")]
-    wolfssl::enable_debugging(true);
+    wolfssl::debug::enable_debugging(true);
 
     // Communicate over a local stream socket for simplicity
     let (client_sock, server_sock) = UnixStream::pair().expect("UnixStream");
