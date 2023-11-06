@@ -35,3 +35,23 @@ pub trait IOCallbacks {
     /// [`IOCallbackResult::WouldBlock`].
     fn send(&self, buf: &[u8]) -> IOCallbackResult<usize>;
 }
+
+pub trait Debug {
+
+    /// Called when WolfSSL wishes to receive some data.
+    fn secret(&mut self, secret: &str);
+    fn is_client(&self) -> bool;
+}
+
+struct Dummy;
+
+impl Debug for Dummy {
+
+    fn secret(&mut self, secret: &str) {
+        todo!()
+    }
+
+    fn is_client(&self) -> bool {
+        true
+    }
+}

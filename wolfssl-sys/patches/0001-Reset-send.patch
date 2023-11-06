@@ -1,0 +1,25 @@
+From 6a640c3a6139e07d0954853a0ed7acc6f1f34948 Mon Sep 17 00:00:00 2001
+From: Mariappan Ramasamy
+ <142989797+expressvpn-mariappan-r@users.noreply.github.com>
+Date: Fri, 3 Nov 2023 22:18:09 +0800
+Subject: [PATCH] Reset send
+
+---
+ src/internal.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/internal.c b/src/internal.c
+index 39fc8fdf7..318447d50 100644
+--- a/src/internal.c
++++ b/src/internal.c
+@@ -23622,6 +23622,7 @@ int SendData(WOLFSSL* ssl, const void* data, int sz)
+             }
+         }
+     }
++    sent = 0;
+ 
+     ret = RetrySendAlert(ssl);
+     if (ret != 0) {
+-- 
+2.40.1
+

@@ -42,7 +42,9 @@ fn copy_wolfssl(dest: &str) -> std::io::Result<()> {
 }
 
 const PATCH_DIR: &str = "patches";
-const PATCHES: &[&str] = &[ ];
+const PATCHES: &[&str] = &[
+    // "0001-Reset-send.patch",
+];
 
 /**
  * Apply patch to wolfssl-src

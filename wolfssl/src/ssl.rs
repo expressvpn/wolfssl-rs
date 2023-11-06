@@ -1,9 +1,4 @@
-use crate::{
-    callback::{IOCallbackResult, IOCallbacks},
-    context::Context,
-    error::{Error, Poll, PollResult, Result},
-    CurveGroup, Protocol, ProtocolVersion, TLS_MAX_RECORD_SIZE,
-};
+use crate::{callback::{IOCallbackResult, IOCallbacks}, context::Context, error::{Error, Poll, PollResult, Result}, CurveGroup, Protocol, ProtocolVersion, TLS_MAX_RECORD_SIZE, Debug};
 
 use bytes::{Buf, Bytes, BytesMut};
 use parking_lot::Mutex;
@@ -150,6 +145,7 @@ pub struct Session<IOCB: IOCallbacks> {
     /// File path to save TLS keys
     #[cfg(feature = "debug")]
     debug_file: Option<CString>,
+    // debug_file: Option<Box<dyn Debug>>,
 }
 
 /// Error creating a [`Session`] object.
@@ -1092,7 +1088,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
 
         let file = file.to_str().unwrap();
         self.debug_file = Some(CString::new(file).unwrap());
-        let file_path = self.debug_file.as_mut().unwrap().as_ptr();
+        let file_path = self.debug_file.as_ref().unwrap().as_ptr();
 
         match unsafe {
             let ssl = self.ssl.lock();
@@ -1113,7 +1109,6 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         secret_size: ::std::os::raw::c_int,
         ctx: *mut ::std::os::raw::c_void,
     ) -> ::std::os::raw::c_int {
-        use std::fs::File;
         debug_assert!(!ssl.is_null());
         debug_assert!(!secret.is_null());
         debug_assert!(!ctx.is_null());
@@ -1142,7 +1137,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
 
         secret_keylog.push(' ');
         let mut random: Vec<u8> = vec!(0; 64);
-        let random_size = wolfssl_sys::wolfSSL_get_client_random(ssl, random.as_mut_ptr() as *mut c_uchar, random.len());
+        let wolf_ssl_get_random = wolfssl_sys::wolfSSL_get_client_random;
+        let random_size = wolf_ssl_get_random(ssl, random.as_mut_ptr() as *mut c_uchar, random.len());
         (0..random_size).into_iter().for_each(|i| secret_keylog.push_str(&format!("{:02x}", random[i])));
 
         secret_keylog.push(' ');
