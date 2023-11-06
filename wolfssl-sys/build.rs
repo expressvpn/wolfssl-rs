@@ -79,7 +79,7 @@ fn build_wolfssl(dest: &str) -> PathBuf {
         // Disable old TLS versions
         .disable("oldtls", None)
         // Enable single threaded mode
-        .enable("singlethreaded", None)
+        // .enable("singlethreaded", None)
         // Enable D/TLS
         .enable("dtls", None)
         // Enable single precision

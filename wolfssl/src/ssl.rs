@@ -14,6 +14,9 @@ use std::{
     ptr::NonNull,
     time::Duration,
 };
+use std::ffi::{c_char, CStr, CString};
+use std::io::Write;
+use std::path::PathBuf;
 
 /// Convert a [`std::io::ErrorKind`] into WOLFSSL_CBIO error as descibed in [`EmbedReceive`][0].
 ///
@@ -143,6 +146,10 @@ pub struct Session<IOCB: IOCallbacks> {
 
     /// Box so we have a stable address to pass to FFI.
     io: Box<IOCB>,
+
+    /// File path to save TLS keys
+    #[cfg(feature = "debug")]
+    debug_file: Option<CString>,
 }
 
 /// Error creating a [`Session`] object.
@@ -177,6 +184,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 NonNull::new(ptr).ok_or(NewSessionError::CreateFailed)?,
             )),
             io: Box::new(config.io),
+            #[cfg(feature = "debug")]
+            debug_file: None,
         };
 
         session.register_io_context();
@@ -1075,6 +1084,77 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             e @ wolfssl_sys::BAD_FUNC_ARG => unreachable!("{e:?}"),
             e => unreachable!("{e:?}"),
         }
+    }
+
+    #[cfg(feature = "debug")]
+    pub fn enable_key_logging(&mut self, file: PathBuf) -> Result<()> {
+        println!("Logging key logging to {file:?}");
+
+        let file = file.to_str().unwrap();
+        self.debug_file = Some(CString::new(file).unwrap());
+        let file_path = self.debug_file.as_mut().unwrap().as_ptr();
+
+        match unsafe {
+            let ssl = self.ssl.lock();
+            wolfssl_sys::wolfSSL_KeepArrays(ssl.as_ptr());;
+            wolfssl_sys::wolfSSL_set_tls13_secret_cb(ssl.as_ptr(), Some(Self::tls13_secret_cb), file_path as *mut c_void)
+        } {
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
+            wolfssl_sys::WOLFSSL_FATAL_ERROR => panic!("No SSL context"),
+            e => unreachable!("{e:?}"),
+        }
+    }
+
+    #[cfg(feature = "debug")]
+    unsafe extern "C" fn tls13_secret_cb(
+        ssl: *mut wolfssl_sys::WOLFSSL,
+        id: ::std::os::raw::c_int,
+        secret: *const ::std::os::raw::c_uchar,
+        secret_size: ::std::os::raw::c_int,
+        ctx: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int {
+        use std::fs::File;
+        debug_assert!(!ssl.is_null());
+        debug_assert!(!secret.is_null());
+        debug_assert!(!ctx.is_null());
+
+        let file_path = ctx as *const c_char;
+        let file_path: &CStr = unsafe { CStr::from_ptr(file_path) };
+        let file_path: &str = file_path.to_str().unwrap();
+        let Ok(mut keylog_file) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .append(true)
+            .open(file_path) else {
+            return 1;
+        };
+
+        let mut secret_keylog = match id as wolfssl_sys::Tls13Secret {
+            wolfssl_sys::Tls13Secret_CLIENT_EARLY_TRAFFIC_SECRET => "CLIENT_EARLY_TRAFFIC_SECRET",
+            wolfssl_sys::Tls13Secret_CLIENT_HANDSHAKE_TRAFFIC_SECRET => "CLIENT_HANDSHAKE_TRAFFIC_SECRET",
+            wolfssl_sys::Tls13Secret_SERVER_HANDSHAKE_TRAFFIC_SECRET => "SERVER_HANDSHAKE_TRAFFIC_SECRET",
+            wolfssl_sys::Tls13Secret_CLIENT_TRAFFIC_SECRET => "CLIENT_TRAFFIC_SECRET_0",
+            wolfssl_sys::Tls13Secret_SERVER_TRAFFIC_SECRET => "SERVER_TRAFFIC_SECRET_0",
+            wolfssl_sys::Tls13Secret_EARLY_EXPORTER_SECRET => "EARLY_EXPORTER_SECRET",
+            wolfssl_sys::Tls13Secret_EXPORTER_SECRET => "EXPORTER_SECRET",
+            _e => "UNKNOWN_SECRET",
+        }.to_string();
+
+        secret_keylog.push(' ');
+        let mut random: Vec<u8> = vec!(0; 64);
+        let random_size = wolfssl_sys::wolfSSL_get_client_random(ssl, random.as_mut_ptr() as *mut c_uchar, random.len());
+        (0..random_size).into_iter().for_each(|i| secret_keylog.push_str(&format!("{:02x}", random[i])));
+
+        secret_keylog.push(' ');
+        let secret = std::slice::from_raw_parts_mut(secret as *mut u8, secret_size as usize);
+        secret.iter().for_each(|f| secret_keylog.push_str(&format!("{:02x}", f)));
+
+        secret_keylog.push('\n');
+
+        if let Err(e) = keylog_file.write_all(secret_keylog.as_bytes()) {
+            eprintln!("Failed to write in file {:?}", e);
+        }
+        0
     }
 }
 
