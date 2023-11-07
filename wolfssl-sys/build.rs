@@ -42,16 +42,7 @@ fn copy_wolfssl(dest: &str) -> std::io::Result<()> {
 }
 
 const PATCH_DIR: &str = "patches";
-const PATCHES: &[&str] = &[
-    "0001-DoHelloVerifyRequest-only-do-DTLS-1.3-version-check.patch",
-    "0002-DTLS-1.3-move-state-machine-forward-when-HVR-receive.patch",
-    "0003-DtlsShouldDrop-don-t-ignore-app-data-sent-before-a-S.patch",
-    "0004-Dtls13GetRnMask-Correctly-get-chacha-counter-on-BE-s.patch",
-    "1000-Guard-away-properly-don-t-build-sphincs-code.patch",
-    "1001-Allow-easily-disabling-of-SPHINCS.patch",
-    "2000-Rename-utils.c-to-utils.h.patch",
-    "2001-Merge-pull-request-6700-from-julek-wolfssl-dtls13-do.patch",
-];
+const PATCHES: &[&str] = &[ ];
 
 /**
  * Apply patch to wolfssl-src
@@ -112,6 +103,8 @@ fn build_wolfssl(dest: &str) -> PathBuf {
         .enable("curve25519", None)
         // Enable Secure Renegotiation
         .enable("secure-renegotiation", None)
+        // Enable DTLS1.3 ClientHello fragmentation
+        .enable("dtls-frag-ch", None)
         // Enable SNI
         .enable("sni", None)
         // CFLAGS
