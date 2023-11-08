@@ -16,10 +16,7 @@ use std::{
 };
 
 #[cfg(feature = "debug")]
-use {
-    crate::debug::{Tls13SecretCallbacksArg, RANDOM_SIZE},
-    std::sync::Arc,
-};
+use crate::debug::{Tls13SecretCallbacksArg, RANDOM_SIZE};
 
 /// Convert a [`std::io::ErrorKind`] into WOLFSSL_CBIO error as descibed in [`EmbedReceive`][0].
 ///
@@ -1136,7 +1133,11 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     pub(crate) fn enable_tls13_keylog(&mut self, secret_cb: Tls13SecretCallbacksArg) -> Result<()> {
         self.secret_cb = Some(secret_cb.clone());
 
-        // let keylog_c = Box::into_raw(Box::new(keylog));
+        // SAFETY: `secret_cb` is an Arc pointer and we save one strong reference inside `Session`
+        // This prevents the memory being freed when `secret_cb` goes out of scope.
+        // So it is safe to send this pointer as callback context and `secret_cb` will be valid
+        // as long the connection is valid
+        let secret_cb = Box::into_raw(Box::new(secret_cb)) as *mut c_void;
 
         // SAFETY: No documentation available for [`wolfSSL_KeepArrays`] [`wolfSSL_set_tls13_secret_cb`].
         // But based on api implementation, it expects a valid pointer to `WOLFSSL`.
@@ -1144,19 +1145,10 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // This implementation is taken from following examples:
         // https://github.com/wolfSSL/wolfssl-examples/blob/master/tls/client-tls13.c
         // https://github.com/wolfSSL/wolfssl-examples/blob/master/tls/server-tls13.c
-        //
-        // `secret_cb` is an Arc pointer and we save one strong reference inside `Session`
-        // This prevents the memory being freed when `secret_cb` goes out of scope.
-        // So it is safe to send this pointer as callback context and `secret_cb` will be valid
-        // as long the connection is valid
         match unsafe {
             let ssl = self.ssl.lock().as_ptr();
             wolfssl_sys::wolfSSL_KeepArrays(ssl);
-            wolfssl_sys::wolfSSL_set_tls13_secret_cb(
-                ssl,
-                Some(Self::tls13_secret_cb),
-                Arc::as_ptr(&secret_cb) as *mut c_void,
-            )
+            wolfssl_sys::wolfSSL_set_tls13_secret_cb(ssl, Some(Self::tls13_secret_cb), secret_cb)
         } {
             wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
             wolfssl_sys::WOLFSSL_FATAL_ERROR => panic!("No SSL context"),
@@ -1176,8 +1168,9 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         debug_assert!(!secret.is_null());
         debug_assert!(!ctx.is_null());
 
-        // let keylog = Box::from_raw(ctx as *mut Arc<dyn Tls13SecretCallbacks>);
-        let secret_cb = &*(ctx as *mut Tls13SecretCallbacksArg);
+        // SAFETY: We have only one strong reference in `self.secret_cb`
+        // Leak the Box pointer, so that it will not be freed while this function return
+        let secret_cb = Box::leak(Box::from_raw(ctx as *mut Tls13SecretCallbacksArg));
 
         let mut random: Vec<u8> = vec![0; RANDOM_SIZE];
         let get_random = if 1 == wolfssl_sys::wolfSSL_is_server(ssl) {
