@@ -4,6 +4,10 @@ on:
     branches: [main]
   pull_request: null # target every PR
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress:  ${{ github.ref_name != 'main' }}
+
 jobs:
   ci:
     needs: [earthly, coverage]
