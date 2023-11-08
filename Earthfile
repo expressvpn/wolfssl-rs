@@ -1,6 +1,6 @@
 VERSION 0.7
-# Importing https://github.com/earthly/lib/tree/2.2.7/rust via commit hash pinning because git tags can be changed
-IMPORT github.com/earthly/lib/rust:72ce5042ba283ced1bcafe2c69d0886c5a549e71 AS rust-udc
+# Importing https://github.com/earthly/lib/tree/2.2.8/rust via commit hash pinning because git tags can be changed
+IMPORT github.com/earthly/lib/rust:437114395f6cd9e3167cf7e83f85f72b3543f603 AS rust-udc
 
 FROM rust:1.73.0
 
@@ -38,13 +38,13 @@ run-tests:
 # run-coverage generates a report of code coverage by unit and integration tests via cargo-llvm-cov
 run-coverage:
     FROM +copy-src
-    DO rust-udc+CARGO --keep_fingerprints=true --args="llvm-cov test" --output='llvm-cov-target/.*'
 
     RUN mkdir /tmp/coverage
 
-    RUN cargo llvm-cov report --summary-only --output-path /tmp/coverage/summary.txt
-    RUN cargo llvm-cov report --json --output-path /tmp/coverage/coverage.json
-    RUN cargo llvm-cov report --html --output-dir /tmp/coverage/
+    DO rust-udc+RUN_WITH_CACHE --command="cargo llvm-cov test &&
+        cargo llvm-cov report --summary-only --output-path /tmp/coverage/summary.txt &&
+        cargo llvm-cov report --json --output-path /tmp/coverage/coverage.json &&
+        cargo llvm-cov report --html --output-dir /tmp/coverage/"
 
     SAVE ARTIFACT /tmp/coverage/*
 
