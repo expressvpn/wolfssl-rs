@@ -1,5 +1,7 @@
 #![deny(unsafe_code)] // unsafety should all be in the library.
 
+#[cfg(feature = "debug")]
+use wolfssl::Tls13SecretCallbacks;
 use wolfssl::{
     ContextBuilder, IOCallbacks, Protocol, ProtocolVersion, RootCertificate, Secret, SessionConfig,
 };
@@ -102,6 +104,16 @@ impl SockIO for tokio::net::UnixStream {
     }
 }
 
+#[cfg(feature = "debug")]
+struct KeyLogger;
+
+#[cfg(feature = "debug")]
+impl Tls13SecretCallbacks for KeyLogger {
+    fn wireshark_keylog(&self, secret: String) {
+        eprintln!("{}", secret);
+    }
+}
+
 async fn client<S: SockIO>(sock: S, protocol: Protocol, exp_protocol_version: ProtocolVersion) {
     let sock = std::rc::Rc::new(sock);
 
@@ -115,6 +127,10 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol, exp_protocol_version: Pr
 
     let io = SockIOCallbacks(sock);
     let session_config = SessionConfig::new(io.clone()).with_dtls_nonblocking(true);
+
+    #[cfg(feature = "debug")]
+    let session_config = session_config.with_key_logger(std::sync::Arc::new(KeyLogger));
+
     let session = ctx
         .new_session(session_config)
         .expect("[Client] Create Client SSL session");
