@@ -119,6 +119,7 @@ fn build_wolfssl(dest: &str) -> PathBuf {
 
     if cfg!(feature = "debug") {
         conf.enable("debug", None);
+        conf.cflag("-DHAVE_SECRET_CALLBACK");
     }
 
     if cfg!(feature = "postquantum") {

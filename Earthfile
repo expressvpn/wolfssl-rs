@@ -64,7 +64,7 @@ lint:
     FROM +copy-src
     DO rust-udc+CARGO --keep_fingerprints=true --args="clippy --all-features --all-targets -- -D warnings"
     ENV RUSTDOCFLAGS="-D warnings"
-    DO rust-udc+CARGO --keep_fingerprints=true --args="doc --document-private-items"
+    DO rust-udc+CARGO --keep_fingerprints=true --args="doc --all-features --document-private-items"
 
 # fmt checks whether Rust code is formatted according to style guidelines
 fmt:

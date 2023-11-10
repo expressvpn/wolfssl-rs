@@ -15,6 +15,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "debug")]
+use crate::debug::{Tls13SecretCallbacksArg, RANDOM_SIZE};
+
 /// Convert a [`std::io::ErrorKind`] into WOLFSSL_CBIO error as descibed in [`EmbedReceive`][0].
 ///
 /// `would_block` is returned if the variant is
@@ -61,6 +64,9 @@ pub struct SessionConfig<IOCB: IOCallbacks> {
     pub checked_domain_name: Option<String>,
     /// If set, specifies a curve group to use for key share
     pub keyshare_group: Option<CurveGroup>,
+    /// If set, callback will be called for all TLS1.3 secret
+    #[cfg(feature = "debug")]
+    pub keylogger: Option<Tls13SecretCallbacksArg>,
 }
 
 impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
@@ -74,6 +80,8 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
             server_name_indicator: Default::default(),
             checked_domain_name: Default::default(),
             keyshare_group: Default::default(),
+            #[cfg(feature = "debug")]
+            keylogger: Default::default(),
         }
     }
 
@@ -130,6 +138,13 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
         self.keyshare_group = Some(curve);
         self
     }
+
+    /// Sets [`Self::keylogger`]
+    #[cfg(feature = "debug")]
+    pub fn with_key_logger(mut self, keylogger: Tls13SecretCallbacksArg) -> Self {
+        self.keylogger = Some(keylogger);
+        self
+    }
 }
 
 // Wrap a valid pointer to a [`wolfssl_sys::WOLFSSL`] such that we can
@@ -167,6 +182,9 @@ pub struct Session<IOCB: IOCallbacks> {
 
     /// Box so we have a stable address to pass to FFI.
     io: Box<IOCB>,
+
+    #[cfg(feature = "debug")]
+    secret_cb: Option<Box<Tls13SecretCallbacksArg>>,
 }
 
 /// Error creating a [`Session`] object.
@@ -201,6 +219,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 NonNull::new(ptr).ok_or(NewSessionError::CreateFailed)?,
             )),
             io: Box::new(config.io),
+            #[cfg(feature = "debug")]
+            secret_cb: Default::default(),
         };
 
         session.register_io_context();
@@ -229,6 +249,13 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             session
                 .use_key_share_curve(curve)
                 .map_err(|e| NewSessionError::SetupFailed("use_key_share_curve", e))?;
+        }
+
+        #[cfg(feature = "debug")]
+        if let Some(keylogger) = config.keylogger {
+            session
+                .enable_tls13_keylog(keylogger)
+                .map_err(|e| NewSessionError::SetupFailed("keylogger", e))?;
         }
 
         Ok(session)
@@ -1099,6 +1126,80 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             e @ wolfssl_sys::BAD_FUNC_ARG => unreachable!("{e:?}"),
             e => unreachable!("{e:?}"),
         }
+    }
+
+    /// Enable TLS1.3 key logging for applications
+    #[cfg(feature = "debug")]
+    pub(crate) fn enable_tls13_keylog(&mut self, secret_cb: Tls13SecretCallbacksArg) -> Result<()> {
+        self.secret_cb = Some(Box::new(secret_cb));
+
+        // SAFETY: `secret_cb` is a `Box` pointer so the address is
+        // stable. (The address is the address of the heap allocation
+        // containing the `Tls13Secretcallbacksarg` which is an `Arc`.
+        //
+        // We free `self.ssl` (the `wolfssl_sys::WOLFSSL`) on drop of
+        // `self`, any use of the callback must have stopped before
+        // the drop, since nothing can also be making calls into the session.
+        //
+        // Therefore `secret_cb` here is valid for as long as it needs to be.
+        let secret_cb: &mut Tls13SecretCallbacksArg = self.secret_cb.as_mut().unwrap();
+        let secret_cb: *mut Tls13SecretCallbacksArg = secret_cb as *mut Tls13SecretCallbacksArg;
+        let secret_cb = secret_cb as *mut c_void;
+
+        // SAFETY: No documentation available for [`wolfSSL_KeepArrays`] [`wolfSSL_set_tls13_secret_cb`].
+        // But based on api implementation, it expects a valid pointer to `WOLFSSL`.
+        //
+        // This implementation is taken from following examples:
+        // https://github.com/wolfSSL/wolfssl-examples/blob/master/tls/client-tls13.c
+        // https://github.com/wolfSSL/wolfssl-examples/blob/master/tls/server-tls13.c
+        match unsafe {
+            let ssl = self.ssl.lock().as_ptr();
+            wolfssl_sys::wolfSSL_KeepArrays(ssl);
+            wolfssl_sys::wolfSSL_set_tls13_secret_cb(ssl, Some(Self::tls13_secret_cb), secret_cb)
+        } {
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
+            wolfssl_sys::WOLFSSL_FATAL_ERROR => panic!("No SSL context"),
+            e => unreachable!("{e:?}"),
+        }
+    }
+
+    #[cfg(feature = "debug")]
+    unsafe extern "C" fn tls13_secret_cb(
+        ssl: *mut wolfssl_sys::WOLFSSL,
+        id: ::std::os::raw::c_int,
+        secret: *const ::std::os::raw::c_uchar,
+        secret_size: ::std::os::raw::c_int,
+        ctx: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int {
+        debug_assert!(!ssl.is_null());
+        debug_assert!(!secret.is_null());
+        debug_assert!(!ctx.is_null());
+
+        // SAFETY: We know this pointer is to the contents of the
+        // `Box<Tls13SecretCallbacksArg>` at `self.secret_cb` which is
+        // owned by the `Session`. See `enable_tls13_keylog` above for
+        // an argument to why calls to this callback cannot happen
+        // after the `Session` is dropped.
+        let secret_cb = ctx as *mut Tls13SecretCallbacksArg;
+        let secret_cb: &Tls13SecretCallbacksArg = &*secret_cb;
+
+        let mut random: Vec<u8> = vec![0; RANDOM_SIZE];
+        let get_random = if 1 == wolfssl_sys::wolfSSL_is_server(ssl) {
+            wolfssl_sys::wolfSSL_get_server_random
+        } else {
+            wolfssl_sys::wolfSSL_get_client_random
+        };
+        let random_size = get_random(ssl, random.as_mut_ptr() as *mut c_uchar, random.len());
+        if random_size == 0 {
+            return 0;
+        }
+        let random: &[u8] = &random[..random_size];
+
+        let secret = std::slice::from_raw_parts(secret as *mut u8, secret_size as usize);
+
+        secret_cb.secrets(id.into(), random, secret);
+
+        0
     }
 }
 

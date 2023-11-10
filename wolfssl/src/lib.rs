@@ -6,6 +6,7 @@
 
 mod callback;
 mod context;
+mod debug;
 mod error;
 mod rng;
 mod ssl;
@@ -16,6 +17,9 @@ pub use rng::*;
 pub use ssl::*;
 
 pub use error::{Error, Poll, Result};
+
+#[cfg(feature = "debug")]
+pub use debug::*;
 
 use std::ptr::NonNull;
 
