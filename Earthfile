@@ -2,7 +2,7 @@ VERSION --global-cache 0.7
 # Importing https://github.com/earthly/lib/tree/2.2.9/rust via commit hash pinning because git tags can be changed
 IMPORT github.com/earthly/lib/rust:1135c5c662934f0678b59e72a4b3b6d10f57553c AS rust-udc
 
-FROM rust:1.73.0
+FROM rust:1.74.0
 
 WORKDIR /wolfssl-rs
 
