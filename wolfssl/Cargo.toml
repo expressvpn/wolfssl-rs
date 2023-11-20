@@ -20,7 +20,7 @@ thiserror = "1.0"
 wolfssl-sys = { path = "../wolfssl-sys", features = ["postquantum"] }
 
 [dev-dependencies]
-async-trait = "0.1.73"
+async-trait = "0.1.74"
 env_logger = "0.10.0"
 test-case = "3.0"
 tokio = { version = "1.31.0", features = ["rt", "net", "macros"] }
