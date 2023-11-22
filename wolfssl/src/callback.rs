@@ -1,4 +1,4 @@
-/// Result type to b  e returned by methods on [`IOCallbacks`]
+/// Result type to be returned by methods on [`IOCallbacks`]
 #[derive(Debug)]
 pub enum IOCallbackResult<T> {
     /// Success
