@@ -1,5 +1,5 @@
 /*!
- * Contains the build process for WolfSSL
+ * Contains the  build process for WolfSSL
  */
 
 extern crate bindgen;
