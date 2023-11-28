@@ -44,7 +44,9 @@ fn copy_wolfssl(dest: &str) -> std::io::Result<()> {
 const PATCH_DIR: &str = "patches";
 const PATCHES: &[&str] = &[
     "0001-tls-return-immediately-if-kyber_id2type-fails.patch",
-    "0002-SP-ARM64-P-256-mark-functions-as-SP_NOINLINE.patch",
+    "0002-SP-ARM64-asm-fix-Montgomery-reduction-by-4.patch",
+    "0003-SP-ARM64-P-256-mark-functions-as-SP_NOINLINE.patch",
+    "0004-AES-GCM-ARM64-Replace-hardware-crypto-assembly-with-.patch",
 ];
 
 /**
