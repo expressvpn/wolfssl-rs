@@ -47,6 +47,7 @@ const PATCHES: &[&str] = &[
     "0002-SP-ARM64-asm-fix-Montgomery-reduction-by-4.patch",
     "0003-SP-ARM64-P-256-mark-functions-as-SP_NOINLINE.patch",
     "0004-AES-GCM-ARM64-Replace-hardware-crypto-assembly-with-.patch",
+    "0005-AES-GCM-ARM64-Fix-clobber-lists.patch",
 ];
 
 /**
