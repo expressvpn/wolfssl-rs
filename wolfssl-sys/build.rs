@@ -42,13 +42,7 @@ fn copy_wolfssl(dest: &str) -> std::io::Result<()> {
 }
 
 const PATCH_DIR: &str = "patches";
-const PATCHES: &[&str] = &[
-    "0001-tls-return-immediately-if-kyber_id2type-fails.patch",
-    "0002-SP-ARM64-asm-fix-Montgomery-reduction-by-4.patch",
-    "0003-SP-ARM64-P-256-mark-functions-as-SP_NOINLINE.patch",
-    "0004-AES-GCM-ARM64-Replace-hardware-crypto-assembly-with-.patch",
-    "0005-AES-GCM-ARM64-Fix-clobber-lists.patch",
-];
+const PATCHES: &[&str] = &[];
 
 /**
  * Apply patch to wolfssl-src
@@ -111,6 +105,8 @@ fn build_wolfssl(dest: &str) -> PathBuf {
         .enable("secure-renegotiation", None)
         // Enable DTLS1.3 ClientHello fragmentation
         .enable("dtls-frag-ch", None)
+        // Enable AES bitsliced implementation (cache attack safe)
+        .enable("aes-bitsliced", None)
         // Enable SNI
         .enable("sni", None)
         // CFLAGS
