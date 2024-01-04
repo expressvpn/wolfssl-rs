@@ -223,7 +223,7 @@ fn main() -> std::io::Result<()> {
 
     // Write out the bindings
     bindings
-        .write_to_file(wolfssl_install_dir.join("bindings.rs"))
+        .write_to_file(out_dir.join("bindings.rs"))
         .expect("Couldn't write bindings!");
 
     // Tell cargo to tell rustc to link in WolfSSL
