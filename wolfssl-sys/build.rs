@@ -8,7 +8,7 @@ use autotools::Config;
 use std::collections::HashSet;
 use std::env;
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /**
@@ -30,7 +30,7 @@ impl bindgen::callbacks::ParseCallbacks for IgnoreMacros {
 /**
  * Copy WolfSSL
  */
-fn copy_wolfssl(dest: &str) -> std::io::Result<()> {
+fn copy_wolfssl(dest: &str) -> std::io::Result<PathBuf> {
     println!("cargo:rerun-if-changed=wolfssl-src");
     Command::new("cp")
         .arg("-rf")
@@ -39,7 +39,7 @@ fn copy_wolfssl(dest: &str) -> std::io::Result<()> {
         .status()
         .unwrap();
 
-    Ok(())
+    Ok(Path::new(dest).join("wolfssl-src"))
 }
 
 const PATCH_DIR: &str = "patches";
@@ -48,8 +48,7 @@ const PATCHES: &[&str] = &[];
 /**
  * Apply patch to wolfssl-src
  */
-fn apply_patch(dest: &str, patch: &str) {
-    let wolfssl_path = format!("{dest}/wolfssl-src");
+fn apply_patch(wolfssl_path: &Path, patch: &str) {
     let patch = format!("{}/{}", PATCH_DIR, patch);
 
     let patch_buffer = File::open(patch).unwrap();
@@ -65,9 +64,9 @@ fn apply_patch(dest: &str, patch: &str) {
 /**
 Builds WolfSSL
 */
-fn build_wolfssl(dest: &str) -> PathBuf {
+fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     // Create the config
-    let mut conf = Config::new(format!("{dest}/wolfssl-src"));
+    let mut conf = Config::new(wolfssl_src);
     // Configure it
     conf.reconf("-ivf")
         // Disable benchmarks
@@ -165,14 +164,14 @@ fn main() -> std::io::Result<()> {
     let out_dir = env::var("OUT_DIR").unwrap();
 
     // Extract WolfSSL
-    copy_wolfssl(&out_dir)?;
+    let wolfssl_src = copy_wolfssl(&out_dir)?;
 
     // Apply patches
-    PATCHES.iter().for_each(|&f| apply_patch(&out_dir, f));
+    PATCHES.iter().for_each(|&f| apply_patch(&wolfssl_src, f));
     println!("cargo:rerun-if-changed={}", PATCH_DIR);
 
     // Configure and build WolfSSL
-    let wolfssl_install_dir = build_wolfssl(&out_dir);
+    let wolfssl_install_dir = build_wolfssl(&wolfssl_src);
 
     // We want to block some macros as they are incorrectly creating duplicate values
     // https://github.com/rust-lang/rust-bindgen/issues/687
