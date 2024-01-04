@@ -30,7 +30,7 @@ impl bindgen::callbacks::ParseCallbacks for IgnoreMacros {
 /**
  * Copy WolfSSL
  */
-fn copy_wolfssl(dest: &str) -> std::io::Result<PathBuf> {
+fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
     println!("cargo:rerun-if-changed=wolfssl-src");
     Command::new("cp")
         .arg("-rf")
@@ -39,7 +39,7 @@ fn copy_wolfssl(dest: &str) -> std::io::Result<PathBuf> {
         .status()
         .unwrap();
 
-    Ok(Path::new(dest).join("wolfssl-src"))
+    Ok(dest.join("wolfssl-src"))
 }
 
 const PATCH_DIR: &str = "patches";
@@ -161,7 +161,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
 
 fn main() -> std::io::Result<()> {
     // Get the build directory
-    let out_dir = env::var("OUT_DIR").unwrap();
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     // Extract WolfSSL
     let wolfssl_src = copy_wolfssl(&out_dir)?;
@@ -233,9 +233,12 @@ fn main() -> std::io::Result<()> {
         println!("cargo:rustc-link-lib=static=oqs");
     }
 
-    println!("cargo:rustc-link-search=native={}/lib/", out_dir);
+    println!(
+        "cargo:rustc-link-search=native={}/lib/",
+        out_dir.to_str().unwrap()
+    );
 
-    println!("cargo:include={}", out_dir);
+    println!("cargo:include={}", out_dir.to_str().unwrap());
 
     // Invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=wrapper.h");
