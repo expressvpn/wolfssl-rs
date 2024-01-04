@@ -238,8 +238,6 @@ fn main() -> std::io::Result<()> {
         wolfssl_install_dir.join("lib").to_str().unwrap()
     );
 
-    println!("cargo:include={}", out_dir.to_str().unwrap());
-
     // Invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=wrapper.h");
 
