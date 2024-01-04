@@ -162,17 +162,17 @@ fn build_wolfssl(dest: &str) -> PathBuf {
 
 fn main() -> std::io::Result<()> {
     // Get the build directory
-    let dst_string = env::var("OUT_DIR").unwrap();
+    let out_dir = env::var("OUT_DIR").unwrap();
 
     // Extract WolfSSL
-    copy_wolfssl(&dst_string)?;
+    copy_wolfssl(&out_dir)?;
 
     // Apply patches
-    PATCHES.iter().for_each(|&f| apply_patch(&dst_string, f));
+    PATCHES.iter().for_each(|&f| apply_patch(&out_dir, f));
     println!("cargo:rerun-if-changed={}", PATCH_DIR);
 
     // Configure and build WolfSSL
-    let dst = build_wolfssl(&dst_string);
+    let wolfssl_install_dir = build_wolfssl(&out_dir);
 
     // We want to block some macros as they are incorrectly creating duplicate values
     // https://github.com/rust-lang/rust-bindgen/issues/687
@@ -194,19 +194,21 @@ fn main() -> std::io::Result<()> {
     }
 
     let ignored_macros = IgnoreMacros(hash_ignored_macros);
-    let dst_include = format!("{dst_string}/include");
+    let wolfssl_include_dir = format!("{out_dir}/include");
 
     // Build the Rust binding
     let builder = bindgen::Builder::default()
         .header("wrapper.h")
-        .clang_arg(format!("-I{dst_include}/"))
+        .clang_arg(format!("-I{wolfssl_include_dir}/"))
         .parse_callbacks(Box::new(ignored_macros))
         .formatter(bindgen::Formatter::Rustfmt);
 
     let builder = builder
-        .allowlist_file(format!("{dst_include}/wolfssl/.*.h"))
-        .allowlist_file(format!("{dst_include}/wolfssl/wolfcrypt/.*.h"))
-        .allowlist_file(format!("{dst_include}/wolfssl/openssl/compat_types.h"));
+        .allowlist_file(format!("{wolfssl_include_dir}/wolfssl/.*.h"))
+        .allowlist_file(format!("{wolfssl_include_dir}/wolfssl/wolfcrypt/.*.h"))
+        .allowlist_file(format!(
+            "{wolfssl_include_dir}/wolfssl/openssl/compat_types.h"
+        ));
 
     let builder = builder.blocklist_function("wolfSSL_BIO_vprintf");
 
@@ -214,7 +216,7 @@ fn main() -> std::io::Result<()> {
 
     // Write out the bindings
     bindings
-        .write_to_file(dst.join("bindings.rs"))
+        .write_to_file(wolfssl_install_dir.join("bindings.rs"))
         .expect("Couldn't write bindings!");
 
     // Tell cargo to tell rustc to link in WolfSSL
@@ -224,9 +226,9 @@ fn main() -> std::io::Result<()> {
         println!("cargo:rustc-link-lib=static=oqs");
     }
 
-    println!("cargo:rustc-link-search=native={}/lib/", dst_string);
+    println!("cargo:rustc-link-search=native={}/lib/", out_dir);
 
-    println!("cargo:include={}", dst_string);
+    println!("cargo:include={}", out_dir);
 
     // Invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=wrapper.h");
