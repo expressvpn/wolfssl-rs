@@ -42,13 +42,7 @@ fn copy_wolfssl(dest: &str) -> std::io::Result<()> {
 }
 
 const PATCH_DIR: &str = "patches";
-const PATCHES: &[&str] = &[
-    "0001-tls-return-immediately-if-kyber_id2type-fails.patch",
-    "0002-SP-ARM64-asm-fix-Montgomery-reduction-by-4.patch",
-    "0003-SP-ARM64-P-256-mark-functions-as-SP_NOINLINE.patch",
-    "0004-AES-GCM-ARM64-Replace-hardware-crypto-assembly-with-.patch",
-    "0005-AES-GCM-ARM64-Fix-clobber-lists.patch",
-];
+const PATCHES: &[&str] = &[];
 
 /**
  * Apply patch to wolfssl-src
@@ -75,44 +69,48 @@ fn build_wolfssl(dest: &str) -> PathBuf {
     let mut conf = Config::new(format!("{dest}/wolfssl-src"));
     // Configure it
     conf.reconf("-ivf")
-        // Only build the static library
-        .enable_static()
-        .disable_shared()
-        // Enable TLS/1.3
-        .enable("tls13", None)
-        // Enable DTLS/1.3
-        .enable("dtls13", None)
-        // Disable old TLS versions
-        .disable("oldtls", None)
-        // Enable single threaded mode
-        .enable("singlethreaded", None)
-        // Enable D/TLS
-        .enable("dtls", None)
-        // Enable single precision
-        .enable("sp", None)
-        // Enable single precision ASM
-        .enable("sp-asm", None)
-        // Enable setting the D/TLS MTU size
-        .enable("dtls-mtu", None)
-        // Disable SHA3
-        .disable("sha3", None)
+        // Disable benchmarks
+        .disable("benchmark", None)
         // Disable DH key exchanges
         .disable("dh", None)
         // Disable examples
         .disable("examples", None)
-        // Disable benchmarks
-        .disable("benchmark", None)
+        // Disable old TLS versions
+        .disable("oldtls", None)
+        // Disable SHA3
+        .disable("sha3", None)
+        // Disable dynamic library
+        .disable_shared()
         // Disable sys ca certificate store
         .disable("sys-ca-certs", None)
-        // Enable elliptic curve exchanges
-        .enable("supportedcurves", None)
+        // Enable AES bitsliced implementation (cache attack safe)
+        .enable("aes-bitsliced", None)
+        // Enable Curve25519
         .enable("curve25519", None)
-        // Enable Secure Renegotiation
-        .enable("secure-renegotiation", None)
+        // Enable D/TLS
+        .enable("dtls", None)
+        // Enable DTLS/1.3
+        .enable("dtls13", None)
         // Enable DTLS1.3 ClientHello fragmentation
         .enable("dtls-frag-ch", None)
+        // Enable setting the D/TLS MTU size
+        .enable("dtls-mtu", None)
+        // Enable Secure Renegotiation
+        .enable("secure-renegotiation", None)
+        // Enable single threaded mode
+        .enable("singlethreaded", None)
         // Enable SNI
         .enable("sni", None)
+        // Enable single precision
+        .enable("sp", None)
+        // Enable single precision ASM
+        .enable("sp-asm", None)
+        // Only build the static library
+        .enable_static()
+        // Enable elliptic curve exchanges
+        .enable("supportedcurves", None)
+        // Enable TLS/1.3
+        .enable("tls13", None)
         // CFLAGS
         .cflag("-g")
         .cflag("-fPIC")
