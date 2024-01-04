@@ -193,21 +193,29 @@ fn main() -> std::io::Result<()> {
     }
 
     let ignored_macros = IgnoreMacros(hash_ignored_macros);
-    let wolfssl_include_dir = format!("{out_dir}/include");
+    let wolfssl_include_dir = wolfssl_install_dir.join("include");
 
     // Build the Rust binding
     let builder = bindgen::Builder::default()
         .header("wrapper.h")
-        .clang_arg(format!("-I{wolfssl_include_dir}/"))
+        .clang_arg(format!("-I{}/", wolfssl_include_dir.to_str().unwrap()))
         .parse_callbacks(Box::new(ignored_macros))
         .formatter(bindgen::Formatter::Rustfmt);
 
     let builder = builder
-        .allowlist_file(format!("{wolfssl_include_dir}/wolfssl/.*.h"))
-        .allowlist_file(format!("{wolfssl_include_dir}/wolfssl/wolfcrypt/.*.h"))
-        .allowlist_file(format!(
-            "{wolfssl_include_dir}/wolfssl/openssl/compat_types.h"
-        ));
+        .allowlist_file(wolfssl_include_dir.join("wolfssl/.*.h").to_str().unwrap())
+        .allowlist_file(
+            wolfssl_include_dir
+                .join("wolfssl/wolfcrypt/.*.h")
+                .to_str()
+                .unwrap(),
+        )
+        .allowlist_file(
+            wolfssl_include_dir
+                .join("wolfssl/openssl/compat_types.h")
+                .to_str()
+                .unwrap(),
+        );
 
     let builder = builder.blocklist_function("wolfSSL_BIO_vprintf");
 
