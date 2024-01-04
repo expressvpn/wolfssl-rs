@@ -48,8 +48,8 @@ const PATCHES: &[&str] = &[];
 /**
  * Apply patch to wolfssl-src
  */
-fn apply_patch(wolfssl_path: &Path, patch: &str) {
-    let patch = format!("{}/{}", PATCH_DIR, patch);
+fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) {
+    let patch = Path::new(PATCH_DIR).join(patch);
 
     let patch_buffer = File::open(patch).unwrap();
     Command::new("patch")
@@ -129,9 +129,15 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     if cfg!(feature = "postquantum") {
         // Post Quantum support is provided by liboqs
         if let Some(include) = std::env::var_os("DEP_OQS_ROOT") {
-            let oqs_path = &include.into_string().unwrap();
-            conf.cflag(format!("-I{oqs_path}/build/include/"));
-            conf.ldflag(format!("-L{oqs_path}/build/lib/"));
+            let oqs_path = Path::new(&include);
+            conf.cflag(format!(
+                "-I{}",
+                oqs_path.join("build/include/").to_str().unwrap()
+            ));
+            conf.ldflag(format!(
+                "-L{}",
+                oqs_path.join("build/lib/").to_str().unwrap()
+            ));
             conf.with("liboqs", None);
         } else {
             panic!("Post Quantum requested but liboqs appears to be missing?");
