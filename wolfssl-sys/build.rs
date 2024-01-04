@@ -202,20 +202,15 @@ fn main() -> std::io::Result<()> {
         .parse_callbacks(Box::new(ignored_macros))
         .formatter(bindgen::Formatter::Rustfmt);
 
-    let builder = builder
-        .allowlist_file(wolfssl_include_dir.join("wolfssl/.*.h").to_str().unwrap())
-        .allowlist_file(
-            wolfssl_include_dir
-                .join("wolfssl/wolfcrypt/.*.h")
-                .to_str()
-                .unwrap(),
-        )
-        .allowlist_file(
-            wolfssl_include_dir
-                .join("wolfssl/openssl/compat_types.h")
-                .to_str()
-                .unwrap(),
-        );
+    let builder = [
+        "wolfssl/.*.h",
+        "wolfssl/wolfcrypt/.*.h",
+        "wolfssl/openssl/compat_types.h",
+    ]
+    .iter()
+    .fold(builder, |b, p| {
+        b.allowlist_file(wolfssl_include_dir.join(p).to_str().unwrap())
+    });
 
     let builder = builder.blocklist_function("wolfSSL_BIO_vprintf");
 
