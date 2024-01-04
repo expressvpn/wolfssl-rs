@@ -31,6 +31,7 @@ impl bindgen::callbacks::ParseCallbacks for IgnoreMacros {
  * Copy WolfSSL
  */
 fn copy_wolfssl(dest: &str) -> std::io::Result<()> {
+    println!("cargo:rerun-if-changed=wolfssl-src");
     Command::new("cp")
         .arg("-rf")
         .arg("wolfssl-src")
