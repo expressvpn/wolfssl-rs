@@ -234,8 +234,8 @@ fn main() -> std::io::Result<()> {
     }
 
     println!(
-        "cargo:rustc-link-search=native={}/lib/",
-        out_dir.to_str().unwrap()
+        "cargo:rustc-link-search=native={}",
+        wolfssl_install_dir.join("lib").to_str().unwrap()
     );
 
     println!("cargo:include={}", out_dir.to_str().unwrap());
