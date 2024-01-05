@@ -42,3 +42,4 @@ jobs:
         commit-message: "[auto] Update Rust toolchain to ${{ steps.check-version.outputs.rust }}"
         branch: gha/rust-toolchain-update
         title: "[auto] Update Rust toolchain to ${{ steps.check-version.outputs.rust }}"
+        body: "Changelog: https://releases.rs/docs/${{ steps.check-version.outputs.rust }}/"
