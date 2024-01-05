@@ -8,7 +8,7 @@ use autotools::Config;
 use std::collections::HashSet;
 use std::env;
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /**
@@ -30,7 +30,8 @@ impl bindgen::callbacks::ParseCallbacks for IgnoreMacros {
 /**
  * Copy WolfSSL
  */
-fn copy_wolfssl(dest: &str) -> std::io::Result<()> {
+fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
+    println!("cargo:rerun-if-changed=wolfssl-src");
     Command::new("cp")
         .arg("-rf")
         .arg("wolfssl-src")
@@ -38,7 +39,7 @@ fn copy_wolfssl(dest: &str) -> std::io::Result<()> {
         .status()
         .unwrap();
 
-    Ok(())
+    Ok(dest.join("wolfssl-src"))
 }
 
 const PATCH_DIR: &str = "patches";
@@ -47,9 +48,8 @@ const PATCHES: &[&str] = &[];
 /**
  * Apply patch to wolfssl-src
  */
-fn apply_patch(dest: &str, patch: &str) {
-    let wolfssl_path = format!("{dest}/wolfssl-src");
-    let patch = format!("{}/{}", PATCH_DIR, patch);
+fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) {
+    let patch = Path::new(PATCH_DIR).join(patch);
 
     let patch_buffer = File::open(patch).unwrap();
     Command::new("patch")
@@ -64,9 +64,9 @@ fn apply_patch(dest: &str, patch: &str) {
 /**
 Builds WolfSSL
 */
-fn build_wolfssl(dest: &str) -> PathBuf {
+fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     // Create the config
-    let mut conf = Config::new(format!("{dest}/wolfssl-src"));
+    let mut conf = Config::new(wolfssl_src);
     // Configure it
     conf.reconf("-ivf")
         // Disable benchmarks
@@ -129,9 +129,15 @@ fn build_wolfssl(dest: &str) -> PathBuf {
     if cfg!(feature = "postquantum") {
         // Post Quantum support is provided by liboqs
         if let Some(include) = std::env::var_os("DEP_OQS_ROOT") {
-            let oqs_path = &include.into_string().unwrap();
-            conf.cflag(format!("-I{oqs_path}/build/include/"));
-            conf.ldflag(format!("-L{oqs_path}/build/lib/"));
+            let oqs_path = Path::new(&include);
+            conf.cflag(format!(
+                "-I{}",
+                oqs_path.join("build/include/").to_str().unwrap()
+            ));
+            conf.ldflag(format!(
+                "-L{}",
+                oqs_path.join("build/lib/").to_str().unwrap()
+            ));
             conf.with("liboqs", None);
         } else {
             panic!("Post Quantum requested but liboqs appears to be missing?");
@@ -161,17 +167,17 @@ fn build_wolfssl(dest: &str) -> PathBuf {
 
 fn main() -> std::io::Result<()> {
     // Get the build directory
-    let dst_string = env::var("OUT_DIR").unwrap();
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     // Extract WolfSSL
-    copy_wolfssl(&dst_string)?;
+    let wolfssl_src = copy_wolfssl(&out_dir)?;
 
     // Apply patches
-    PATCHES.iter().for_each(|&f| apply_patch(&dst_string, f));
+    PATCHES.iter().for_each(|&f| apply_patch(&wolfssl_src, f));
     println!("cargo:rerun-if-changed={}", PATCH_DIR);
 
     // Configure and build WolfSSL
-    let dst = build_wolfssl(&dst_string);
+    let wolfssl_install_dir = build_wolfssl(&wolfssl_src);
 
     // We want to block some macros as they are incorrectly creating duplicate values
     // https://github.com/rust-lang/rust-bindgen/issues/687
@@ -193,19 +199,24 @@ fn main() -> std::io::Result<()> {
     }
 
     let ignored_macros = IgnoreMacros(hash_ignored_macros);
-    let dst_include = format!("{dst_string}/include");
+    let wolfssl_include_dir = wolfssl_install_dir.join("include");
 
     // Build the Rust binding
     let builder = bindgen::Builder::default()
         .header("wrapper.h")
-        .clang_arg(format!("-I{dst_include}/"))
+        .clang_arg(format!("-I{}/", wolfssl_include_dir.to_str().unwrap()))
         .parse_callbacks(Box::new(ignored_macros))
         .formatter(bindgen::Formatter::Rustfmt);
 
-    let builder = builder
-        .allowlist_file(format!("{dst_include}/wolfssl/.*.h"))
-        .allowlist_file(format!("{dst_include}/wolfssl/wolfcrypt/.*.h"))
-        .allowlist_file(format!("{dst_include}/wolfssl/openssl/compat_types.h"));
+    let builder = [
+        "wolfssl/.*.h",
+        "wolfssl/wolfcrypt/.*.h",
+        "wolfssl/openssl/compat_types.h",
+    ]
+    .iter()
+    .fold(builder, |b, p| {
+        b.allowlist_file(wolfssl_include_dir.join(p).to_str().unwrap())
+    });
 
     let builder = builder.blocklist_function("wolfSSL_BIO_vprintf");
 
@@ -213,7 +224,7 @@ fn main() -> std::io::Result<()> {
 
     // Write out the bindings
     bindings
-        .write_to_file(dst.join("bindings.rs"))
+        .write_to_file(out_dir.join("bindings.rs"))
         .expect("Couldn't write bindings!");
 
     // Tell cargo to tell rustc to link in WolfSSL
@@ -223,9 +234,10 @@ fn main() -> std::io::Result<()> {
         println!("cargo:rustc-link-lib=static=oqs");
     }
 
-    println!("cargo:rustc-link-search=native={}/lib/", dst_string);
-
-    println!("cargo:include={}", dst_string);
+    println!(
+        "cargo:rustc-link-search=native={}",
+        wolfssl_install_dir.join("lib").to_str().unwrap()
+    );
 
     // Invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=wrapper.h");
