@@ -64,6 +64,8 @@ pub struct SessionConfig<IOCB: IOCallbacks> {
     pub checked_domain_name: Option<String>,
     /// If set, specifies a curve group to use for key share
     pub keyshare_group: Option<CurveGroup>,
+    /// If set, specifies if fragmented ClientHello (CH) is allowed
+    pub dtls13_allow_ch_frag: Option<bool>,
     /// If set, callback will be called for all TLS1.3 secret
     #[cfg(feature = "debug")]
     pub keylogger: Option<Tls13SecretCallbacksArg>,
@@ -80,6 +82,7 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
             server_name_indicator: Default::default(),
             checked_domain_name: Default::default(),
             keyshare_group: Default::default(),
+            dtls13_allow_ch_frag: Default::default(),
             #[cfg(feature = "debug")]
             keylogger: Default::default(),
         }
@@ -112,6 +115,12 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
     /// Sets [`Self::dtls_use_nonblock`]
     pub fn with_dtls_nonblocking(mut self, is_nonblocking: bool) -> Self {
         self.dtls_use_nonblock = Some(is_nonblocking);
+        self
+    }
+
+    /// Sets [`Self::dtls13_allow_ch_frag`]
+    pub fn with_dtls13_allow_ch_frag(mut self, allow: bool) -> Self {
+        self.dtls13_allow_ch_frag = Some(allow);
         self
     }
 
@@ -227,6 +236,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
 
         if let Some(is_nonblocking) = config.dtls_use_nonblock {
             session.dtls_set_nonblock_use(is_nonblocking);
+        }
+
+        if let Some(allow_ch_frag) = config.dtls13_allow_ch_frag {
+            session
+                .dtls13_allow_ch_frag(allow_ch_frag)
+                .map_err(|e| NewSessionError::SetupFailed("dtls13_allow_ch_frag", e))?;
         }
 
         if let Some(mtu) = config.dtls_mtu {
@@ -839,6 +854,32 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // [1]: https://www.wolfssl.com/doxygen/ssl_8h.html#a61f3b53cb0397dd1debc8b8daaa490c2
         // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         0 != unsafe { wolfssl_sys::wolfSSL_dtls13_use_quick_timeout(ssl.as_ptr()) }
+    }
+
+    /// Invokes [`wolfSSL_dtls13_allow_ch_frag`][0]
+    ///
+    /// [0]: https://github.com/wolfSSL/wolfssl/blob/v5.6.4-stable/src/dtls13.c#L2835
+    pub fn dtls13_allow_ch_frag(&self, enabled: bool) -> Result<()> {
+        if !self.is_dtls() {
+            log::debug!("Session is not configured for DTLS");
+            return Err(Error::fatal(wolfssl_sys::WOLFSSL_FAILURE));
+        }
+
+        let ssl = self.ssl.lock();
+        // SAFETY: `wolfSSL_dtls13_allow_ch_frag` is
+        // undocumented. However from the implementation[0] it expects a
+        // valid pointer to `WOLFSSL`. Per the [Library design][1]
+        // access is synchronized via the containing [`Mutex`].
+        //
+        // It returns either WOLFSSL_SUCCESS or WOLFSSL_FAILURE.
+        //
+        // [0]: https://github.com/wolfSSL/wolfssl/blob/v5.6.4-stable/src/dtls13.c#L2835
+        // [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
+        match unsafe { wolfssl_sys::wolfSSL_dtls13_allow_ch_frag(ssl.as_ptr(), enabled as i32) } {
+            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
+            e @ wolfssl_sys::WOLFSSL_FAILURE => Err(Error::fatal(e)),
+            e => unreachable!("{e:?}"),
+        }
     }
 
     unsafe extern "C" fn io_recv_shim(
@@ -1695,6 +1736,27 @@ mod tests {
         // call after connection succeeds
         let (client, _) = make_connected_clients();
         assert!(!client.ssl.dtls13_use_quick_timeout());
+    }
+
+    #[test_case(true)]
+    #[test_case(false)]
+    fn dtls13_allow_ch_frag(allow: bool) {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        // call before connection
+        let server_ctx = ContextBuilder::new(Protocol::DtlsServerV1_3)
+            .unwrap()
+            .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
+            .unwrap()
+            .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
+            .unwrap()
+            .build();
+
+        let ssl = server_ctx
+            .new_session(SessionConfig::new(NoIOCallbacks))
+            .unwrap();
+
+        ssl.dtls13_allow_ch_frag(allow).expect("ok");
     }
 
     #[test]
