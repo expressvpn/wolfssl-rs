@@ -9,12 +9,12 @@ jobs:
     runs-on: ubuntu-latest
     environment: expressvpn_iat_automation_githubiatuser_gpg_key
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: true
 
     - name: Import GPG Key
-      uses: crazy-max/ghaction-import-gpg@v5
+      uses: crazy-max/ghaction-import-gpg@v6
       with:
         gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
         passphrase: ${{ secrets.GPG_PASSPHRASE }}
@@ -57,7 +57,7 @@ jobs:
         echo "$body"           >> "$GITHUB_OUTPUT"
         echo "$EOF"            >> "$GITHUB_OUTPUT"
 
-    - uses: peter-evans/create-pull-request@v5
+    - uses: peter-evans/create-pull-request@v6
       id: pr
       with:
         token: ${{ secrets.SERVICE_ACCOUNT_PAT }}
@@ -106,7 +106,7 @@ jobs:
     # comment.
     - name: Outdated dependencies comment
       if: steps.pr.outputs.pull-request-number && steps.outdated-check.outputs.failed == 'true'
-      uses: peter-evans/create-or-update-comment@v3
+      uses: peter-evans/create-or-update-comment@v4
       with:
         issue-number: ${{ steps.pr.outputs.pull-request-number }}
         body: ${{ steps.outdated-check.outputs.comment }}
