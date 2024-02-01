@@ -1,7 +1,7 @@
 name: Weekly `cargo update`
 on:
   schedule:
-    - cron:  '18 5 * * 3' # 5:18 AM UTC on Wednesdays
+    - cron:  '18 5 * * 1' # 5:18 AM UTC on Mondays
   workflow_dispatch:
 
 jobs:
