@@ -9,12 +9,12 @@ jobs:
     runs-on: ubuntu-latest
     environment: expressvpn_iat_automation_githubiatuser_gpg_key
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: true
 
     - name: Import GPG Key
-      uses: crazy-max/ghaction-import-gpg@v5
+      uses: crazy-max/ghaction-import-gpg@v6
       with:
         gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
         passphrase: ${{ secrets.GPG_PASSPHRASE }}
@@ -33,7 +33,7 @@ jobs:
     - name: Update Rust version in Earthfile
       run: sed -i -E 's/^(\s*FROM rust):(:?[0-9\.]+)$/\1:${{ steps.check-version.outputs.rust }}/g' Earthfile
 
-    - uses: peter-evans/create-pull-request@v5
+    - uses: peter-evans/create-pull-request@v6
       with:
         token: ${{ secrets.SERVICE_ACCOUNT_PAT }}
         delete-branch: true
