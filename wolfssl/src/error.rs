@@ -109,7 +109,7 @@ fn wolf_error_string(raw_err: std::ffi::c_ulong) -> String {
             raw_err,
             // note that we are asked for a `char *`, but the
             // following `from_utf8` asks for a Vec<u8>
-            buffer.as_mut_slice().as_mut_ptr() as *mut i8,
+            buffer.as_mut_slice().as_mut_ptr() as *mut std::os::raw::c_char,
         );
     }
     String::from_utf8_lossy(&buffer)
