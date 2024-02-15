@@ -16,7 +16,7 @@ autotools = "0.2"
 build-target = "0.4.0"
 
 [dependencies.oqs-sys]
-version = "0.9.1+liboqs-0.9.0"
+version = "0.9.1"
 default-features = false
 features = ["kems", "sigs"]
 optional = true
