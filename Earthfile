@@ -1,6 +1,6 @@
 VERSION 0.8
-# Importing https://github.com/earthly/lib/tree/2.2.11/rust via commit hash pinning because git tags can be changed
-IMPORT github.com/earthly/lib/rust:d5937f9cba1662e7bb07e4c3d69d95db32288a84 AS lib-rust
+# Importing https://github.com/earthly/lib/tree/3.0.1/rust via commit hash pinning because git tags can be changed
+IMPORT github.com/earthly/lib/rust:1a4a008e271c7a5583e7bd405da8fd3624c05610 AS lib-rust
 
 FROM rust:1.76.0
 
@@ -42,10 +42,12 @@ run-coverage:
 
     RUN mkdir /tmp/coverage
 
-    DO lib-rust+RUN_WITH_CACHE --command="cargo llvm-cov test &&
-        cargo llvm-cov report --summary-only --output-path /tmp/coverage/summary.txt &&
-        cargo llvm-cov report --json --output-path /tmp/coverage/coverage.json &&
-        cargo llvm-cov report --html --output-dir /tmp/coverage/"
+    DO lib-rust+SET_CACHE_MOUNTS_ENV
+    RUN --mount=$EARTHLY_RUST_CARGO_HOME_CACHE --mount=$EARTHLY_RUST_TARGET_CACHE \
+        cargo llvm-cov test && \
+        cargo llvm-cov report --summary-only --output-path /tmp/coverage/summary.txt && \
+        cargo llvm-cov report --json --output-path /tmp/coverage/coverage.json && \
+        cargo llvm-cov report --html --output-dir /tmp/coverage/
 
     SAVE ARTIFACT /tmp/coverage/*
 
