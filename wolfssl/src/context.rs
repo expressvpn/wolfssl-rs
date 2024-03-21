@@ -2,7 +2,7 @@ use crate::{
     callback::IOCallbacks,
     error::{Error, Result},
     ssl::{Session, SessionConfig},
-    CurveGroup, NewSessionError, Protocol, RootCertificate, Secret,
+    CurveGroup, NewSessionError, Protocol, RootCertificate, Secret, SslVerifyMode,
 };
 use std::ptr::NonNull;
 use thiserror::Error;
@@ -406,6 +406,20 @@ impl ContextBuilder {
         }
     }
 
+    /// Wraps `wolfSSL_CTX_set_verify`[0]([also][1])
+    // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_set_verify
+    // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#ga26c623e093cf15f81cdfc3bb26682089
+    pub fn with_verify_method(self, mode: SslVerifyMode) {
+        // SAFETY: [`wolfSSL_CTX_set_verify`][0] ([also][1]) requires a valid `ctx` pointer
+        // from `wolfSSL_CTX_new()`.
+        // Third parameter `verify_callback` if valid, will be called when verification fails.
+        // But we send `None` since we do not use this additional functionality
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_set_verify
+        // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#ga26c623e093cf15f81cdfc3bb26682089
+        unsafe { wolfssl_sys::wolfSSL_CTX_set_verify(self.ctx.as_ptr(), mode.into(), None) };
+    }
+
     /// Finalizes a `WolfContext`.
     pub fn build(self) -> Context {
         Context {
@@ -632,6 +646,16 @@ mod tests {
             .unwrap()
             .with_secure_renegotiation()
             .unwrap();
+    }
+
+    #[test_case(SslVerifyMode::SslVerifyNone)]
+    #[test_case(SslVerifyMode::SslVerifyPeer)]
+    #[test_case(SslVerifyMode::SslVerifyFailIfNoPeerCert)]
+    #[test_case(SslVerifyMode::SslVerifyFailExceptPsk)]
+    fn set_verify_method(mode: SslVerifyMode) {
+        ContextBuilder::new(Protocol::TlsClient)
+            .unwrap()
+            .with_verify_method(mode);
     }
 
     #[test]

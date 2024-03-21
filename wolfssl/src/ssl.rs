@@ -2,7 +2,7 @@ use crate::{
     callback::{IOCallbackResult, IOCallbacks},
     context::Context,
     error::{Error, Poll, PollResult, Result},
-    CurveGroup, Protocol, ProtocolVersion, TLS_MAX_RECORD_SIZE,
+    CurveGroup, Protocol, ProtocolVersion, SslVerifyMode, TLS_MAX_RECORD_SIZE,
 };
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -66,6 +66,8 @@ pub struct SessionConfig<IOCB: IOCallbacks> {
     pub keyshare_group: Option<CurveGroup>,
     /// If set, specifies if fragmented ClientHello (CH) is allowed
     pub dtls13_allow_ch_frag: Option<bool>,
+    /// SSL Verify mode
+    pub ssl_verify_mode: Option<SslVerifyMode>,
     /// If set, callback will be called for all TLS1.3 secret
     #[cfg(feature = "debug")]
     pub keylogger: Option<Tls13SecretCallbacksArg>,
@@ -83,6 +85,7 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
             checked_domain_name: Default::default(),
             keyshare_group: Default::default(),
             dtls13_allow_ch_frag: Default::default(),
+            ssl_verify_mode: Default::default(),
             #[cfg(feature = "debug")]
             keylogger: Default::default(),
         }
@@ -145,6 +148,12 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
     /// Sets [`Self::keyshare_group`]
     pub fn with_keyshare_group(mut self, curve: CurveGroup) -> Self {
         self.keyshare_group = Some(curve);
+        self
+    }
+
+    /// Sets [`Self::ssl_verify_mode`]
+    pub fn with_ssl_verify_mode(mut self, mode: SslVerifyMode) -> Self {
+        self.ssl_verify_mode = Some(mode);
         self
     }
 
@@ -266,6 +275,10 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 .map_err(|e| NewSessionError::SetupFailed("use_key_share_curve", e))?;
         }
 
+        if let Some(mode) = config.ssl_verify_mode {
+            session.set_verify(mode);
+        }
+
         #[cfg(feature = "debug")]
         if let Some(keylogger) = config.keylogger {
             session
@@ -328,6 +341,18 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             Some(x) if x == "None" => None,
             x => x,
         }
+    }
+
+    /// Sets verification method for remote peers
+    pub fn set_verify(&self, mode: SslVerifyMode) {
+        // SAFETY: [`wolfSSL_set_verify`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the containing [`Mutex`]
+        // Third parameter `verify_callback` if valid, will be called when verification fails.
+        // But we send `None` since we do not use this additional functionality
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_set_verify
+        // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#gaf9198658e31dd291088be18262ef2354
+        unsafe { wolfssl_sys::wolfSSL_set_verify(self.ssl.lock().as_ptr(), mode.into(), None) };
     }
 
     /// Gets the current curve of the session if ECDH was used,
@@ -1785,5 +1810,51 @@ mod tests {
             dbg!(client.ssl.get_current_curve_name().unwrap()),
             dbg!(server.ssl.get_current_curve_name().unwrap())
         )
+    }
+
+    #[test_case(SslVerifyMode::SslVerifyNone, SslVerifyMode::SslVerifyNone)]
+    #[test_case(SslVerifyMode::SslVerifyNone, SslVerifyMode::SslVerifyPeer => panics "ASN no signer error to confirm failure")]
+    #[test_case(SslVerifyMode::SslVerifyPeer, SslVerifyMode::SslVerifyNone)]
+    #[test_case(SslVerifyMode::SslVerifyPeer, SslVerifyMode::SslVerifyPeer => panics "ASN no signer error to confirm failure")]
+    #[test_case(SslVerifyMode::SslVerifyFailIfNoPeerCert, SslVerifyMode::SslVerifyNone => panics "peer did not return a certificate")]
+    #[test_case(SslVerifyMode::SslVerifyFailIfNoPeerCert, SslVerifyMode::SslVerifyPeer => panics "ASN no signer error to confirm failure")]
+    #[test_case(SslVerifyMode::SslVerifyFailExceptPsk, SslVerifyMode::SslVerifyNone)]
+    #[test_case(SslVerifyMode::SslVerifyFailExceptPsk, SslVerifyMode::SslVerifyPeer => panics "ASN no signer error to confirm failure")]
+    fn test_client_set_verify(server_mode: SslVerifyMode, client_mode: SslVerifyMode) {
+        let client_protocol = Protocol::TlsClientV1_3;
+        // Create context without server CA certificate
+        let client_ctx = ContextBuilder::new(client_protocol)
+            .unwrap_or_else(|e| panic!("new({client_protocol:?}): {e}"))
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        let server_protocol = Protocol::TlsServerV1_3;
+        let server_ctx = ContextBuilder::new(server_protocol)
+            .unwrap_or_else(|e| panic!("new({server_protocol:?}): {e}"))
+            .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
+            .unwrap()
+            .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
+            .unwrap()
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        let (client_io, server_io) = TestIOCallbacks::pair();
+
+        let client_ssl = client_ctx
+            .new_session(SessionConfig::new(client_io).with_ssl_verify_mode(client_mode))
+            .unwrap();
+        let server_ssl = server_ctx
+            .new_session(SessionConfig::new(server_io).with_ssl_verify_mode(server_mode))
+            .unwrap();
+
+        for _ in 0..7 {
+            let _ = client_ssl.try_negotiate().unwrap();
+            let _ = server_ssl.try_negotiate().unwrap();
+        }
+
+        assert!(client_ssl.is_init_finished());
+        assert!(server_ssl.is_init_finished());
     }
 }
