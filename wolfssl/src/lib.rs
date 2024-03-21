@@ -5,6 +5,7 @@
 #![warn(missing_docs)]
 
 mod callback;
+mod chacha20_poly1305;
 mod context;
 mod debug;
 mod error;
@@ -12,6 +13,7 @@ mod rng;
 mod ssl;
 
 pub use callback::*;
+pub use chacha20_poly1305::*;
 pub use context::*;
 pub use rng::*;
 pub use ssl::*;
