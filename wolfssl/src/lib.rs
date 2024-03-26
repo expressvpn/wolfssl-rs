@@ -5,6 +5,7 @@
 #![warn(missing_docs)]
 
 mod callback;
+mod chacha20_poly1305;
 mod context;
 mod debug;
 mod error;
@@ -12,6 +13,7 @@ mod rng;
 mod ssl;
 
 pub use callback::*;
+pub use chacha20_poly1305::*;
 pub use context::*;
 pub use rng::*;
 pub use ssl::*;
@@ -20,8 +22,12 @@ pub use error::{Error, Poll, Result};
 
 #[cfg(feature = "debug")]
 pub use debug::*;
+use wolfssl_sys::{
+    WOLFSSL_VERIFY_FAIL_EXCEPT_PSK, WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT, WOLFSSL_VERIFY_NONE,
+    WOLFSSL_VERIFY_PEER,
+};
 
-use std::ptr::NonNull;
+use std::{os::raw::c_int, ptr::NonNull};
 
 /// Record size is defined as `2^14 + 1`.
 ///
@@ -265,6 +271,37 @@ pub enum Secret<'a> {
     PemFile(&'a std::path::Path),
 }
 
+/// SSL Verification method
+/// Ref: `https://www.wolfssl.com/doxygen/group__Setup.html#gaf9198658e31dd291088be18262ef2354`
+#[derive(Debug, Clone)]
+pub enum SslVerifyMode {
+    /// No verification done
+    SslVerifyNone,
+    /// Verify peers certificate
+    SslVerifyPeer,
+    /// Verify client's certificate (applicable only for server)
+    SslVerifyFailIfNoPeerCert,
+    /// Verify client's certificate except PSK connection (applicable only for server)
+    SslVerifyFailExceptPsk,
+}
+
+impl Default for SslVerifyMode {
+    fn default() -> Self {
+        Self::SslVerifyPeer
+    }
+}
+
+impl From<SslVerifyMode> for c_int {
+    fn from(value: SslVerifyMode) -> Self {
+        match value {
+            SslVerifyMode::SslVerifyNone => WOLFSSL_VERIFY_NONE,
+            SslVerifyMode::SslVerifyPeer => WOLFSSL_VERIFY_PEER,
+            SslVerifyMode::SslVerifyFailIfNoPeerCert => WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+            SslVerifyMode::SslVerifyFailExceptPsk => WOLFSSL_VERIFY_FAIL_EXCEPT_PSK,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,5 +324,13 @@ mod tests {
     #[test_case(ProtocolVersion::Unknown => "unknown")]
     fn protocol_version_as_str(p: ProtocolVersion) -> &'static str {
         p.as_str()
+    }
+
+    #[test_case(SslVerifyMode::SslVerifyNone => WOLFSSL_VERIFY_NONE)]
+    #[test_case(SslVerifyMode::SslVerifyPeer => WOLFSSL_VERIFY_PEER)]
+    #[test_case(SslVerifyMode::SslVerifyFailIfNoPeerCert => WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT)]
+    #[test_case(SslVerifyMode::SslVerifyFailExceptPsk => WOLFSSL_VERIFY_FAIL_EXCEPT_PSK)]
+    fn ssl_verify_mode(s: SslVerifyMode) -> c_int {
+        s.into()
     }
 }
