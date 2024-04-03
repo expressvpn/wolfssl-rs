@@ -53,7 +53,7 @@ macro_rules! retry_io {
 }
 
 impl<IOCB: SockIO> IOCallbacks for SockIOCallbacks<IOCB> {
-    fn recv(&self, buf: &mut [u8]) -> wolfssl::IOCallbackResult<usize> {
+    fn recv(&mut self, buf: &mut [u8]) -> wolfssl::IOCallbackResult<usize> {
         match self.0.try_recv(buf) {
             Ok(nr) => wolfssl::IOCallbackResult::Ok(nr),
             Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) => {
@@ -63,7 +63,7 @@ impl<IOCB: SockIO> IOCallbacks for SockIOCallbacks<IOCB> {
         }
     }
 
-    fn send(&self, buf: &[u8]) -> wolfssl::IOCallbackResult<usize> {
+    fn send(&mut self, buf: &[u8]) -> wolfssl::IOCallbackResult<usize> {
         match self.0.try_send(buf) {
             Ok(nr) => wolfssl::IOCallbackResult::Ok(nr),
             Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) => {
@@ -131,7 +131,7 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol, exp_protocol_version: Pr
     #[cfg(feature = "debug")]
     let session_config = session_config.with_key_logger(std::sync::Arc::new(KeyLogger));
 
-    let session = ctx
+    let mut session = ctx
         .new_session(session_config)
         .expect("[Client] Create Client SSL session");
 
@@ -183,7 +183,7 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol, exp_protocol_version: Pr
 
     let io = SockIOCallbacks(sock);
     let session_config = SessionConfig::new(io.clone()).with_dtls_nonblocking(true);
-    let session = ctx
+    let mut session = ctx
         .new_session(session_config)
         .expect("[Server] Create Server SSL session");
 
