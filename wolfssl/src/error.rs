@@ -2,6 +2,7 @@ use std::ffi::c_int;
 
 use bytes::Bytes;
 use thiserror::Error;
+use wolfssl_sys::wolfSSL_ErrorCodes_DOMAIN_NAME_MISMATCH as WOLFSSL_ERROR_DOMAIN_NAME_MISMATCH;
 
 /// The `Result::Ok` for a non-blocking operation.
 #[derive(Debug)]
@@ -27,51 +28,70 @@ pub enum Error {
     /// `wolfssl_read` to extract the data. If that `wolfssl_read` call fails,
     /// this error will be generated.
     #[error("App Data: {0}")]
-    AppData(FatalError),
+    AppData(ErrorKind),
     /// Top-level errors from WolfSSL API invocations.
     #[error("Fatal: {0}")]
-    Fatal(FatalError),
+    Fatal(ErrorKind),
 }
 
 impl Error {
     /// Construct a fatal error
     pub(crate) fn fatal(code: c_int) -> Self {
-        Self::Fatal(FatalError::from(code))
+        Self::Fatal(ErrorKind::from(code))
+    }
+
+    /// Get error kind
+    pub fn kind(&self) -> ErrorKind {
+        match self {
+            Error::AppData(e) => e,
+            Error::Fatal(e) => e,
+        }
+        .clone()
     }
 }
 
 /// Extracts an error message given a wolfssl error enum.
-#[derive(Clone, Error, Debug)]
-#[error("code: {code}, what: {what}")]
-pub struct FatalError {
-    what: String,
-    code: c_int,
+/// Abstraction over WolfSSL errors
+#[derive(Clone, Debug, Error)]
+pub enum ErrorKind {
+    /// Domain name mismatch error)
+    #[error("Domain name mismatch")]
+    DomainNameMismatch,
+    /// All other wolfssl fatal errors
+    #[error("code: {code}, what: {what}")]
+    Other {
+        /// Textual representation of error code
+        what: String,
+        /// Error code
+        code: c_int,
+    },
 }
 
-impl std::convert::From<c_int> for FatalError {
+impl std::convert::From<c_int> for ErrorKind {
     // Not all errors are fatal. Since the errors are fundamentally C-style
     // enums, the most we can do is to just check that only fatal errors get
     // constructed.
     fn from(code: c_int) -> Self {
-        let this = Self {
-            what: wolf_error_string(code as std::ffi::c_ulong),
-            code,
+        let this = match code {
+            WOLFSSL_ERROR_DOMAIN_NAME_MISMATCH => Self::DomainNameMismatch,
+            _other => Self::Other {
+                what: wolf_error_string(code as std::ffi::c_ulong),
+                code,
+            },
         };
 
         debug_assert!(
             !matches!(
                 this,
-                Self {
+                Self::Other {
                     code: wolfssl_sys::WOLFSSL_ERROR_WANT_READ
                         | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE
                         | wolfssl_sys::WOLFSSL_SUCCESS,
-                        // | wolfssl_sys::WOLFSSL_ERROR_NONE, // since WOLFSSL_FAILURE also uses this value
                     ..
                 }
             ),
-            "Attempting to construct a `FatalError` from a non-fatal error code {code}, with error message {what}",
-            code = this.code,
-            what = this.what
+            "Attempting to construct a `ErrorKind` from a non-error code {code}",
+            code = code,
         );
 
         this
