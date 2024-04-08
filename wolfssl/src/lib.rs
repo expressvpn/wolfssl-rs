@@ -18,7 +18,7 @@ pub use context::*;
 pub use rng::*;
 pub use ssl::*;
 
-pub use error::{Error, Poll, Result};
+pub use error::{Error, ErrorKind, Poll, Result};
 
 #[cfg(feature = "debug")]
 pub use debug::*;

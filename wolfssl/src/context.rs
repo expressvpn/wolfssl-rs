@@ -547,7 +547,7 @@ mod tests {
     }
 
     #[test_case(true, true => true)]
-    #[test_case(true, false => panics "Fatal(FatalError")]
+    #[test_case(true, false => panics "Fatal(Other { what:")]
     #[test_case(false, false => false)]
     #[test_case(false, true => false)]
     fn try_when(whether: bool, ok: bool) -> bool {
@@ -567,7 +567,7 @@ mod tests {
     }
 
     #[test_case(Some(true) => true)]
-    #[test_case(Some(false) => panics "Fatal(FatalError")]
+    #[test_case(Some(false) => panics "Fatal(Other { what:")]
     #[test_case(None => false)]
     fn try_some(whether: Option<bool>) -> bool {
         let mut called = false;
