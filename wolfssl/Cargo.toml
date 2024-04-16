@@ -9,7 +9,8 @@ repository = "https://github.com/expressvpn/wolfssl-rs"
 keywords = ["wolfssl", "vpn", "lightway", "post-quantum", "cryptography"]
 
 [features]
-default = []
+default = ["postquantum"]
+postquantum = ["wolfssl-sys/postquantum"]
 debug = ["wolfssl-sys/debug"] # Note that application code must also call wolfssl::enable_debugging(true)
 
 [dependencies]
@@ -17,7 +18,7 @@ bytes = "1"
 log = "0.4"
 parking_lot = "0.12.1"
 thiserror = "1.0"
-wolfssl-sys = { path = "../wolfssl-sys", features = ["postquantum"] }
+wolfssl-sys = { path = "../wolfssl-sys" }
 
 [dev-dependencies]
 async-trait = "0.1.73"
