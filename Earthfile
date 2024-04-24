@@ -66,6 +66,7 @@ build-crate:
 lint:
     FROM +copy-src
     DO lib-rust+CARGO --args="clippy --all-features --all-targets -- -D warnings"
+    DO lib-rust+CARGO --args="clippy --no-default-features --all-targets -- -D warnings"
     ENV RUSTDOCFLAGS="-D warnings"
     DO lib-rust+CARGO --args="doc --all-features --document-private-items"
 
