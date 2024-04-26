@@ -872,7 +872,7 @@ dependencies = [
 
 [[package]]
 name = "wolfssl-sys"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "autotools",
  "bindgen 0.69.4",

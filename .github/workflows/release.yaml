@@ -1,0 +1,167 @@
+name: Release
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [main]
+    paths:
+      - "*/Cargo.toml" # only run if Cargo.toml changes
+  push:
+    branches: [main]
+    paths:
+      - "*/Cargo.toml" # only run if Cargo.toml changes
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+
+jobs:
+  check_label:
+    runs-on: ubuntu-latest
+    outputs:
+      is_release_label_attached: ${{ steps.pr_labels.outputs.is_release_label_attached }}
+      issue_number: ${{ steps.pr_labels.outputs.issue_number }}
+    steps:
+      - uses: jwalton/gh-find-current-pr@v1
+        id: find_pr
+        with:
+          state: all
+      - id: pr_labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue_number = ${{ steps.find_pr.outputs.pr }}
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+
+            const attached_labels = (await github.rest.issues.listLabelsOnIssue({ owner, repo, issue_number })).data
+
+            const is_release_label_attached = attached_labels.find(label => label.name == 'release') !== undefined
+            core.setOutput('is_release_label_attached', is_release_label_attached)
+            core.setOutput('issue_number', issue_number)
+  release:
+    runs-on: ubuntu-latest
+    needs: check_label
+    if: needs.check_label.outputs.is_release_label_attached == 'true'
+    env:
+      EARTHLY_TOKEN: "${{ secrets.EARTHLY_TOKEN }}"
+      CARGO_REGISTRY_TOKEN: "${{ secrets.CARGO_REGISTRY_TOKEN }}"
+      FORCE_COLOR: 1
+    steps:
+      - uses: earthly/actions-setup@v1
+        with:
+          version: v0.8.3
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+      - run: npm install toml globby axios
+      - uses: actions/github-script@v7
+        id: process_release
+        with:
+          script: |
+            const is_merge_event = ${{ github.event_name == 'push' }}
+
+            const { globby } = await import("${{ github.workspace }}/node_modules/globby/index.js");
+            const toml = require('toml');
+            const fs = require('fs');
+            const axios = require('axios');
+            const { spawn } = require('child_process');
+
+            async function get_crate_details(name) {
+              try {
+                return (await axios(`https://crates.io/api/v1/crates/${name}`)).data
+              } catch(error) {
+                console.error("Error fetching crate details:", error)
+              }
+            }
+
+            function run_command_stream(command_arr) {
+              const [command, ...args] = command_arr
+
+              const child = spawn(command, args)
+              child.stdout.on("data", data => console.log(Buffer.from(data).toString()))
+              child.stderr.on("data", data => console.error(Buffer.from(data).toString()))
+              child.on("close", code => {
+                console.log(command, "exited with code", code)
+                if (code != 0) {
+                  core.setFailed(`Command ${command_str} exited with code ${code}`)
+                }
+              })
+            }
+
+            async function create_github_release(crate_name, version) {
+              console.log("Creating a github release for", crate_name, version)
+
+              const { owner, repo } = context.repo
+              const tag_name = `${crate_name}-${version}`
+              const name = tag_name
+              const ref = `refs/tags/${tag_name}`
+              const sha = context.sha
+              const body = ""
+
+              await github.rest.git.createRef({ owner, repo, ref, sha })
+              await github.rest.repos.createRelease({ owner, repo, tag_name, name, body })
+            }
+
+            const is_dry_run = !is_merge_event
+            console.log("Dry run status is:", is_dry_run)
+
+            const crate_definitions = await globby("*/Cargo.toml")
+
+            const crates_to_publish = []
+            for (crate_definition of crate_definitions) {
+              console.log(`Processing ${crate_definition}`)
+
+              const data = toml.parse(fs.readFileSync(crate_definition, 'utf8'))
+              const name = data.package.name
+              const version_on_file = data.package.version
+              const version_on_crate_io = (await get_crate_details(name)).crate.max_version
+
+              if (version_on_file != version_on_crate_io) {
+                console.log("Crate", name, "need publishing")
+                crates_to_publish.push({ name, version_on_file, version_on_crate_io })
+
+                run_command_stream(["earthly", "--push", "--ci", "--org", "expressvpn", "--satellite", "wolfssl-rs", "--secret", "CARGO_REGISTRY_TOKEN", "+publish", `--PACKAGE=${name}`, `--DRY_RUN=${is_dry_run}`])
+                if (!is_dry_run) {
+                  await create_github_release(name, version_on_file)
+                }
+              } else {
+                console.log("Crate", name, "does not need publishing")
+              }
+            }
+
+            const crates_to_publish_table_rendered = crates_to_publish.map(item =>
+              `| \`${item.name}\` | ${item.version_on_crate_io} | **${item.version_on_file}** |`
+            ).join("\n")
+            core.setOutput('crates_to_publish_table_rendered', crates_to_publish_table_rendered)
+
+      - uses: peter-evans/find-comment@v3
+        id: fc
+        with:
+          issue-number: ${{ needs.check_label.outputs.issue_number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: Release Plan
+      - if: steps.process_release.outputs.crates_to_publish_table_rendered == ''
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.fc.outputs.comment-id }}
+          issue-number: ${{ needs.check_label.outputs.issue_number }}
+          body: |
+            # :rocket: Release Plan
+
+            Nothing to release
+          edit-mode: replace
+      - if: steps.process_release.outputs.crates_to_publish_table_rendered != ''
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.fc.outputs.comment-id }}
+          issue-number: ${{ needs.check_label.outputs.issue_number }}
+          body: |
+            # :rocket: Release Plan
+
+            | Crate | Previous version | New version |
+            |--|--|--|
+            ${{ steps.process_release.outputs.crates_to_publish_table_rendered }}
+          edit-mode: replace
