@@ -9,6 +9,7 @@ description = "System bindings for WolfSSL"
 repository = "https://github.com/expressvpn/wolfssl-rs"
 keywords = ["wolfssl", "vpn", "lightway", "post-quantum", "cryptography"]
 links = "wolfssl"
+exclude = ["wolfssl-src/**/*.pdf"] # crates.io has a size limit for publishing. Exclude unused files to keep the size under the limit.
 
 [build-dependencies]
 bindgen = "0.69"
