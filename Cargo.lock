@@ -851,7 +851,7 @@ checksum = "bec47e5bfd1bff0eeaf6d8b485cc1074891a197ab4225d504cb7a1ab88b02bf0"
 
 [[package]]
 name = "wolfssl"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -866,7 +866,7 @@ dependencies = [
 
 [[package]]
 name = "wolfssl-sys"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "autotools",
  "bindgen 0.69.4",

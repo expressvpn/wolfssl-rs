@@ -79,3 +79,17 @@ fmt:
 check-dependencies:
     FROM +copy-src
     DO lib-rust+CARGO --args="deny --all-features check --deny warnings bans license sources"
+
+# publish publishes the target crate to cargo.io. Must specify package by --PACKAGE=<package-name>
+publish:
+    FROM +copy-src
+    ARG --required PACKAGE
+    ARG DRY_RUN=true
+
+    LET DRY_RUN_OPTION=""
+    IF [ "$DRY_RUN" = "true" ]
+        SET DRY_RUN_OPTION="--dry-run"
+    END
+
+    # earthly doesn't support passing secrets to FUNCTION directly. Calling the cargo command directly instead.
+    RUN --push --secret CARGO_REGISTRY_TOKEN cargo publish --package $PACKAGE $DRY_RUN_OPTION
