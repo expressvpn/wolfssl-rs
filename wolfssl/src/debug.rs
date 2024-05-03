@@ -1,5 +1,6 @@
 #![cfg(feature = "debug")]
 
+use std::fmt::{self, Display};
 use std::os::raw::{c_int, c_uint};
 use std::sync::Arc;
 
@@ -60,16 +61,16 @@ pub enum Tls13Secret {
     ServerTrafficSecret,
     /// "EARLY_EXPORTER_SECRET"
     EarlyExporterSecret,
-    ///
-    ExporterSecret,
     /// "EXPORTER_SECRET"
+    ExporterSecret,
+    /// "UNKNOWN_SECRET"
     UnknownSecret(c_uint),
 }
 
-impl ToString for Tls13Secret {
-    fn to_string(&self) -> String {
+impl Display for Tls13Secret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Tls13Secret::*;
-        match self {
+        let secret = match self {
             ClientEarlyTrafficSecret => "CLIENT_EARLY_TRAFFIC_SECRET",
             ClientHandshakeTrafficSecret => "CLIENT_HANDSHAKE_TRAFFIC_SECRET",
             ServerHandshakeTrafficSecret => "SERVER_HANDSHAKE_TRAFFIC_SECRET",
@@ -78,8 +79,8 @@ impl ToString for Tls13Secret {
             EarlyExporterSecret => "EARLY_EXPORTER_SECRET",
             ExporterSecret => "EXPORTER_SECRET",
             UnknownSecret(_e) => "UNKNOWN_SECRET",
-        }
-        .to_string()
+        };
+        write!(f, "{}", secret)
     }
 }
 
