@@ -25,7 +25,7 @@ pub trait IOCallbacks {
     /// the number of bytes actually received. If the operation would
     /// block [`std::io::ErrorKind::WouldBlock`] then return
     /// [`IOCallbackResult::WouldBlock`].
-    fn recv(&self, buf: &mut [u8]) -> IOCallbackResult<usize>;
+    fn recv(&mut self, buf: &mut [u8]) -> IOCallbackResult<usize>;
 
     /// Called when WolfSSL wishes to send some data
     ///
@@ -33,5 +33,5 @@ pub trait IOCallbacks {
     /// return the number of bytes actually consumed. If the operation would
     /// block [`std::io::ErrorKind::WouldBlock`] then return
     /// [`IOCallbackResult::WouldBlock`].
-    fn send(&self, buf: &[u8]) -> IOCallbackResult<usize>;
+    fn send(&mut self, buf: &[u8]) -> IOCallbackResult<usize>;
 }
