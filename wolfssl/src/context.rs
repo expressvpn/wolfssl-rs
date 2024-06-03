@@ -96,7 +96,7 @@ impl ContextBuilder {
                 wolfSSL_CTX_load_verify_buffer(
                     self.ctx.as_ptr(),
                     buf.as_ptr(),
-                    buf.len() as i64,
+                    buf.len() as std::os::raw::c_long,
                     WOLFSSL_FILETYPE_ASN1,
                 )
             },
@@ -110,7 +110,7 @@ impl ContextBuilder {
                 wolfSSL_CTX_load_verify_buffer(
                     self.ctx.as_ptr(),
                     buf.as_ptr(),
-                    buf.len() as i64,
+                    buf.len() as std::os::raw::c_long,
                     WOLFSSL_FILETYPE_PEM,
                 )
             },
@@ -237,7 +237,7 @@ impl ContextBuilder {
                 wolfSSL_CTX_use_certificate_buffer(
                     self.ctx.as_ptr(),
                     buf.as_ptr(),
-                    buf.len() as i64,
+                    buf.len() as std::os::raw::c_long,
                     WOLFSSL_FILETYPE_ASN1,
                 )
             },
@@ -271,7 +271,7 @@ impl ContextBuilder {
                 wolfSSL_CTX_use_certificate_buffer(
                     self.ctx.as_ptr(),
                     buf.as_ptr(),
-                    buf.len() as i64,
+                    buf.len() as std::os::raw::c_long,
                     WOLFSSL_FILETYPE_PEM,
                 )
             },
@@ -325,7 +325,7 @@ impl ContextBuilder {
                 wolfSSL_CTX_use_PrivateKey_buffer(
                     self.ctx.as_ptr(),
                     buf.as_ptr(),
-                    buf.len() as i64,
+                    buf.len() as std::os::raw::c_long,
                     WOLFSSL_FILETYPE_ASN1,
                 )
             },
@@ -359,7 +359,7 @@ impl ContextBuilder {
                 wolfSSL_CTX_use_PrivateKey_buffer(
                     self.ctx.as_ptr(),
                     buf.as_ptr(),
-                    buf.len() as i64,
+                    buf.len() as std::os::raw::c_long,
                     WOLFSSL_FILETYPE_PEM,
                 )
             },
