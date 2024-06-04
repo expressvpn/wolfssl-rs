@@ -157,8 +157,54 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     }
 
     if build_target::target_arch().unwrap() == build_target::Arch::ARM {
-        // Enable ARM ASM optimisations
-        conf.enable("armasm", None);
+        // Enable ARM ASM optimisations, except for android armeabi-v7a
+        if build_target::target_os().unwrap() != build_target::Os::Android {
+            conf.enable("armasm", None);
+        }
+    }
+
+    if build_target::target_os().unwrap() == build_target::Os::Android {
+        // Build options for Android
+        let (chost, arch_flags, arch, configure_platform) =
+            match build_target::target_arch().unwrap() {
+                build_target::Arch::ARM => (
+                    "armv7a-linux-androideabi",
+                    "-march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16 -O3",
+                    "armeabi-v7a",
+                    "android-arm",
+                ),
+                build_target::Arch::AARCH64 => (
+                    "aarch64-linux-android",
+                    "-march=armv8-a+crypto -O3",
+                    "arm64-v8a",
+                    "android-arm64",
+                ),
+                build_target::Arch::X86 => (
+                    "i686-linux-android",
+                    "-march=i686 -msse3 -m32 -O3",
+                    "x86",
+                    "android-x86",
+                ),
+                build_target::Arch::X86_64 => (
+                    "x86_64-linux-android",
+                    "-march=x86-64 -msse4.2 -mpopcnt -m64 -O3",
+                    "x86_64",
+                    "android64-x86_64",
+                ),
+                _ => panic!("Unsupported build_target for Android"),
+            };
+
+        // Per arch configurations
+        conf.config_option("host", Some(chost));
+        conf.cflag(arch_flags);
+        conf.env("ARCH", arch);
+        conf.env("CONFIGURE_PLATFORM", configure_platform);
+
+        // General Android specific configurations
+        conf.disable("crypttests", None);
+        conf.cflag("-DFP_MAX_BITS=8192");
+        conf.cflag("-fomit-frame-pointer");
+        conf.env("LIBS", "-llog -landroid");
     }
 
     // Build and return the config
