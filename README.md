@@ -25,6 +25,11 @@ After cloning this repo, you'll also need to clone the submodules for the WolfSS
 git submodule update --init
 ```
 
+The project requires `cmake`, `automake` and `autoconf` to build. Use the following command to install the dependencies on macOS:
+```
+brew install cmake autoconf automake
+```
+
 Currently, the usual commands from `cargo` works perfectly fine. Common commands
 include the following:
 
