@@ -66,11 +66,18 @@ If you are not a member of ExpressVPN, you may set up your own Earthly satellite
 
 # Releasing
 
-This repository is a monorepo for two crates: `wolfssl-sys` and `wolfssl`. They should __always__ be released together. Since `wolfssl` depends on `wolfssl-sys`, they should be released in the below order:
+This repository is a monorepo for two crates: `wolfssl-sys` and `wolfssl`. It is required when releasing `wolfssl` that it depends on an version of `wolfssl-sys` which is up to date with `main`.
 
-1. Bump the crate version `wolfssl-sys`, update the version specified under `dependencies` in the `wolfssl` crate, and release it (Follow the section [Releasing a Single Crate](#releasing-a-single-crate))
-1. Bump the crate version `wolfssl` and release it (same procedure as above)
+If `wolfssl-sys` has unreleased changes:
 
+1. Bump the crate version `wolfssl-sys`
+1. Update the version specified under `dependencies` in the `wolfssl` crate
+1. Release `wolfssl-sys` (Follow the section [Releasing a Single Crate](#releasing-a-single-crate))
+
+Once the most recent `wolfssl-sys` is released and `wolfssl` depends on it then `wolfssl` can be released:
+
+1. Bump the crate version `wolfssl`
+1. Release `wolfssl` (Follow the section [Releasing a Single Crate](#releasing-a-single-crate))
 
 ## Releasing a Single Crate
 
