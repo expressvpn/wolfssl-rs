@@ -1,0 +1,95 @@
+name: "Validate wolfssl-sys dependency version"
+
+outputs:
+  dependency_status:
+    description: "Is wolfssl's versioned dependency on wolfssl-sys up to date [released, pending, unreleased, out-of-date]"
+    value: ${{ steps.validate_dependency.outputs.status }}
+  dependency_version:
+    description: "Current value of wolfssl's versioned dependency on wolfssl-sys"
+    value: ${{ steps.get-dep.outputs.version }}
+  wolfssl_sys_release_status:
+    description: "Current wolfssl-sys status: [released, pending, unreleased]"
+    value: ${{ steps.validate_sys_release.outputs.status }}
+  wolfssl_sys_release_version:
+    description: "Current wolfssl-sys wolfssl release"
+    value: ${{ steps.get-sys-release.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Get wolfssl-sys current release version
+      id: get-sys-release
+      shell: bash
+      run: |
+        VER=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[] | select(.name == "wolfssl-sys") | .version')
+        echo version=${VER} >> $GITHUB_OUTPUT
+    - name: Get wolfssl-sys current release treesha
+      id: get-sys-release-treesha
+      shell: bash
+      run: |
+        TAG="wolfssl-sys-${{ steps.get-sys-release.outputs.version }}"
+        if ! git fetch origin --depth=1 tag "$TAG" ; then
+            echo "tag $TAG not found, assuming pending release"
+            echo sha=pending >> $GITHUB_OUTPUT
+            exit 0
+        fi
+
+        TREESHA=$(git ls-tree --object-only $TAG wolfssl-sys)
+        echo TREESHA=$TREESHA
+        echo sha=${TREESHA} >> $GITHUB_OUTPUT
+
+    - name: Get latest sys treesha
+      id: get-sys-latest-treesha
+      shell: bash
+      run: |
+        TREESHA=$(git ls-tree --object-only HEAD wolfssl-sys)
+        echo TREESHA=$TREESHA
+        echo sha=${TREESHA} >> $GITHUB_OUTPUT
+
+    - name: Get wolfssl->wolfssl-sys dependency version
+      id: get-dep
+      shell: bash
+      run: |
+        # DEP is e.g. ^1.0.0, which is the only form we expect to see
+        DEP=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[] | select(.name == "wolfssl") | .dependencies[] | select(.name == "wolfssl-sys") | .req')
+
+        case $DEP in
+        ^*)
+            echo version=${DEP#^} >> $GITHUB_OUTPUT
+            ;;
+        *)
+          echo "Unexpected dependency format: $DEP"
+          exit 1
+        esac
+
+    - name: Validate wolfssl-sys is released
+      id: validate_sys_release
+      shell: bash
+      run: |
+        if [ ${{ steps.get-sys-release-treesha.outputs.sha }} != "pending" ] ; then
+            echo "current wolfssl-sys release has tree sha ${{ steps.get-sys-release-treesha.outputs.sha }}" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "latest wolfssl-sys has tree sha ${{ steps.get-sys-latest-treesha.outputs.sha }}" >> $GITHUB_STEP_SUMMARY
+
+        if [ ${{ steps.get-sys-release-treesha.outputs.sha }} = "pending" ] ; then
+            echo "current wolfssl-sys release ${{ steps.get-sys-release.outputs.version }} is pending (tag not found)" >> $GITHUB_STEP_SUMMARY
+            echo "status=pending" >> $GITHUB_OUTPUT
+        elif [ ${{ steps.get-sys-release-treesha.outputs.sha }} = ${{ steps.get-sys-latest-treesha.outputs.sha }} ] ; then
+            echo "current wolfssl-sys release ${{ steps.get-sys-release.outputs.version }} is up to date" >> $GITHUB_STEP_SUMMARY
+            echo status=released >> $GITHUB_OUTPUT
+        else
+            echo "wolfssl-sys has unreleased changes" >> $GITHUB_STEP_SUMMARY
+            echo status=unreleased >> $GITHUB_OUTPUT
+        fi
+
+    - name: Validate wolfssl->wolfssl-sys dependency
+      id: validate_dependency
+      shell: bash
+      run: |
+        if [ ${{ steps.get-dep.outputs.version }} = ${{ steps.get-sys-release.outputs.version }} ] ; then
+            echo "wolfssl depends on latest wolfssl-sys ${{ steps.get-dep.outputs.version }}, which is ${{ steps.validate_sys_release.outputs.status }}" >> $GITHUB_STEP_SUMMARY
+            echo status=${{ steps.validate_sys_release.outputs.status }} >> $GITHUB_OUTPUT
+        else
+            echo "wolfssl depends on outdated wolfssl-sys ${{ steps.get-dep.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo status=out-of-date >> $GITHUB_OUTPUT
+        fi
