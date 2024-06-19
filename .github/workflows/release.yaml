@@ -121,6 +121,7 @@ jobs:
 
             const crate_definitions = await globby("*/Cargo.toml")
 
+            let blocked_crates = 0
             const crates_to_publish = []
             for (crate_definition of crate_definitions) {
               console.log(`Processing ${crate_definition}`)
@@ -136,6 +137,7 @@ jobs:
                 if (name == "wolfssl" && "${{ steps.check_dependencies.outputs.dependency_status }})" != "released") {
                   console.log("Cannot release wolfssl with dependency on ${{ steps.check_dependencies.outputs.dependency_status }} wolfssl-sys")
                   crates_to_publish.push({ name, version_on_file, version_on_crate_io, release_status: ":no_entry: Blocked", comment: "dependency on ${{ steps.check_dependencies.outputs.dependency_status }} wolfssl-sys" })
+                  blocked_crates++
                   continue
                 }
 
@@ -155,6 +157,7 @@ jobs:
               `| \`${item.name}\` | ${item.version_on_crate_io} | **${item.version_on_file}** | ${item.release_status} | ${item.comment} | `
             ).join("\n")
             core.setOutput('crates_to_publish_table_rendered', crates_to_publish_table_rendered)
+            core.setOutput('nr_crates_blocked_from_releasing', blocked_crates)
 
       - uses: peter-evans/find-comment@v3
         id: fc
@@ -184,3 +187,9 @@ jobs:
             |--|--|--|--|--|
             ${{ steps.process_release.outputs.crates_to_publish_table_rendered }}
           edit-mode: replace
+
+      - if: ${{ steps.process_release.outputs.nr_crates_blocked_from_releasing > 0 }}
+        name: Fail release on blocked releases
+        uses: actions/github-script@v7
+        with:
+          script: core.setFailed('Unable to release all required crates')
