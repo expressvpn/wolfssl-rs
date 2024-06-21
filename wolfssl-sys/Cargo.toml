@@ -2,7 +2,7 @@
 name = "wolfssl-sys"
 version = "1.0.0"
 edition = "2021"
-authors = ["pete.m@expressvpn.com"]
+authors = ["lightway-developers@expressvpn.com"]
 license = "GPL-2.0"
 readme = "README.md"
 description = "System bindings for WolfSSL"
