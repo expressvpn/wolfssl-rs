@@ -66,11 +66,30 @@ If you are not a member of ExpressVPN, you may set up your own Earthly satellite
 
 # Releasing
 
-This repository is a monorepo for two crates: `wolfssl-sys` and `wolfssl`. They should __always__ be released together. Since `wolfssl` depends on `wolfssl-sys`, they should be released in the below order:
+This repository is a monorepo for two crates: `wolfssl-sys` and `wolfssl`. It is required when releasing `wolfssl` that it depends on an version of `wolfssl-sys` which is up to date with `main`.
 
-1. Bump the crate version `wolfssl-sys`, update the version specified under `dependencies` in the `wolfssl` crate, and release it (Follow the section [Releasing a Single Crate](#releasing-a-single-crate))
-1. Bump the crate version `wolfssl` and release it (same procedure as above)
+There are four possible states for `wolfssl`'s dependency on `wolfssl-sys`:
 
+| State         | Description                                                               |
+|---------------|---------------------------------------------------------------------------|
+| `released`    | `wolfssl` depends on the latest, most up to date release of `wolfssl-sys` |
+| `pending`     | `wolfssl` depends on a pending release of `wolfssl-sys`                   |
+| `unreleased`  | `wolfssl-sys` has changes which must be released                          |
+| `out-of-date` | `wolfssl` depends on an old version of `wolfssl-sys`                      |
+
+If state is `out-of-date` or `unreleased` then:
+
+1. Bump the crate version in `wolfssl-sys/Cargo.toml`
+1. Update the version specified under `dependencies` in the `wolfssl` crate
+
+The state will now be `pending` (or it already was) so:
+
+1. Release `wolfssl-sys` (Follow the section [Releasing a Single Crate](#releasing-a-single-crate))
+
+Once the most recent `wolfssl-sys` is released and `wolfssl` depends on it then `wolfssl` can be released:
+
+1. Bump the crate version in `wolfssl/Cargo.toml`
+1. Release `wolfssl` (Follow the section [Releasing a Single Crate](#releasing-a-single-crate))
 
 ## Releasing a Single Crate
 
