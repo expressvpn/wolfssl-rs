@@ -77,6 +77,8 @@ There are four possible states for `wolfssl`'s dependency on `wolfssl-sys`:
 | `unreleased`  | `wolfssl-sys` has changes which must be released                          |
 | `out-of-date` | `wolfssl` depends on an old version of `wolfssl-sys`                      |
 
+If state is `released` then `wolfssl` can be released without releasing a new version of `wolfssl-sys`.
+
 If state is `out-of-date` or `unreleased` then:
 
 1. Bump the crate version in `wolfssl-sys/Cargo.toml`
@@ -90,6 +92,54 @@ Once the most recent `wolfssl-sys` is released and `wolfssl` depends on it then 
 
 1. Bump the crate version in `wolfssl/Cargo.toml`
 1. Release `wolfssl` (Follow the section [Releasing a Single Crate](#releasing-a-single-crate))
+
+```mermaid
+flowchart TD
+    Start((Start))
+    Determine{"Determine
+     current state
+      of wolfssl-sys"}
+
+    Released([Released])
+    Pending([Pending])
+    Unreleased([Unreleased])
+    OutOfDate([Out-of-date])
+
+    BumpWolfsslSysVersion["Update <code>version</code> field
+      in <code>wolfssl-sys/Cargo.toml</code>"]
+    BumpWolfsslVersion["Update <code>version</code> field
+      in <code>wolfssl/Cargo.toml</code>"]
+    BumpWolfsslSysDependency["
+      Update <code>wolfssl-sys = { ..., version = &quot;...&quot; }</code>
+      dependency line in <code>wolfssl/Cargo.toml</code> to new version
+    "]
+    RaiseWolfsslSysReleasePR[Raise, review and merge <code>wolfssl-sys</code> release PR]
+    RaiseWolfsslReleasePR[Raise, review and merge <code>wolfssl</code> release PR]
+
+    Complete((Done))
+
+    Start --> Determine
+    Determine --"No changes to <code>wolfssl-sys</code>,
+      no release is required"--> Released
+    Determine --"A <code>wolfssl-sys</code> release has already been prepared
+      and must be released"--> Pending
+    Determine --New <code>wolfssl-sys</code> release is required--> Unreleased
+    Determine --New <code>wolfssl-sys</code> release is required--> OutOfDate
+
+    Released --> BumpWolfsslVersion
+    Pending --> RaiseWolfsslSysReleasePR
+
+    RaiseWolfsslSysReleasePR --> Released
+
+    Unreleased --> BumpWolfsslSysVersion
+    OutOfDate --> BumpWolfsslSysDependency
+
+    BumpWolfsslSysVersion --> BumpWolfsslSysDependency
+
+    BumpWolfsslSysDependency --> Pending
+    BumpWolfsslVersion --> RaiseWolfsslReleasePR
+    RaiseWolfsslReleasePR --> Complete
+```
 
 ## Releasing a Single Crate
 
