@@ -118,6 +118,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .enable("supportedcurves", None)
         // Enable TLS/1.3
         .enable("tls13", None)
+        // Enable liboqs, etc
+        .enable("experimental", None)
         // CFLAGS
         .cflag("-g")
         .cflag("-fPIC")
