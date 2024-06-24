@@ -77,27 +77,54 @@ There are four possible states for `wolfssl`'s dependency on `wolfssl-sys`:
 | `unreleased`  | `wolfssl-sys` has changes which must be released                          |
 | `out-of-date` | `wolfssl` depends on an old version of `wolfssl-sys`                      |
 
+If state is `released` then `wolfssl` can be released without releasing a new version of `wolfssl-sys`.
+
 If state is `out-of-date` or `unreleased` then:
 
-1. Bump the crate version in `wolfssl-sys/Cargo.toml`
+1. Bump the crate version in `wolfssl-sys/Cargo.toml`, following semantic versioning.
 1. Update the version specified under `dependencies` in the `wolfssl` crate
 
-The state will now be `pending` (or it already was) so:
+The state will now be (or already was) either `pending` or `released` so we can release:
 
-1. Release `wolfssl-sys` (Follow the section [Releasing a Single Crate](#releasing-a-single-crate))
-
-Once the most recent `wolfssl-sys` is released and `wolfssl` depends on it then `wolfssl` can be released:
-
-1. Bump the crate version in `wolfssl/Cargo.toml`
-1. Release `wolfssl` (Follow the section [Releasing a Single Crate](#releasing-a-single-crate))
-
-## Releasing a Single Crate
-
-A GitHub Workflow is set up to automate the release of crates in this repo. Upon a release, it will create a release in GitHub and Crates.io
-
-To create a new release, follow the below steps:
-
-1. Bump the version in `<crate-name>/Cargo.toml`. We follow the semantic versioning pattern when deciding a new version number
+1. Bump the crate version in `wolfssl/Cargo.toml`, following semantic versioning.
 1. Open a PR, attach the `release` label to the PR
-1. Observe that a comment is add to the PR, indicating the current version and the upcoming version
-1. Merge the PR, a new version should be released to both GitHub and Crates.io
+1. Observe that a comment is add to the PR, indicating the current version(s) and the upcoming version(s)
+1. Merge the PR, the new version(s) should be released to both GitHub and Crates.io
+
+
+```mermaid
+flowchart TD
+    Start((Start))
+
+    Released([Released])
+    Pending([Pending])
+    Unreleased([Unreleased])
+    OutOfDate([Out-of-date])
+
+    BumpWolfsslSysVersion[Update version in wolfssl-sys/Cargo.toml]
+    BumpWolfsslVersion[Update version in wolfssl/Cargo.toml]
+    BumpWolfsslSysDependency["
+      Update dependency from wolfssl on wolfssl-sys
+      in wolfssl/Cargo.toml to new version
+    "]
+    RaiseReleasePR[Raise Release PR]
+
+    Complete((Done))
+
+    Start --> Released
+    Start --> Pending
+    Start --> Unreleased
+    Start --> OutOfDate
+
+    Released --> BumpWolfsslVersion
+    Pending --> BumpWolfsslVersion
+
+    Unreleased --> BumpWolfsslSysVersion
+    OutOfDate --> BumpWolfsslSysDependency
+
+    BumpWolfsslSysVersion --> BumpWolfsslSysDependency
+
+    BumpWolfsslSysDependency --> Pending
+    BumpWolfsslVersion --> RaiseReleasePR
+    RaiseReleasePR --> Complete
+```

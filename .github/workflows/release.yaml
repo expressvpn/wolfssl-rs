@@ -133,11 +133,13 @@ jobs:
             console.log("wolfssl to sys dependency version: ${{ steps.check_dependencies.outputs.dependency_version }}")
             console.log("wolfssl to sys dependency status: ${{ steps.check_dependencies.outputs.dependency_status }}")
 
-            const crate_definitions = await globby("*/Cargo.toml")
+            const crates = ["wolfssl-sys", "wolfssl"]
 
             let blocked_crates = 0
             const crates_to_publish = []
-            for (crate_definition of crate_definitions) {
+            for (crate of crates) {
+              const crate_definition = crate + "/Cargo.toml"
+
               console.log(`Processing ${crate_definition}`)
 
               const data = toml.parse(fs.readFileSync(crate_definition, 'utf8'))
@@ -148,14 +150,17 @@ jobs:
               if (version_on_file != version_on_crate_io) {
                 console.log("Crate", name, "needs publishing")
 
-                if (name == "wolfssl" && "${{ steps.check_dependencies.outputs.dependency_status }}" != "released") {
-                  console.log("Cannot release wolfssl with dependency on ${{ steps.check_dependencies.outputs.dependency_status }} wolfssl-sys")
-                  crates_to_publish.push({ name, version_on_file, version_on_crate_io, release_status: ":no_entry: Blocked", comment: "dependency on ${{ steps.check_dependencies.outputs.dependency_status }} wolfssl-sys" })
-                  blocked_crates++
-                  continue
+                if (name == "wolfssl") {
+                  if(!["pending", "released"].includes("${{ steps.check_dependencies.outputs.dependency_status }}")) {
+                    console.log("Cannot release wolfssl with dependency on ${{ steps.check_dependencies.outputs.dependency_status }} wolfssl-sys")
+                    crates_to_publish.push({ name, version_on_file, version_on_crate_io, release_status: ":no_entry: Blocked", comment: "dependency on ${{ steps.check_dependencies.outputs.dependency_status }} wolfssl-sys" })
+                    blocked_crates++
+                    continue
+                  }
+                  crates_to_publish.push({ name, version_on_file, version_on_crate_io, release_status: ":white_check_mark: Release", comment: "dependency on ${{ steps.check_dependencies.outputs.dependency_status }} wolfssl-sys" })
+                } else {
+                  crates_to_publish.push({ name, version_on_file, version_on_crate_io, release_status: ":white_check_mark: Release", comment: "" })
                 }
-
-                crates_to_publish.push({ name, version_on_file, version_on_crate_io, release_status: ":white_check_mark: Release", comment: "" })
 
                 run_command_stream(["earthly", "--push", "--ci", "--org", "expressvpn", "--satellite", "wolfssl-rs", "--secret", "CARGO_REGISTRY_TOKEN", "+publish", `--PACKAGE=${name}`, `--DRY_RUN=${is_dry_run}`])
                 if (!is_dry_run) {
