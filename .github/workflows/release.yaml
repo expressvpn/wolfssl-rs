@@ -134,7 +134,7 @@ jobs:
               if (version_on_file != version_on_crate_io) {
                 console.log("Crate", name, "needs publishing")
 
-                if (name == "wolfssl" && "${{ steps.check_dependencies.outputs.dependency_status }})" != "released") {
+                if (name == "wolfssl" && "${{ steps.check_dependencies.outputs.dependency_status }}" != "released") {
                   console.log("Cannot release wolfssl with dependency on ${{ steps.check_dependencies.outputs.dependency_status }} wolfssl-sys")
                   crates_to_publish.push({ name, version_on_file, version_on_crate_io, release_status: ":no_entry: Blocked", comment: "dependency on ${{ steps.check_dependencies.outputs.dependency_status }} wolfssl-sys" })
                   blocked_crates++
