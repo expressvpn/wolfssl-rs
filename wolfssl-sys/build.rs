@@ -144,6 +144,11 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         }
     }
 
+    if build_target::target_arch().unwrap() == build_target::Arch::X86 {
+        // Disable all asm optmisations for x86 builds
+        conf.disable("sp-asm", None);
+    }
+
     if build_target::target_arch().unwrap() == build_target::Arch::X86_64 {
         // Enable Intel ASM optmisations
         conf.enable("intelasm", None);
