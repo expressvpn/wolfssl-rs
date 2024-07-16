@@ -17,7 +17,7 @@ autotools = "0.2"
 build-target = "0.4.0"
 
 [dependencies.oqs-sys]
-version = "0.9.1"
+git = "https://github.com/kp-mariappan-ramasamy/liboqs-rust.git"
 default-features = false
 features = ["kyber", "dilithium", "falcon"]
 optional = true

@@ -112,29 +112,6 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.68.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "726e4313eb6ec35d2730258ad4e15b547ee75d6afaa1361a922e78e59b7d8078"
-dependencies = [
- "bitflags",
- "cexpr",
- "clang-sys",
- "lazy_static",
- "lazycell",
- "log",
- "peeking_take_while",
- "prettyplease",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash",
- "shlex",
- "syn",
- "which",
-]
-
-[[package]]
-name = "bindgen"
 version = "0.69.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a00dc851838a2120612785d195287475a3ac45514741da670b735818822129a0"
@@ -411,21 +388,15 @@ checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
 [[package]]
 name = "oqs-sys"
 version = "0.9.1+liboqs-0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afa79adc3c10f8e01d0b134c159254e5843ec3f91c0bd868e57777beb3329e17"
+source = "git+https://github.com/kp-mariappan-ramasamy/liboqs-rust.git#ca4793b0bc2a33afbdc978ba9a0cf0bfb6d429e9"
 dependencies = [
- "bindgen 0.68.1",
+ "bindgen",
  "build-deps",
+ "build-target",
  "cmake",
  "libc",
  "pkg-config",
 ]
-
-[[package]]
-name = "peeking_take_while"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
 
 [[package]]
 name = "pin-project-lite"
@@ -815,7 +786,7 @@ name = "wolfssl-sys"
 version = "1.1.0"
 dependencies = [
  "autotools",
- "bindgen 0.69.4",
+ "bindgen",
  "build-target",
  "oqs-sys",
 ]
