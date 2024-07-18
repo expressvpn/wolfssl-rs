@@ -144,23 +144,28 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         }
     }
 
-    if build_target::target_arch().unwrap() == build_target::Arch::X86_64 {
-        // Enable Intel ASM optmisations
-        conf.enable("intelasm", None);
-        // Enable AES hardware acceleration
-        conf.enable("aesni", None);
-    }
-
-    if build_target::target_arch().unwrap() == build_target::Arch::AARCH64 {
-        // Enable ARM ASM optimisations
-        conf.enable("armasm", None);
-    }
-
-    if build_target::target_arch().unwrap() == build_target::Arch::ARM {
-        // Enable ARM ASM optimisations, except for android armeabi-v7a
-        if build_target::target_os().unwrap() != build_target::Os::Android {
+    match build_target::target_arch().unwrap() {
+        build_target::Arch::AARCH64 => {
+            // Enable ARM ASM optimisations
             conf.enable("armasm", None);
         }
+        build_target::Arch::ARM => {
+            // Enable ARM ASM optimisations, except for android armeabi-v7a
+            if build_target::target_os().unwrap() != build_target::Os::Android {
+                conf.enable("armasm", None);
+            }
+        }
+        build_target::Arch::X86 => {
+            // Disable sp asm optmisations which has been enabled earlier
+            conf.disable("sp-asm", None);
+        }
+        build_target::Arch::X86_64 => {
+            // Enable Intel ASM optmisations
+            conf.enable("intelasm", None);
+            // Enable AES hardware acceleration
+            conf.enable("aesni", None);
+        }
+        _ => {}
     }
 
     if build_target::target_os().unwrap() == build_target::Os::Android {
