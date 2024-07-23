@@ -2,7 +2,7 @@ use crate::{
     callback::IOCallbacks,
     error::{Error, Result},
     ssl::{Session, SessionConfig},
-    CurveGroup, NewSessionError, Protocol, RootCertificate, Secret, SslVerifyMode,
+    CurveGroup, Method, NewSessionError, RootCertificate, Secret, SslVerifyMode,
 };
 use std::ptr::NonNull;
 use thiserror::Error;
@@ -11,7 +11,7 @@ use thiserror::Error;
 #[derive(Debug)]
 pub struct ContextBuilder {
     ctx: NonNull<wolfssl_sys::WOLFSSL_CTX>,
-    protocol: Protocol,
+    method: Method,
 }
 
 /// Error creating a [`ContextBuilder`] object.
@@ -21,7 +21,7 @@ pub enum NewContextBuilderError {
     #[error("Failed to initialize WolfSSL: {0}")]
     InitFailed(Error),
 
-    /// Failed to turn `Protocol` into a `wolfssl_sys::WOLFSSL_METHOD`
+    /// Failed to turn `Method` into a `wolfssl_sys::WOLFSSL_METHOD`
     #[error("Failed to obtain WOLFSSL_METHOD")]
     MethodFailed,
 
@@ -34,21 +34,21 @@ impl ContextBuilder {
     /// Invokes [`wolfSSL_CTX_new`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_new
-    pub fn new(protocol: Protocol) -> std::result::Result<Self, NewContextBuilderError> {
+    pub fn new(method: Method) -> std::result::Result<Self, NewContextBuilderError> {
         crate::wolf_init().map_err(NewContextBuilderError::InitFailed)?;
 
-        let method_fn = protocol
+        let method_fn = method
             .into_method_ptr()
             .ok_or(NewContextBuilderError::MethodFailed)?;
 
         // SAFETY: [`wolfSSL_CTX_new`][0] is documented to get pointer to a valid `WOLFSSL_METHOD` structure which is created using one of the `wolfSSLvXX_XXXX_method()`.
-        // `Protocol::into_method_ptr` function returns a pointer `wolfSSLvXX_XXXX_method()`
+        // `Method::into_method_ptr` function returns a pointer `wolfSSLvXX_XXXX_method()`
         //
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_new
         let ctx = unsafe { wolfssl_sys::wolfSSL_CTX_new(method_fn.as_ptr()) };
         let ctx = NonNull::new(ctx).ok_or(NewContextBuilderError::CreateFailed)?;
 
-        Ok(Self { ctx, protocol })
+        Ok(Self { ctx, method })
     }
 
     /// When `cond` is True call fallible `func` on `Self`
@@ -423,7 +423,7 @@ impl ContextBuilder {
     /// Finalizes a `WolfContext`.
     pub fn build(self) -> Context {
         Context {
-            protocol: self.protocol,
+            method: self.method,
             ctx: ContextPointer(self.ctx),
         }
     }
@@ -474,7 +474,7 @@ unsafe impl Sync for ContextPointer {}
 
 /// A wrapper around a `WOLFSSL_CTX`.
 pub struct Context {
-    protocol: Protocol,
+    method: Method,
     ctx: ContextPointer,
 }
 
@@ -490,9 +490,9 @@ impl Context {
         &self.ctx
     }
 
-    /// Returns the Context's [`Protocol`].
-    pub fn protocol(&self) -> Protocol {
-        self.protocol
+    /// Returns the Context's [`Method`].
+    pub fn method(&self) -> Method {
+        self.method
     }
 
     /// Creates a new SSL session using this underlying context.
@@ -526,24 +526,24 @@ mod tests {
     use super::*;
     use test_case::test_case;
 
-    #[test_case(Protocol::DtlsClient)]
-    #[test_case(Protocol::DtlsClientV1_2)]
-    #[test_case(Protocol::DtlsServer)]
-    #[test_case(Protocol::DtlsServerV1_2)]
-    #[test_case(Protocol::TlsClient)]
-    #[test_case(Protocol::TlsClientV1_2)]
-    #[test_case(Protocol::TlsClientV1_3)]
-    #[test_case(Protocol::TlsServer)]
-    #[test_case(Protocol::TlsServerV1_2)]
-    #[test_case(Protocol::TlsServerV1_3)]
-    fn wolfssl_context_new(protocol: Protocol) {
+    #[test_case(Method::DtlsClient)]
+    #[test_case(Method::DtlsClientV1_2)]
+    #[test_case(Method::DtlsServer)]
+    #[test_case(Method::DtlsServerV1_2)]
+    #[test_case(Method::TlsClient)]
+    #[test_case(Method::TlsClientV1_2)]
+    #[test_case(Method::TlsClientV1_3)]
+    #[test_case(Method::TlsServer)]
+    #[test_case(Method::TlsServerV1_2)]
+    #[test_case(Method::TlsServerV1_3)]
+    fn wolfssl_context_new(method: Method) {
         crate::wolf_init().unwrap();
-        let _ = protocol.into_method_ptr().unwrap();
+        let _ = method.into_method_ptr().unwrap();
     }
 
     #[test]
     fn new() {
-        ContextBuilder::new(Protocol::DtlsClient).unwrap();
+        ContextBuilder::new(Method::DtlsClient).unwrap();
     }
 
     #[test_case(true, true => true)]
@@ -552,7 +552,7 @@ mod tests {
     #[test_case(false, true => false)]
     fn try_when(whether: bool, ok: bool) -> bool {
         let mut called = false;
-        let _ = ContextBuilder::new(Protocol::TlsClient)
+        let _ = ContextBuilder::new(Method::TlsClient)
             .unwrap()
             .try_when(whether, |b| {
                 called = true;
@@ -571,7 +571,7 @@ mod tests {
     #[test_case(None => false)]
     fn try_some(whether: Option<bool>) -> bool {
         let mut called = false;
-        let _ = ContextBuilder::new(Protocol::TlsClient)
+        let _ = ContextBuilder::new(Method::TlsClient)
             .unwrap()
             .try_when_some(whether, |b, ok| {
                 called = true;
@@ -594,7 +594,7 @@ mod tests {
 
         let cert = RootCertificate::Asn1Buffer(CA_CERT);
 
-        let _ = ContextBuilder::new(Protocol::TlsClient)
+        let _ = ContextBuilder::new(Method::TlsClient)
             .unwrap()
             .with_root_certificate(cert)
             .unwrap();
@@ -602,7 +602,7 @@ mod tests {
 
     #[test]
     fn set_cipher_list() {
-        let _ = ContextBuilder::new(Protocol::DtlsClient)
+        let _ = ContextBuilder::new(Method::DtlsClient)
             .unwrap()
             // This string might need to change depending on the flags
             // we built wolfssl with.
@@ -619,7 +619,7 @@ mod tests {
 
         let cert = Secret::Asn1Buffer(SERVER_CERT);
 
-        let _ = ContextBuilder::new(Protocol::TlsClient)
+        let _ = ContextBuilder::new(Method::TlsClient)
             .unwrap()
             .with_certificate(cert)
             .unwrap();
@@ -634,7 +634,7 @@ mod tests {
 
         let key = Secret::Asn1Buffer(SERVER_KEY);
 
-        let _ = ContextBuilder::new(Protocol::TlsClient)
+        let _ = ContextBuilder::new(Method::TlsClient)
             .unwrap()
             .with_private_key(key)
             .unwrap();
@@ -642,7 +642,7 @@ mod tests {
 
     #[test]
     fn set_secure_renegotiation() {
-        let _ = ContextBuilder::new(Protocol::TlsClient)
+        let _ = ContextBuilder::new(Method::TlsClient)
             .unwrap()
             .with_secure_renegotiation()
             .unwrap();
@@ -653,13 +653,13 @@ mod tests {
     #[test_case(SslVerifyMode::SslVerifyFailIfNoPeerCert)]
     #[test_case(SslVerifyMode::SslVerifyFailExceptPsk)]
     fn set_verify_method(mode: SslVerifyMode) {
-        ContextBuilder::new(Protocol::TlsClient)
+        ContextBuilder::new(Method::TlsClient)
             .unwrap()
             .with_verify_method(mode);
     }
 
     #[test]
     fn register_io_callbacks() {
-        let _ = ContextBuilder::new(Protocol::TlsClient).unwrap().build();
+        let _ = ContextBuilder::new(Method::TlsClient).unwrap().build();
     }
 }

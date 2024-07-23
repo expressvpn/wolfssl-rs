@@ -151,7 +151,7 @@ impl ProtocolVersion {
 
 /// Corresponds to the various `wolf*_{client,server}_method()` APIs
 #[derive(Debug, Copy, Clone)]
-pub enum Protocol {
+pub enum Method {
     /// `wolfDTLS_client_method`
     DtlsClient,
     /// `wolfDTLSv1_2_client_method`
@@ -178,7 +178,7 @@ pub enum Protocol {
     TlsServerV1_3,
 }
 
-impl Protocol {
+impl Method {
     /// Converts a [`Self`] into a [`wolfssl_sys::WOLFSSL_METHOD`]
     /// compatible with [`wolfssl_sys::wolfSSL_CTX_new`]
     fn into_method_ptr(self) -> Option<NonNull<wolfssl_sys::WOLFSSL_METHOD>> {

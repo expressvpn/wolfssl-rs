@@ -3,7 +3,7 @@
 #[cfg(feature = "debug")]
 use wolfssl::Tls13SecretCallbacks;
 use wolfssl::{
-    ContextBuilder, IOCallbacks, Protocol, ProtocolVersion, RootCertificate, Secret, SessionConfig,
+    ContextBuilder, IOCallbacks, Method, ProtocolVersion, RootCertificate, Secret, SessionConfig,
 };
 
 use async_trait::async_trait;
@@ -114,12 +114,12 @@ impl Tls13SecretCallbacks for KeyLogger {
     }
 }
 
-async fn client<S: SockIO>(sock: S, protocol: Protocol, exp_protocol_version: ProtocolVersion) {
+async fn client<S: SockIO>(sock: S, method: Method, exp_protocol_version: ProtocolVersion) {
     let sock = std::rc::Rc::new(sock);
 
     let ca_cert = RootCertificate::Asn1Buffer(CA_CERT);
 
-    let ctx = ContextBuilder::new(protocol)
+    let ctx = ContextBuilder::new(method)
         .expect("[Client] new ContextBuilder")
         .with_root_certificate(ca_cert)
         .expect("[Client] add root certificate")
@@ -164,14 +164,14 @@ async fn client<S: SockIO>(sock: S, protocol: Protocol, exp_protocol_version: Pr
     println!("[Client] Finished");
 }
 
-async fn server<S: SockIO>(sock: S, protocol: Protocol, exp_protocol_version: ProtocolVersion) {
+async fn server<S: SockIO>(sock: S, method: Method, exp_protocol_version: ProtocolVersion) {
     let sock = std::rc::Rc::new(sock);
 
     let ca_cert = RootCertificate::Asn1Buffer(CA_CERT);
     let cert = Secret::Asn1Buffer(SERVER_CERT);
     let key = Secret::Asn1Buffer(SERVER_KEY);
 
-    let ctx = ContextBuilder::new(protocol)
+    let ctx = ContextBuilder::new(method)
         .expect("[Server] new ContextBuilder")
         .with_root_certificate(ca_cert)
         .expect("[Server] add root certificate")
@@ -219,58 +219,50 @@ async fn server<S: SockIO>(sock: S, protocol: Protocol, exp_protocol_version: Pr
     println!("[Server] Finished");
 }
 
-#[test_case(Protocol::DtlsClientV1_2, Protocol::DtlsServerV1_3, ProtocolVersion::Unknown => panics "record layer version error"; "client_1.2_server_1.3")]
-#[test_case(Protocol::DtlsClientV1_2, Protocol::DtlsServerV1_2, ProtocolVersion::DtlsV1_2; "client_1.2_server_1.2")]
-#[test_case(Protocol::DtlsClientV1_2, Protocol::DtlsServer, ProtocolVersion::DtlsV1_2; "client_1.2_server_any")]
-#[test_case(Protocol::DtlsClientV1_3, Protocol::DtlsServerV1_3, ProtocolVersion::DtlsV1_3; "client_1.3_server_1.3")]
-#[test_case(Protocol::DtlsClientV1_3, Protocol::DtlsServerV1_2, ProtocolVersion::Unknown => panics "record layer version error"; "client_1.3_server_1.2")]
-#[test_case(Protocol::DtlsClientV1_3, Protocol::DtlsServer, ProtocolVersion::DtlsV1_3; "client_any_1.3_server_any")]
-#[test_case(Protocol::DtlsClient, Protocol::DtlsServerV1_3, ProtocolVersion::DtlsV1_3; "client_any_server_1.3")]
+#[test_case(Method::DtlsClientV1_2, Method::DtlsServerV1_3, ProtocolVersion::Unknown => panics "record layer version error"; "client_1.2_server_1.3")]
+#[test_case(Method::DtlsClientV1_2, Method::DtlsServerV1_2, ProtocolVersion::DtlsV1_2; "client_1.2_server_1.2")]
+#[test_case(Method::DtlsClientV1_2, Method::DtlsServer, ProtocolVersion::DtlsV1_2; "client_1.2_server_any")]
+#[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_3, ProtocolVersion::DtlsV1_3; "client_1.3_server_1.3")]
+#[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_2, ProtocolVersion::Unknown => panics "record layer version error"; "client_1.3_server_1.2")]
+#[test_case(Method::DtlsClientV1_3, Method::DtlsServer, ProtocolVersion::DtlsV1_3; "client_any_1.3_server_any")]
+#[test_case(Method::DtlsClient, Method::DtlsServerV1_3, ProtocolVersion::DtlsV1_3; "client_any_server_1.3")]
 // TODO: WolfSSL downgrade bug
-// #[test_case(Protocol::DtlsClient, Protocol::DtlsServerV1_2; "client_server_1.2")]
-#[test_case(Protocol::DtlsClient, Protocol::DtlsServer, ProtocolVersion::DtlsV1_3; "client_any_server_any")]
+// #[test_case(Method::DtlsClient, Method::DtlsServerV1_2; "client_server_1.2")]
+#[test_case(Method::DtlsClient, Method::DtlsServer, ProtocolVersion::DtlsV1_3; "client_any_server_any")]
 #[tokio::test]
-async fn dtls(
-    client_protocol: Protocol,
-    server_protocol: Protocol,
-    exp_protocol_version: ProtocolVersion,
-) {
+async fn dtls(client_method: Method, server_method: Method, exp_protocol_version: ProtocolVersion) {
     #[cfg(feature = "debug")]
     wolfssl::enable_debugging(true);
 
     // Communicate over a local datagram socket for simplicity
     let (client_sock, server_sock) = UnixDatagram::pair().expect("UnixDatagram");
 
-    let client = client(client_sock, client_protocol, exp_protocol_version);
-    let server = server(server_sock, server_protocol, exp_protocol_version);
+    let client = client(client_sock, client_method, exp_protocol_version);
+    let server = server(server_sock, server_method, exp_protocol_version);
 
     // Note that this runs concurrently but not in parallel
     tokio::join!(client, server);
 }
 
-#[test_case(Protocol::TlsClientV1_2, Protocol::TlsServerV1_3, ProtocolVersion::Unknown => panics "record layer version error"; "client_1.2_server_1.3")]
-#[test_case(Protocol::TlsClientV1_2, Protocol::TlsServerV1_2, ProtocolVersion::TlsV1_2; "client_1.2_server_1.2")]
-#[test_case(Protocol::TlsClientV1_2, Protocol::TlsServer, ProtocolVersion::TlsV1_2; "client_1.2_server_any")]
-#[test_case(Protocol::TlsClientV1_3, Protocol::TlsServerV1_3, ProtocolVersion::TlsV1_3; "client_1.3_server_1.3")]
-#[test_case(Protocol::TlsClientV1_3, Protocol::TlsServerV1_2, ProtocolVersion::Unknown => panics "malformed buffer input error"; "client_1.3_server_1.2")]
-#[test_case(Protocol::TlsClientV1_3, Protocol::TlsServer, ProtocolVersion::TlsV1_3; "client_1.3_server_any")]
-#[test_case(Protocol::TlsClient, Protocol::TlsServerV1_3, ProtocolVersion::TlsV1_3; "client_any_server_1.3")]
-#[test_case(Protocol::TlsClient, Protocol::TlsServerV1_2, ProtocolVersion::TlsV1_2; "client_any_server_1.2")]
-#[test_case(Protocol::TlsClient, Protocol::TlsServer, ProtocolVersion::TlsV1_3; "client_any_server_any")]
+#[test_case(Method::TlsClientV1_2, Method::TlsServerV1_3, ProtocolVersion::Unknown => panics "record layer version error"; "client_1.2_server_1.3")]
+#[test_case(Method::TlsClientV1_2, Method::TlsServerV1_2, ProtocolVersion::TlsV1_2; "client_1.2_server_1.2")]
+#[test_case(Method::TlsClientV1_2, Method::TlsServer, ProtocolVersion::TlsV1_2; "client_1.2_server_any")]
+#[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3, ProtocolVersion::TlsV1_3; "client_1.3_server_1.3")]
+#[test_case(Method::TlsClientV1_3, Method::TlsServerV1_2, ProtocolVersion::Unknown => panics "malformed buffer input error"; "client_1.3_server_1.2")]
+#[test_case(Method::TlsClientV1_3, Method::TlsServer, ProtocolVersion::TlsV1_3; "client_1.3_server_any")]
+#[test_case(Method::TlsClient, Method::TlsServerV1_3, ProtocolVersion::TlsV1_3; "client_any_server_1.3")]
+#[test_case(Method::TlsClient, Method::TlsServerV1_2, ProtocolVersion::TlsV1_2; "client_any_server_1.2")]
+#[test_case(Method::TlsClient, Method::TlsServer, ProtocolVersion::TlsV1_3; "client_any_server_any")]
 #[tokio::test]
-async fn tls(
-    client_protocol: Protocol,
-    server_protocol: Protocol,
-    exp_protocol_version: ProtocolVersion,
-) {
+async fn tls(client_method: Method, server_method: Method, exp_protocol_version: ProtocolVersion) {
     #[cfg(feature = "debug")]
     wolfssl::enable_debugging(true);
 
     // Communicate over a local stream socket for simplicity
     let (client_sock, server_sock) = UnixStream::pair().expect("UnixStream");
 
-    let client = client(client_sock, client_protocol, exp_protocol_version);
-    let server = server(server_sock, server_protocol, exp_protocol_version);
+    let client = client(client_sock, client_method, exp_protocol_version);
+    let server = server(server_sock, server_method, exp_protocol_version);
 
     // Note that this runs concurrently but not in parallel
     tokio::join!(client, server);
