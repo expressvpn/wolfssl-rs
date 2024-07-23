@@ -2,7 +2,7 @@ use crate::{
     callback::{IOCallbackResult, IOCallbacks},
     context::Context,
     error::{Error, Poll, PollResult, Result},
-    CurveGroup, Protocol, ProtocolVersion, SslVerifyMode, TLS_MAX_RECORD_SIZE,
+    CurveGroup, ProtocolVersion, SslVerifyMode, TLS_MAX_RECORD_SIZE,
 };
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -191,8 +191,6 @@ unsafe impl Send for WolfsslPointer {}
 /// Wraps a `WOLFSSL` pointer, as well as the additional fields needed to
 /// write into, and read from, wolfSSL's custom IO callbacks.
 pub struct Session<IOCB: IOCallbacks> {
-    protocol: Protocol,
-
     ssl: WolfsslPointer,
 
     /// Box so we have a stable address to pass to FFI.
@@ -229,7 +227,6 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.ctx().as_ptr()) };
 
         let mut session = Self {
-            protocol: ctx.protocol(),
             ssl: WolfsslPointer(NonNull::new(ptr).ok_or(NewSessionError::CreateFailed)?),
             io: Box::new(config.io),
             #[cfg(feature = "debug")]
@@ -641,7 +638,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_update_keys
     pub fn try_trigger_update_key(&mut self) -> PollResult<()> {
-        if !self.protocol.is_tls_13() && !self.protocol.is_dtls_13() {
+        let protocol_version = self.version();
+        if !protocol_version.is_tls_13() && !protocol_version.is_dtls_13() {
             return Ok(Poll::Ready(()));
         }
 
@@ -675,7 +673,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_key_update_response
     pub fn is_update_keys_pending(&mut self) -> bool {
-        if !self.protocol.is_tls_13() && !self.protocol.is_dtls_13() {
+        let protocol_version = self.version();
+        if !protocol_version.is_tls_13() && !protocol_version.is_dtls_13() {
             return false;
         }
 
@@ -1564,8 +1563,8 @@ mod tests {
 
         let (mut client, mut server) = make_connected_clients_with_protocol(client, server);
 
-        assert!(client.ssl.protocol.is_tls_13() || client.ssl.protocol.is_dtls_13());
-        assert!(server.ssl.protocol.is_tls_13() || server.ssl.protocol.is_dtls_13());
+        assert!(client.ssl.version().is_tls_13() || client.ssl.version().is_dtls_13());
+        assert!(server.ssl.version().is_tls_13() || server.ssl.version().is_dtls_13());
 
         // Trigger the wolfssl key update mechanism. This will cause the client
         // to send a key update message.

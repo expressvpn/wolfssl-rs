@@ -137,6 +137,16 @@ impl ProtocolVersion {
             ProtocolVersion::Unknown => "unknown",
         }
     }
+
+    /// Checks if the protocol version is compatible with TLS 1.3
+    fn is_tls_13(&self) -> bool {
+        matches!(self, Self::TlsV1_3)
+    }
+
+    /// Checks if the protocol version is compatible with DTLS 1.3
+    fn is_dtls_13(&self) -> bool {
+        matches!(self, Self::DtlsV1_3)
+    }
 }
 
 /// Corresponds to the various `wolf*_{client,server}_method()` APIs
@@ -206,16 +216,6 @@ impl Protocol {
         };
 
         NonNull::new(ptr)
-    }
-
-    /// Checks if the protocol is compatible with TLS 1.3
-    fn is_tls_13(&self) -> bool {
-        matches!(self, Self::TlsClientV1_3 | Self::TlsServerV1_3)
-    }
-
-    /// Checks if the protocol is compatible with DTLS 1.3
-    fn is_dtls_13(&self) -> bool {
-        matches!(self, Self::DtlsClientV1_3 | Self::DtlsServerV1_3)
     }
 }
 
