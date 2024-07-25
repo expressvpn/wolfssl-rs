@@ -2,7 +2,7 @@ use crate::{
     callback::{IOCallbackResult, IOCallbacks},
     context::Context,
     error::{Error, Poll, PollResult, Result},
-    CurveGroup, Protocol, ProtocolVersion, SslVerifyMode, TLS_MAX_RECORD_SIZE,
+    CurveGroup, ProtocolVersion, SslVerifyMode, TLS_MAX_RECORD_SIZE,
 };
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -191,8 +191,6 @@ unsafe impl Send for WolfsslPointer {}
 /// Wraps a `WOLFSSL` pointer, as well as the additional fields needed to
 /// write into, and read from, wolfSSL's custom IO callbacks.
 pub struct Session<IOCB: IOCallbacks> {
-    protocol: Protocol,
-
     ssl: WolfsslPointer,
 
     /// Box so we have a stable address to pass to FFI.
@@ -229,7 +227,6 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.ctx().as_ptr()) };
 
         let mut session = Self {
-            protocol: ctx.protocol(),
             ssl: WolfsslPointer(NonNull::new(ptr).ok_or(NewSessionError::CreateFailed)?),
             io: Box::new(config.io),
             #[cfg(feature = "debug")]
@@ -641,7 +638,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_update_keys
     pub fn try_trigger_update_key(&mut self) -> PollResult<()> {
-        if !self.protocol.is_tls_13() && !self.protocol.is_dtls_13() {
+        let protocol_version = self.version();
+        if !protocol_version.is_tls_13() && !protocol_version.is_dtls_13() {
             return Ok(Poll::Ready(()));
         }
 
@@ -675,7 +673,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_key_update_response
     pub fn is_update_keys_pending(&mut self) -> bool {
-        if !self.protocol.is_tls_13() && !self.protocol.is_dtls_13() {
+        let protocol_version = self.version();
+        if !protocol_version.is_tls_13() && !protocol_version.is_dtls_13() {
             return false;
         }
 
@@ -1259,7 +1258,7 @@ impl<IOCB: IOCallbacks> Drop for Session<IOCB> {
 mod tests {
     use super::*;
     use crate::{
-        context::ContextBuilder, Context, Protocol, RootCertificate, Secret, Session,
+        context::ContextBuilder, Context, Method, RootCertificate, Secret, Session,
         TLS_MAX_RECORD_SIZE,
     };
 
@@ -1350,23 +1349,23 @@ mod tests {
     }
 
     fn make_connected_clients() -> (TestClient, TestClient) {
-        make_connected_clients_with_protocol(Protocol::TlsClientV1_3, Protocol::TlsServerV1_3)
+        make_connected_clients_with_method(Method::TlsClientV1_3, Method::TlsServerV1_3)
     }
 
-    fn make_connected_clients_with_protocol(
-        client_protocol: Protocol,
-        server_protocol: Protocol,
+    fn make_connected_clients_with_method(
+        client_method: Method,
+        server_method: Method,
     ) -> (TestClient, TestClient) {
-        let client_ctx = ContextBuilder::new(client_protocol)
-            .unwrap_or_else(|e| panic!("new({client_protocol:?}): {e}"))
+        let client_ctx = ContextBuilder::new(client_method)
+            .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
             .with_root_certificate(RootCertificate::Asn1Buffer(CA_CERT))
             .unwrap()
             .with_secure_renegotiation()
             .unwrap()
             .build();
 
-        let server_ctx = ContextBuilder::new(server_protocol)
-            .unwrap_or_else(|e| panic!("new({server_protocol:?}): {e}"))
+        let server_ctx = ContextBuilder::new(server_method)
+            .unwrap_or_else(|e| panic!("new({server_method:?}): {e}"))
             .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
             .unwrap()
             .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
@@ -1500,10 +1499,8 @@ mod tests {
     fn try_rehandshake() {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let (mut client, mut server) = make_connected_clients_with_protocol(
-            Protocol::DtlsClientV1_2,
-            Protocol::DtlsServerV1_2,
-        );
+        let (mut client, mut server) =
+            make_connected_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
 
         assert!(client.ssl.is_secure_renegotiation_supported());
         assert!(server.ssl.is_secure_renegotiation_supported());
@@ -1557,15 +1554,15 @@ mod tests {
         assert!(!server.ssl.is_secure_renegotiation_pending());
     }
 
-    #[test_case(Protocol::TlsClientV1_3, Protocol::TlsServerV1_3; "tls1.3")]
-    #[test_case(Protocol::DtlsClientV1_3, Protocol::DtlsServerV1_3; "dtls1.3")]
-    fn try_trigger_update_keys(client: Protocol, server: Protocol) {
+    #[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3; "tls1.3")]
+    #[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_3; "dtls1.3")]
+    fn try_trigger_update_keys(client: Method, server: Method) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let (mut client, mut server) = make_connected_clients_with_protocol(client, server);
+        let (mut client, mut server) = make_connected_clients_with_method(client, server);
 
-        assert!(client.ssl.protocol.is_tls_13() || client.ssl.protocol.is_dtls_13());
-        assert!(server.ssl.protocol.is_tls_13() || server.ssl.protocol.is_dtls_13());
+        assert!(client.ssl.version().is_tls_13() || client.ssl.version().is_dtls_13());
+        assert!(server.ssl.version().is_tls_13() || server.ssl.version().is_dtls_13());
 
         // Trigger the wolfssl key update mechanism. This will cause the client
         // to send a key update message.
@@ -1625,9 +1622,7 @@ mod tests {
     fn dtls_current_timeout() {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let client_ctx = ContextBuilder::new(Protocol::DtlsClientV1_2)
-            .unwrap()
-            .build();
+        let client_ctx = ContextBuilder::new(Method::DtlsClientV1_2).unwrap().build();
 
         let mut ssl = client_ctx
             .new_session(SessionConfig::new(NoIOCallbacks))
@@ -1648,10 +1643,8 @@ mod tests {
     fn dtls_timeout(should_timeout: bool) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let (mut client, _server) = make_connected_clients_with_protocol(
-            Protocol::DtlsClientV1_2,
-            Protocol::DtlsServerV1_2,
-        );
+        let (mut client, _server) =
+            make_connected_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
 
         client
             .ssl
@@ -1703,9 +1696,7 @@ mod tests {
     fn dtls_mtu(mtu: u16) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let client_ctx = ContextBuilder::new(Protocol::DtlsClientV1_2)
-            .unwrap()
-            .build();
+        let client_ctx = ContextBuilder::new(Method::DtlsClientV1_2).unwrap().build();
 
         let mut ssl = client_ctx
             .new_session(SessionConfig::new(NoIOCallbacks))
@@ -1719,9 +1710,7 @@ mod tests {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
         // call before connection
-        let client_ctx = ContextBuilder::new(Protocol::DtlsClientV1_3)
-            .unwrap()
-            .build();
+        let client_ctx = ContextBuilder::new(Method::DtlsClientV1_3).unwrap().build();
 
         let mut ssl = client_ctx
             .new_session(SessionConfig::new(NoIOCallbacks))
@@ -1740,7 +1729,7 @@ mod tests {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
         // call before connection
-        let server_ctx = ContextBuilder::new(Protocol::DtlsServerV1_3)
+        let server_ctx = ContextBuilder::new(Method::DtlsServerV1_3)
             .unwrap()
             .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
             .unwrap()
@@ -1792,17 +1781,17 @@ mod tests {
     #[test_case(SslVerifyMode::SslVerifyFailExceptPsk, SslVerifyMode::SslVerifyNone)]
     #[test_case(SslVerifyMode::SslVerifyFailExceptPsk, SslVerifyMode::SslVerifyPeer => panics "ASN no signer error to confirm failure")]
     fn test_client_set_verify(server_mode: SslVerifyMode, client_mode: SslVerifyMode) {
-        let client_protocol = Protocol::TlsClientV1_3;
+        let client_method = Method::TlsClientV1_3;
         // Create context without server CA certificate
-        let client_ctx = ContextBuilder::new(client_protocol)
-            .unwrap_or_else(|e| panic!("new({client_protocol:?}): {e}"))
+        let client_ctx = ContextBuilder::new(client_method)
+            .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
             .with_secure_renegotiation()
             .unwrap()
             .build();
 
-        let server_protocol = Protocol::TlsServerV1_3;
-        let server_ctx = ContextBuilder::new(server_protocol)
-            .unwrap_or_else(|e| panic!("new({server_protocol:?}): {e}"))
+        let server_method = Method::TlsServerV1_3;
+        let server_ctx = ContextBuilder::new(server_method)
+            .unwrap_or_else(|e| panic!("new({server_method:?}): {e}"))
             .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
             .unwrap()
             .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
