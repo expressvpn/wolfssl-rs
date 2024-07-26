@@ -12,10 +12,11 @@ jobs:
   ci:
     needs: [earthly, coverage]
     runs-on: ubuntu-latest
+    if: always()
     steps:
       - shell: bash
         run: |
-          echo "Build success"
+          [[ $(echo '${{ toJSON(needs) }}' | jq 'map(select(.result != "success")) | length == 0') == 'true' ]] || exit 1
   earthly:
     strategy:
       fail-fast: false
