@@ -119,7 +119,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .cflag("-DWOLFSSL_MIN_ECC_BITS=256")
         .cflag("-DUSE_CERT_BUFFERS_4096")
         .cflag("-DUSE_CERT_BUFFERS_256")
-        .cflag("-DWOLFSSL_NO_SPHINCS");
+        .cflag("-DWOLFSSL_NO_SPHINCS")
+        .cflag("-DWOLFSSL_TLS13_MIDDLEBOX_COMPAT");
 
     if cfg!(feature = "debug") {
         conf.enable("debug", None);
