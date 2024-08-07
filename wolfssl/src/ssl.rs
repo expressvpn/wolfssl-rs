@@ -1169,15 +1169,6 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     pub(crate) fn enable_tls13_keylog(&mut self, secret_cb: Tls13SecretCallbacksArg) -> Result<()> {
         self.secret_cb = Some(Box::new(secret_cb));
 
-        // SAFETY: `secret_cb` is a `Box` pointer so the address is
-        // stable. (The address is the address of the heap allocation
-        // containing the `Tls13Secretcallbacksarg` which is an `Arc`.
-        //
-        // We free `self.ssl` (the `wolfssl_sys::WOLFSSL`) on drop of
-        // `self`, any use of the callback must have stopped before
-        // the drop, since nothing can also be making calls into the session.
-        //
-        // Therefore `secret_cb` here is valid for as long as it needs to be.
         let secret_cb: &mut Tls13SecretCallbacksArg = self.secret_cb.as_mut().unwrap();
         let secret_cb: *mut Tls13SecretCallbacksArg = secret_cb as *mut Tls13SecretCallbacksArg;
         let secret_cb = secret_cb as *mut c_void;
@@ -1191,6 +1182,15 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         match unsafe {
             let ssl = self.ssl.as_ptr();
             wolfssl_sys::wolfSSL_KeepArrays(ssl);
+            // SAFETY: `secret_cb` is a `Box` pointer so the address is
+            // stable. (The address is the address of the heap allocation
+            // containing the `Tls13Secretcallbacksarg` which is an `Arc`.
+            //
+            // We free `self.ssl` (the `wolfssl_sys::WOLFSSL`) on drop of
+            // `self`, any use of the callback must have stopped before
+            // the drop, since nothing can also be making calls into the session.
+            //
+            // Therefore `secret_cb` here is valid for as long as it needs to be.
             wolfssl_sys::wolfSSL_set_tls13_secret_cb(ssl, Some(Self::tls13_secret_cb), secret_cb)
         } {
             wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
@@ -1211,13 +1211,13 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         debug_assert!(!secret.is_null());
         debug_assert!(!ctx.is_null());
 
+        let secret_cb = ctx as *mut Tls13SecretCallbacksArg;
         // SAFETY: We know this pointer is to the contents of the
         // `Box<Tls13SecretCallbacksArg>` at `self.secret_cb` which is
         // owned by the `Session`. See `enable_tls13_keylog` above for
         // an argument to why calls to this callback cannot happen
         // after the `Session` is dropped.
-        let secret_cb = ctx as *mut Tls13SecretCallbacksArg;
-        let secret_cb: &Tls13SecretCallbacksArg = &*secret_cb;
+        let secret_cb: &Tls13SecretCallbacksArg = unsafe { &*secret_cb };
 
         let mut random: Vec<u8> = vec![0; RANDOM_SIZE];
         let get_random = if 1 == wolfssl_sys::wolfSSL_is_server(ssl) {
