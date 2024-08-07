@@ -896,7 +896,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // exclusive reference to `IOCB`.
         let io = unsafe { &mut *(ctx as *mut IOCB) };
 
-        let buf = std::slice::from_raw_parts_mut(buf as *mut u8, sz as usize);
+        // SAFETY: Per the callback rules for `wolfSSL_SSLSetIORecv`
+        // (see [`wolfSSL_CTX_SetIORecv`][0] for related docs) `buf`
+        // is valid for `sz` bytes.
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-wolfssl_ctx_setiorecv
+        let buf = unsafe { std::slice::from_raw_parts_mut(buf as *mut u8, sz as usize) };
 
         match io.recv(buf) {
             IOCallbackResult::Ok(nr) => nr as std::os::raw::c_int,
@@ -929,7 +934,11 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // exclusive reference to `IOCB`.
         let io = unsafe { &mut *(ctx as *mut IOCB) };
 
-        let buf = std::slice::from_raw_parts(buf as *mut u8, sz as usize);
+        // SAFETY: Per the callback rules for `wolfSSL_SSLSetIOSend` (see [`wolfSSL_CTX_SetIORecv`][0] for
+        // related docs) `buf` is valid for `sz` bytes.
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-wolfssl_ctx_setiorecv
+        let buf = unsafe { std::slice::from_raw_parts(buf as *mut u8, sz as usize) };
 
         match io.send(buf) {
             IOCallbackResult::Ok(nr) => nr as std::os::raw::c_int,
@@ -1220,18 +1229,42 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         let secret_cb: &Tls13SecretCallbacksArg = unsafe { &*secret_cb };
 
         let mut random: Vec<u8> = vec![0; RANDOM_SIZE];
-        let get_random = if 1 == wolfssl_sys::wolfSSL_is_server(ssl) {
+        // SAFETY: We know `ssl` is a valid pointer because we were
+        // passed it by wolfssl in the call to this function.
+        let get_random = if 1 == unsafe { wolfssl_sys::wolfSSL_is_server(ssl) } {
             wolfssl_sys::wolfSSL_get_server_random
         } else {
             wolfssl_sys::wolfSSL_get_client_random
         };
-        let random_size = get_random(ssl, random.as_mut_ptr() as *mut c_uchar, random.len());
+        // SAFETY: We are calling either [`wolfssl_get_server_random`][0]
+        // or [`wolfSSL_get_client_random`][1] as determined
+        // above. Both functions have the same requirements.
+        //
+        // We know `ssl` is a valid pointer because we were passed it
+        // by wolfssl in the call to this function.
+        //
+        // The `out` parameter must be a pointer into a valid buffer
+        // of `outlen` bytes, which are satisfied by the `random:
+        // Vec<_>` used.
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_get_server_random
+        // [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_get_client_random
+        let random_size =
+            unsafe { get_random(ssl, random.as_mut_ptr() as *mut c_uchar, random.len()) };
         if random_size == 0 {
             return 0;
         }
         let random: &[u8] = &random[..random_size];
 
-        let secret = std::slice::from_raw_parts(secret as *mut u8, secret_size as usize);
+        // SAFETY:
+        //
+        // `secret` is a valid pointer from WolfSSL for the duration
+        // of the following call to the callback. We trust WolfSSL to
+        // give us the correct length.
+        //
+        // WolfSSL is single threaded so nothing is mutating the
+        // buffer under our feet.
+        let secret = unsafe { std::slice::from_raw_parts(secret as *mut u8, secret_size as usize) };
 
         secret_cb.secrets(id.into(), random, secret);
 
