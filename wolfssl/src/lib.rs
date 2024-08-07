@@ -1,9 +1,6 @@
 //! The `wolfssl` crate is designed to be a Rust layer built on top of
 //! the `wolfssl-sys` crate (a C passthrough crate).
 
-#![warn(clippy::undocumented_unsafe_blocks)]
-#![warn(missing_docs)]
-
 mod callback;
 mod chacha20_poly1305;
 mod context;
