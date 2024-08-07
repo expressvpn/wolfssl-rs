@@ -288,11 +288,22 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             //
             // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_cipher_get_name
             // [1]: https://www.wolfssl.com/doxygen/group__IO.html#ga1d77df578e8cebd9d75d2211b927d868
-            let name = unsafe {
-                let name = wolfssl_sys::wolfSSL_CIPHER_get_name(cipher);
-                std::ffi::CStr::from_ptr(name).to_str().ok()?.to_string()
-            };
-            Some(name)
+            let c_name = unsafe { wolfssl_sys::wolfSSL_CIPHER_get_name(cipher) };
+            if c_name.is_null() {
+                None
+            } else {
+                // SAFETY: If `wolfSSL_CIPHER_get_name` returns
+                // non-NULL then it returns a valid C string.
+                //
+                // Since the return value is to a static buffer it is
+                // within a single allocated object.
+                //
+                // Since the return value is to a static buffer it
+                // outlives any possible 'a.
+                //
+                // No cipher suite name is `isize::MAX` long.
+                Some(unsafe { std::ffi::CStr::from_ptr(c_name).to_str().ok()?.to_string() })
+            }
         } else {
             None
         };
@@ -931,10 +942,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-wolfssl_setioreadctx
     /// [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-wolfssl_setiowritectx
     fn register_io_context(&mut self) {
-        // SAFETY:
-        // The functions here are 'static so must live longer than `self.ssl`.
+        // SAFETY: `Self::io_recv_shim is 'static so must live longer than `self.ssl`.
         unsafe {
             wolfssl_sys::wolfSSL_SSLSetIORecv(self.ssl.as_ptr(), Some(Self::io_recv_shim));
+        }
+        // SAFETY: `Self::io_send_shim is 'static so must live longer than `self.ssl`.
+        unsafe {
             wolfssl_sys::wolfSSL_SSLSetIOSend(self.ssl.as_ptr(), Some(Self::io_send_shim));
         }
 
@@ -950,6 +963,9 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // Therefore `io` here is valid for as long as it needs to be.
         unsafe {
             wolfssl_sys::wolfSSL_SetIOReadCtx(self.ssl.as_ptr(), io);
+        }
+        // SAFETY: As above
+        unsafe {
             wolfssl_sys::wolfSSL_SetIOWriteCtx(self.ssl.as_ptr(), io);
         }
     }
@@ -1151,25 +1167,36 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         let secret_cb: *mut Tls13SecretCallbacksArg = secret_cb as *mut Tls13SecretCallbacksArg;
         let secret_cb = secret_cb as *mut c_void;
 
-        // SAFETY: No documentation available for [`wolfSSL_KeepArrays`] [`wolfSSL_set_tls13_secret_cb`].
-        // But based on api implementation, it expects a valid pointer to `WOLFSSL`.
+        // SAFETY: No documentation available for [`wolfSSL_KeepArrays`].
+        // But based on api implementation, it expects a valid pointer
+        // to `WOLFSSL`.
         //
         // This implementation is taken from following examples:
         // https://github.com/wolfSSL/wolfssl-examples/blob/master/tls/client-tls13.c
         // https://github.com/wolfSSL/wolfssl-examples/blob/master/tls/server-tls13.c
+        unsafe {
+            wolfssl_sys::wolfSSL_KeepArrays(self.ssl.as_ptr());
+        }
+
+        // SAFETY: No documentation available for [`wolfSSL_set_tls13_secret_cb`].
+        // But based on api implementation, it expects a valid pointer
+        // to `WOLFSSL`.
+        //
+        // `secret_cb` is a `Box` pointer so the address is
+        // stable. (The address is the address of the heap allocation
+        // containing the `Tls13Secretcallbacksarg` which is an `Arc`.
+        //
+        // We free `self.ssl` (the `wolfssl_sys::WOLFSSL`) on drop of
+        // `self`, any use of the callback must have stopped before
+        // the drop, since nothing can also be making calls into the session.
+        //
+        // Therefore `secret_cb` here is valid for as long as it needs to be.
         match unsafe {
-            let ssl = self.ssl.as_ptr();
-            wolfssl_sys::wolfSSL_KeepArrays(ssl);
-            // SAFETY: `secret_cb` is a `Box` pointer so the address is
-            // stable. (The address is the address of the heap allocation
-            // containing the `Tls13Secretcallbacksarg` which is an `Arc`.
-            //
-            // We free `self.ssl` (the `wolfssl_sys::WOLFSSL`) on drop of
-            // `self`, any use of the callback must have stopped before
-            // the drop, since nothing can also be making calls into the session.
-            //
-            // Therefore `secret_cb` here is valid for as long as it needs to be.
-            wolfssl_sys::wolfSSL_set_tls13_secret_cb(ssl, Some(Self::tls13_secret_cb), secret_cb)
+            wolfssl_sys::wolfSSL_set_tls13_secret_cb(
+                self.ssl.as_ptr(),
+                Some(Self::tls13_secret_cb),
+                secret_cb,
+            )
         } {
             wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
             wolfssl_sys::WOLFSSL_FATAL_ERROR => panic!("No SSL context"),
