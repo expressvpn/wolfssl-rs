@@ -12,7 +12,7 @@ links = "wolfssl"
 exclude = ["wolfssl-src/**/*.pdf"] # crates.io has a size limit for publishing. Exclude unused files to keep the size under the limit.
 
 [build-dependencies]
-bindgen = "0.69"
+bindgen = "0.70"
 autotools = "0.2"
 build-target = "0.4.0"
 
