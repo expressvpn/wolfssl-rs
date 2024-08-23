@@ -1,6 +1,6 @@
 use crate::{
     callback::{IOCallbackResult, IOCallbacks},
-    context::Context,
+    context::WolfsslPointer,
     error::{Error, Poll, PollResult, Result},
     CurveGroup, ProtocolVersion, SslVerifyMode, TLS_MAX_RECORD_SIZE,
 };
@@ -10,7 +10,6 @@ use thiserror::Error;
 
 use std::{
     ffi::{c_int, c_uchar, c_ushort, c_void},
-    ptr::NonNull,
     time::Duration,
 };
 
@@ -164,30 +163,6 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
     }
 }
 
-// Wrap a valid pointer to a [`wolfssl_sys::WOLFSSL`] such that we can
-// add traits such as `Send`.
-struct WolfsslPointer(NonNull<wolfssl_sys::WOLFSSL>);
-
-impl WolfsslPointer {
-    fn as_ptr(&mut self) -> *mut wolfssl_sys::WOLFSSL {
-        self.0.as_ptr()
-    }
-}
-
-// SAFETY: Per [Library Design][] under "Thread Safety"
-//
-// > A client may share an WOLFSSL object across multiple threads but
-// > access must be synchronized, i.e., trying to read/write at the same
-// > time from two different threads with the same SSL pointer is not
-// > supported.
-//
-// This is consistent with the requirements for `Send`. The required
-// syncronization is handled by requiring `&mut self` in all relevant
-// methods.
-//
-// [Library Design]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html
-unsafe impl Send for WolfsslPointer {}
-
 /// Wraps a `WOLFSSL` pointer, as well as the additional fields needed to
 /// write into, and read from, wolfSSL's custom IO callbacks.
 pub struct Session<IOCB: IOCallbacks> {
@@ -216,18 +191,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// Invokes [`wolfSSL_new`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
-    pub fn new_from_context(
-        ctx: &Context,
+    pub(crate) fn new_from_wolfssl_pointer(
+        ssl: WolfsslPointer,
         config: SessionConfig<IOCB>,
     ) -> std::result::Result<Self, NewSessionError> {
-        // SAFETY: [`wolfSSL_new`][0] ([also][1]) needs a valid `wolfssl_sys::WOLFSSL_CTX` pointer as per documentation
-        //
-        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
-        // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#gaa37dc22775da8f6a3b5c149d5dfd6e1c
-        let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.ctx().as_ptr()) };
-
         let mut session = Self {
-            ssl: WolfsslPointer(NonNull::new(ptr).ok_or(NewSessionError::CreateFailed)?),
+            ssl,
             io: Box::new(config.io),
             #[cfg(feature = "debug")]
             secret_cb: Default::default(),
