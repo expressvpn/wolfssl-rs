@@ -1,6 +1,6 @@
 use crate::{
     callback::{IOCallbackResult, IOCallbacks},
-    context::Context,
+    context::WolfsslPointer,
     error::{Error, Poll, PollResult, Result},
     CurveGroup, ProtocolVersion, SslVerifyMode, TLS_MAX_RECORD_SIZE,
 };
@@ -10,7 +10,6 @@ use thiserror::Error;
 
 use std::{
     ffi::{c_int, c_uchar, c_ushort, c_void},
-    ptr::NonNull,
     time::Duration,
 };
 
@@ -164,30 +163,6 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
     }
 }
 
-// Wrap a valid pointer to a [`wolfssl_sys::WOLFSSL`] such that we can
-// add traits such as `Send`.
-struct WolfsslPointer(NonNull<wolfssl_sys::WOLFSSL>);
-
-impl WolfsslPointer {
-    fn as_ptr(&mut self) -> *mut wolfssl_sys::WOLFSSL {
-        self.0.as_ptr()
-    }
-}
-
-// SAFETY: Per [Library Design][] under "Thread Safety"
-//
-// > A client may share an WOLFSSL object across multiple threads but
-// > access must be synchronized, i.e., trying to read/write at the same
-// > time from two different threads with the same SSL pointer is not
-// > supported.
-//
-// This is consistent with the requirements for `Send`. The required
-// syncronization is handled by requiring `&mut self` in all relevant
-// methods.
-//
-// [Library Design]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html
-unsafe impl Send for WolfsslPointer {}
-
 /// Wraps a `WOLFSSL` pointer, as well as the additional fields needed to
 /// write into, and read from, wolfSSL's custom IO callbacks.
 pub struct Session<IOCB: IOCallbacks> {
@@ -216,18 +191,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// Invokes [`wolfSSL_new`][0]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
-    pub fn new_from_context(
-        ctx: &Context,
+    pub(crate) fn new_from_wolfssl_pointer(
+        ssl: WolfsslPointer,
         config: SessionConfig<IOCB>,
     ) -> std::result::Result<Self, NewSessionError> {
-        // SAFETY: [`wolfSSL_new`][0] ([also][1]) needs a valid `wolfssl_sys::WOLFSSL_CTX` pointer as per documentation
-        //
-        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_new
-        // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#gaa37dc22775da8f6a3b5c149d5dfd6e1c
-        let ptr = unsafe { wolfssl_sys::wolfSSL_new(ctx.ctx().as_ptr()) };
-
         let mut session = Self {
-            ssl: WolfsslPointer(NonNull::new(ptr).ok_or(NewSessionError::CreateFailed)?),
+            ssl,
             io: Box::new(config.io),
             #[cfg(feature = "debug")]
             secret_cb: Default::default(),
@@ -319,11 +288,22 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             //
             // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_cipher_get_name
             // [1]: https://www.wolfssl.com/doxygen/group__IO.html#ga1d77df578e8cebd9d75d2211b927d868
-            let name = unsafe {
-                let name = wolfssl_sys::wolfSSL_CIPHER_get_name(cipher);
-                std::ffi::CStr::from_ptr(name).to_str().ok()?.to_string()
-            };
-            Some(name)
+            let c_name = unsafe { wolfssl_sys::wolfSSL_CIPHER_get_name(cipher) };
+            if c_name.is_null() {
+                None
+            } else {
+                // SAFETY: If `wolfSSL_CIPHER_get_name` returns
+                // non-NULL then it returns a valid C string.
+                //
+                // Since the return value is to a static buffer it is
+                // within a single allocated object.
+                //
+                // Since the return value is to a static buffer it
+                // outlives any possible 'a.
+                //
+                // No cipher suite name is `isize::MAX` long.
+                Some(unsafe { std::ffi::CStr::from_ptr(c_name).to_str().ok()?.to_string() })
+            }
         } else {
             None
         };
@@ -896,7 +876,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // exclusive reference to `IOCB`.
         let io = unsafe { &mut *(ctx as *mut IOCB) };
 
-        let buf = std::slice::from_raw_parts_mut(buf as *mut u8, sz as usize);
+        // SAFETY: Per the callback rules for `wolfSSL_SSLSetIORecv`
+        // (see [`wolfSSL_CTX_SetIORecv`][0] for related docs) `buf`
+        // is valid for `sz` bytes.
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-wolfssl_ctx_setiorecv
+        let buf = unsafe { std::slice::from_raw_parts_mut(buf as *mut u8, sz as usize) };
 
         match io.recv(buf) {
             IOCallbackResult::Ok(nr) => nr as std::os::raw::c_int,
@@ -929,7 +914,11 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // exclusive reference to `IOCB`.
         let io = unsafe { &mut *(ctx as *mut IOCB) };
 
-        let buf = std::slice::from_raw_parts(buf as *mut u8, sz as usize);
+        // SAFETY: Per the callback rules for `wolfSSL_SSLSetIOSend` (see [`wolfSSL_CTX_SetIORecv`][0] for
+        // related docs) `buf` is valid for `sz` bytes.
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-wolfssl_ctx_setiorecv
+        let buf = unsafe { std::slice::from_raw_parts(buf as *mut u8, sz as usize) };
 
         match io.send(buf) {
             IOCallbackResult::Ok(nr) => nr as std::os::raw::c_int,
@@ -953,10 +942,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-wolfssl_setioreadctx
     /// [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/wolfio_8h.html#function-wolfssl_setiowritectx
     fn register_io_context(&mut self) {
-        // SAFETY:
-        // The functions here are 'static so must live longer than `self.ssl`.
+        // SAFETY: `Self::io_recv_shim is 'static so must live longer than `self.ssl`.
         unsafe {
             wolfssl_sys::wolfSSL_SSLSetIORecv(self.ssl.as_ptr(), Some(Self::io_recv_shim));
+        }
+        // SAFETY: `Self::io_send_shim is 'static so must live longer than `self.ssl`.
+        unsafe {
             wolfssl_sys::wolfSSL_SSLSetIOSend(self.ssl.as_ptr(), Some(Self::io_send_shim));
         }
 
@@ -972,6 +963,9 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // Therefore `io` here is valid for as long as it needs to be.
         unsafe {
             wolfssl_sys::wolfSSL_SetIOReadCtx(self.ssl.as_ptr(), io);
+        }
+        // SAFETY: As above
+        unsafe {
             wolfssl_sys::wolfSSL_SetIOWriteCtx(self.ssl.as_ptr(), io);
         }
     }
@@ -1169,7 +1163,26 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     pub(crate) fn enable_tls13_keylog(&mut self, secret_cb: Tls13SecretCallbacksArg) -> Result<()> {
         self.secret_cb = Some(Box::new(secret_cb));
 
-        // SAFETY: `secret_cb` is a `Box` pointer so the address is
+        let secret_cb: &mut Tls13SecretCallbacksArg = self.secret_cb.as_mut().unwrap();
+        let secret_cb: *mut Tls13SecretCallbacksArg = secret_cb as *mut Tls13SecretCallbacksArg;
+        let secret_cb = secret_cb as *mut c_void;
+
+        // SAFETY: No documentation available for [`wolfSSL_KeepArrays`].
+        // But based on api implementation, it expects a valid pointer
+        // to `WOLFSSL`.
+        //
+        // This implementation is taken from following examples:
+        // https://github.com/wolfSSL/wolfssl-examples/blob/master/tls/client-tls13.c
+        // https://github.com/wolfSSL/wolfssl-examples/blob/master/tls/server-tls13.c
+        unsafe {
+            wolfssl_sys::wolfSSL_KeepArrays(self.ssl.as_ptr());
+        }
+
+        // SAFETY: No documentation available for [`wolfSSL_set_tls13_secret_cb`].
+        // But based on api implementation, it expects a valid pointer
+        // to `WOLFSSL`.
+        //
+        // `secret_cb` is a `Box` pointer so the address is
         // stable. (The address is the address of the heap allocation
         // containing the `Tls13Secretcallbacksarg` which is an `Arc`.
         //
@@ -1178,20 +1191,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // the drop, since nothing can also be making calls into the session.
         //
         // Therefore `secret_cb` here is valid for as long as it needs to be.
-        let secret_cb: &mut Tls13SecretCallbacksArg = self.secret_cb.as_mut().unwrap();
-        let secret_cb: *mut Tls13SecretCallbacksArg = secret_cb as *mut Tls13SecretCallbacksArg;
-        let secret_cb = secret_cb as *mut c_void;
-
-        // SAFETY: No documentation available for [`wolfSSL_KeepArrays`] [`wolfSSL_set_tls13_secret_cb`].
-        // But based on api implementation, it expects a valid pointer to `WOLFSSL`.
-        //
-        // This implementation is taken from following examples:
-        // https://github.com/wolfSSL/wolfssl-examples/blob/master/tls/client-tls13.c
-        // https://github.com/wolfSSL/wolfssl-examples/blob/master/tls/server-tls13.c
         match unsafe {
-            let ssl = self.ssl.as_ptr();
-            wolfssl_sys::wolfSSL_KeepArrays(ssl);
-            wolfssl_sys::wolfSSL_set_tls13_secret_cb(ssl, Some(Self::tls13_secret_cb), secret_cb)
+            wolfssl_sys::wolfSSL_set_tls13_secret_cb(
+                self.ssl.as_ptr(),
+                Some(Self::tls13_secret_cb),
+                secret_cb,
+            )
         } {
             wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
             wolfssl_sys::WOLFSSL_FATAL_ERROR => panic!("No SSL context"),
@@ -1211,27 +1216,51 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         debug_assert!(!secret.is_null());
         debug_assert!(!ctx.is_null());
 
+        let secret_cb = ctx as *mut Tls13SecretCallbacksArg;
         // SAFETY: We know this pointer is to the contents of the
         // `Box<Tls13SecretCallbacksArg>` at `self.secret_cb` which is
         // owned by the `Session`. See `enable_tls13_keylog` above for
         // an argument to why calls to this callback cannot happen
         // after the `Session` is dropped.
-        let secret_cb = ctx as *mut Tls13SecretCallbacksArg;
-        let secret_cb: &Tls13SecretCallbacksArg = &*secret_cb;
+        let secret_cb: &Tls13SecretCallbacksArg = unsafe { &*secret_cb };
 
         let mut random: Vec<u8> = vec![0; RANDOM_SIZE];
-        let get_random = if 1 == wolfssl_sys::wolfSSL_is_server(ssl) {
+        // SAFETY: We know `ssl` is a valid pointer because we were
+        // passed it by wolfssl in the call to this function.
+        let get_random = if 1 == unsafe { wolfssl_sys::wolfSSL_is_server(ssl) } {
             wolfssl_sys::wolfSSL_get_server_random
         } else {
             wolfssl_sys::wolfSSL_get_client_random
         };
-        let random_size = get_random(ssl, random.as_mut_ptr() as *mut c_uchar, random.len());
+        // SAFETY: We are calling either [`wolfssl_get_server_random`][0]
+        // or [`wolfSSL_get_client_random`][1] as determined
+        // above. Both functions have the same requirements.
+        //
+        // We know `ssl` is a valid pointer because we were passed it
+        // by wolfssl in the call to this function.
+        //
+        // The `out` parameter must be a pointer into a valid buffer
+        // of `outlen` bytes, which are satisfied by the `random:
+        // Vec<_>` used.
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_get_server_random
+        // [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_get_client_random
+        let random_size =
+            unsafe { get_random(ssl, random.as_mut_ptr() as *mut c_uchar, random.len()) };
         if random_size == 0 {
             return 0;
         }
         let random: &[u8] = &random[..random_size];
 
-        let secret = std::slice::from_raw_parts(secret as *mut u8, secret_size as usize);
+        // SAFETY:
+        //
+        // `secret` is a valid pointer from WolfSSL for the duration
+        // of the following call to the callback. We trust WolfSSL to
+        // give us the correct length.
+        //
+        // WolfSSL is single threaded so nothing is mutating the
+        // buffer under our feet.
+        let secret = unsafe { std::slice::from_raw_parts(secret as *mut u8, secret_size as usize) };
 
         secret_cb.secrets(id.into(), random, secret);
 

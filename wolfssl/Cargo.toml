@@ -13,6 +13,17 @@ default = ["postquantum"]
 postquantum = ["wolfssl-sys/postquantum"]
 debug = ["wolfssl-sys/debug"] # Note that application code must also call wolfssl::enable_debugging(true)
 
+[lints.rust]
+missing_docs = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unused_unsafe = "deny"
+
+[lints.clippy]
+missing_safety_doc = "deny"
+multiple_unsafe_ops_per_block = "deny"
+undocumented_unsafe_blocks = "deny"
+unnecessary_safety_comment = "deny"
+
 [dependencies]
 bytes = "1"
 log = "0.4"
