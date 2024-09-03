@@ -51,6 +51,8 @@ const PATCHES: &[&str] = &["disable-falcon-dilithium.patch"];
 fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) {
     let full_patch = Path::new(PATCH_DIR).join(patch.as_ref());
 
+    println!("cargo:rerun-if-changed={}", full_patch.display());
+
     let patch_buffer = File::open(full_patch).unwrap();
     let status = Command::new("patch")
         .arg("-d")
