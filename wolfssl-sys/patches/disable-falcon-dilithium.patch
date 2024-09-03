@@ -1,0 +1,15 @@
+diff --git a/wolfssl/wolfcrypt/settings.h b/wolfssl/wolfcrypt/settings.h
+index 5eacd6c87..ab8632744 100644
+--- a/wolfssl/wolfcrypt/settings.h
++++ b/wolfssl/wolfcrypt/settings.h
+@@ -3070,8 +3070,8 @@ extern void uITRON4_free(void *p) ;
+  * group */
+ #ifdef HAVE_LIBOQS
+ #define HAVE_PQC
+-#define HAVE_FALCON
+-#define HAVE_DILITHIUM
++// #define HAVE_FALCON
++// #define HAVE_DILITHIUM
+ #ifndef WOLFSSL_NO_SPHINCS
+     #define HAVE_SPHINCS
+ #endif
