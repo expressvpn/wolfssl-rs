@@ -43,7 +43,7 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
 }
 
 const PATCH_DIR: &str = "patches";
-const PATCHES: &[&str] = &[];
+const PATCHES: &[&str] = &["disable-falcon-dilithium.patch"];
 
 /**
  * Apply patch to wolfssl-src
