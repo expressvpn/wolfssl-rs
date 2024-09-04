@@ -32,12 +32,29 @@ impl bindgen::callbacks::ParseCallbacks for IgnoreMacros {
  */
 fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
     println!("cargo:rerun-if-changed=wolfssl-src");
-    Command::new("cp")
-        .arg("-rf")
-        .arg("wolfssl-src")
-        .arg(dest)
-        .status()
-        .unwrap();
+
+    match build_target::target_os().unwrap() {
+        build_target::Os::Windows => {
+            Command::new("cmd")
+                .arg("/C")
+                .arg("xcopy")
+                .arg("wolfssl-src")
+                .arg(format!("{}\\wolfssl-src\\", dest.to_str().unwrap())) // windows need \\ at the back to indicate it is copying to a directory
+                .arg("/s")
+                .arg("/e")
+                .arg("/Y") // force overwrite
+                .status()
+                .unwrap();
+        }
+        _ => {
+            Command::new("cp")
+                .arg("-rf")
+                .arg("wolfssl-src")
+                .arg(dest)
+                .status()
+                .unwrap();
+        }
+    };
 
     Ok(dest.join("wolfssl-src"))
 }
