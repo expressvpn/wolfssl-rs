@@ -5,8 +5,10 @@
 extern crate bindgen;
 
 use autotools::Config;
+use msbuild::MsBuild;
 use std::collections::HashSet;
 use std::env;
+use std::fs::copy;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -82,6 +84,77 @@ fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) {
 Builds WolfSSL
 */
 fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
+    match build_target::target_os().unwrap() {
+        build_target::Os::Windows => build_wolfssl_windows(wolfssl_src),
+        _ => build_wolfssl_linux(wolfssl_src),
+    }
+}
+
+/**
+Builds WolfSSL for windows
+*/
+fn build_wolfssl_windows(wolfssl_src: &Path) -> PathBuf {
+    let mut msb = MsBuild::find_msbuild(Some("2022")).expect("Failed to find MsBuild");
+
+    let pointer_width = match build_target::target_arch().unwrap() {
+        build_target::Arch::X86 => "32",
+        build_target::Arch::X86_64 => "64",
+        _ => unimplemented!(),
+    };
+
+    // copy wolfssl build configs
+    copy(
+        format!("windows\\wolfssl-user_settings-{}.h", pointer_width),
+        wolfssl_src.join("wolfssl\\user_settings.h"),
+    )
+    .unwrap();
+    copy(
+        format!("windows\\wolfssl-user_settings-{}.h", pointer_width),
+        wolfssl_src.join("IDE\\WIN\\user_settings.h"),
+    )
+    .unwrap();
+    copy("windows\\options.h", wolfssl_src.join("wolfssl\\options.h")).unwrap();
+    copy(
+        "windows\\wolfssl.vcxproj",
+        wolfssl_src.join("wolfssl.vcxproj"),
+    )
+    .unwrap();
+
+    // link liboqs if postquantum is enabled
+    let oqs_arg = if cfg!(feature = "postquantum") {
+        let oqs_root = std::env::var_os("DEP_OQS_ROOT")
+            .expect("Post Quantum requested but liboqs appears to be missing?");
+
+        let include_path = Path::new(&oqs_root).join("build\\include");
+        format!(
+            "-p:OqsIncludeDirectories={}",
+            include_path.to_str().unwrap()
+        )
+    } else {
+        String::new()
+    };
+
+    // Invoke MSBuild
+    msb.run(
+        wolfssl_src.to_path_buf(),
+        &[
+            "wolfssl.vcxproj",
+            "-verbosity:detailed",
+            "-t:Build",
+            "-p:Configuration=Release",
+            "-p:Platform=x64",
+            "-p:PlatformToolset=v143",
+            &oqs_arg,
+        ],
+    );
+
+    wolfssl_src.to_path_buf()
+}
+
+/**
+Builds WolfSSL for Linux
+*/
+fn build_wolfssl_linux(wolfssl_src: &Path) -> PathBuf {
     // Create the config
     let mut conf = Config::new(wolfssl_src);
     // Configure it
