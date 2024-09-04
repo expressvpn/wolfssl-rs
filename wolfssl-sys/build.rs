@@ -341,24 +341,30 @@ fn main() -> std::io::Result<()> {
     }
 
     let ignored_macros = IgnoreMacros(hash_ignored_macros);
-    let wolfssl_include_dir = wolfssl_install_dir.join("include");
+    let wolfssl_include_dir = match build_target::target_os().unwrap() {
+        build_target::Os::Windows => wolfssl_install_dir.join(""), // MSBuild doesn't generate headers after build. Use the install path
+        _ => wolfssl_install_dir.join("include/"),
+    };
 
     // Build the Rust binding
     let builder = bindgen::Builder::default()
         .header("wrapper.h")
-        .clang_arg(format!("-I{}/", wolfssl_include_dir.to_str().unwrap()))
+        .clang_arg(format!("-I{}", wolfssl_include_dir.to_str().unwrap()))
         .parse_callbacks(Box::new(ignored_macros))
         .formatter(bindgen::Formatter::Rustfmt);
 
-    let builder = [
-        "wolfssl/.*.h",
-        "wolfssl/wolfcrypt/.*.h",
-        "wolfssl/openssl/compat_types.h",
-    ]
-    .iter()
-    .fold(builder, |b, p| {
-        b.allowlist_file(wolfssl_include_dir.join(p).to_str().unwrap())
-    });
+    let builder = match build_target::target_os().unwrap() {
+        build_target::Os::Windows => builder, // do not apply allowlist on windows
+        _ => [
+            "wolfssl/.*.h",
+            "wolfssl/wolfcrypt/.*.h",
+            "wolfssl/openssl/compat_types.h",
+        ]
+        .iter()
+        .fold(builder, |b, p| {
+            b.allowlist_file(wolfssl_include_dir.join(p).to_str().unwrap())
+        }),
+    };
 
     let builder = builder.blocklist_function("wolfSSL_BIO_vprintf");
 
@@ -376,9 +382,21 @@ fn main() -> std::io::Result<()> {
         println!("cargo:rustc-link-lib=static=oqs");
     }
 
+    let wolfssl_static_lib_dir = match build_target::target_os().unwrap() {
+        build_target::Os::Windows => {
+            let arch_path = match build_target::target_arch().unwrap() {
+                build_target::Arch::X86 => "Win32",
+                build_target::Arch::X86_64 => "x64",
+                _ => unimplemented!(),
+            };
+            wolfssl_install_dir.join("Release").join(arch_path)
+        }
+        _ => wolfssl_install_dir.join("lib"),
+    };
+
     println!(
         "cargo:rustc-link-search=native={}",
-        wolfssl_install_dir.join("lib").to_str().unwrap()
+        wolfssl_static_lib_dir.to_str().unwrap()
     );
 
     // Invalidate the built crate whenever the wrapper changes
