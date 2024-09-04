@@ -49,16 +49,23 @@ const PATCHES: &[&str] = &["disable-falcon-dilithium.patch"];
  * Apply patch to wolfssl-src
  */
 fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) {
-    let patch = Path::new(PATCH_DIR).join(patch);
+    let full_patch = Path::new(PATCH_DIR).join(patch.as_ref());
 
-    let patch_buffer = File::open(patch).unwrap();
-    Command::new("patch")
+    println!("cargo:rerun-if-changed={}", full_patch.display());
+
+    let patch_buffer = File::open(full_patch).unwrap();
+    let status = Command::new("patch")
         .arg("-d")
         .arg(wolfssl_path)
         .arg("-p1")
         .stdin(patch_buffer)
         .status()
         .unwrap();
+    assert!(
+        status.success(),
+        "Failed to apply {}",
+        patch.as_ref().display()
+    );
 }
 
 /**
@@ -111,6 +118,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .enable("supportedcurves", None)
         // Enable TLS/1.3
         .enable("tls13", None)
+        // Enable liboqs, etc
+        .enable("experimental", None)
         // CFLAGS
         .cflag("-g")
         .cflag("-fPIC")

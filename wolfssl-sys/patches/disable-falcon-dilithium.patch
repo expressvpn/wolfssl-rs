@@ -1,15 +1,32 @@
+diff --git a/wolfssl/internal.h b/wolfssl/internal.h
+index 390b21b54..98458c780 100644
+--- a/wolfssl/internal.h
++++ b/wolfssl/internal.h
+@@ -3429,7 +3429,7 @@ typedef struct KeyShareEntry {
+     word32                keyLen;    /* Key size (bytes)                  */
+     byte*                 pubKey;    /* Public key                        */
+     word32                pubKeyLen; /* Public key length                 */
+-#if !defined(NO_DH) || defined(HAVE_FALCON) || defined(HAVE_DILITHIUM)
++#if !defined(NO_DH) || defined(HAVE_PQC)
+     byte*                 privKey;   /* Private key - DH and PQ KEMs only */
+     word32                privKeyLen;/* Only for PQ KEMs. */
+ #endif
 diff --git a/wolfssl/wolfcrypt/settings.h b/wolfssl/wolfcrypt/settings.h
-index 5eacd6c87..ab8632744 100644
+index a4302c700..f1ddb2231 100644
 --- a/wolfssl/wolfcrypt/settings.h
 +++ b/wolfssl/wolfcrypt/settings.h
-@@ -3070,8 +3070,8 @@ extern void uITRON4_free(void *p) ;
+@@ -3351,10 +3351,10 @@ extern void uITRON4_free(void *p) ;
   * group */
  #ifdef HAVE_LIBOQS
  #define HAVE_PQC
 -#define HAVE_FALCON
--#define HAVE_DILITHIUM
+-#ifndef HAVE_DILITHIUM
+-    #define HAVE_DILITHIUM
+-#endif
 +// #define HAVE_FALCON
-+// #define HAVE_DILITHIUM
++// #ifndef HAVE_DILITHIUM
++//     #define HAVE_DILITHIUM
++// #endif
  #ifndef WOLFSSL_NO_SPHINCS
      #define HAVE_SPHINCS
  #endif
