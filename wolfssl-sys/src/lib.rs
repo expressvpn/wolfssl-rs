@@ -6,13 +6,14 @@ pub use bindings::*;
  */
 #[cfg(test)]
 mod tests {
+    use std::os::raw::c_int;
 
     use super::*;
     #[test]
     fn init_wolfssl() {
         unsafe {
             let res = wolfSSL_Init();
-            assert_eq!(res, WOLFSSL_SUCCESS);
+            assert_eq!(res, WOLFSSL_SUCCESS as c_int);
         }
     }
 
@@ -22,7 +23,7 @@ mod tests {
         unsafe {
             // Init WolfSSL
             let res = wolfSSL_Init();
-            assert_eq!(res, WOLFSSL_SUCCESS);
+            assert_eq!(res, WOLFSSL_SUCCESS as c_int);
 
             // Set up client method
             let method = wolfTLSv1_3_client_method();
@@ -37,7 +38,7 @@ mod tests {
             let res = wolfSSL_UseKeyShare(ssl, WOLFSSL_P521_KYBER_LEVEL5.try_into().unwrap());
 
             // Check that Kyber was enabled
-            assert_eq!(res, WOLFSSL_SUCCESS);
+            assert_eq!(res, WOLFSSL_SUCCESS as c_int);
         }
     }
 }

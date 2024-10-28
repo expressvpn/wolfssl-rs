@@ -4,6 +4,7 @@ use crate::{
     ssl::{Session, SessionConfig},
     CurveGroup, Method, NewSessionError, RootCertificate, Secret, SslVerifyMode,
 };
+use std::os::raw::c_int;
 use std::ptr::NonNull;
 use thiserror::Error;
 
@@ -97,7 +98,7 @@ impl ContextBuilder {
                     self.ctx.as_ptr(),
                     buf.as_ptr(),
                     buf.len() as std::os::raw::c_long,
-                    WOLFSSL_FILETYPE_ASN1,
+                    WOLFSSL_FILETYPE_ASN1 as c_int,
                 )
             },
             // SAFETY: [`wolfSSL_CTX_load_verify_buffer`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
@@ -111,14 +112,14 @@ impl ContextBuilder {
                     self.ctx.as_ptr(),
                     buf.as_ptr(),
                     buf.len() as std::os::raw::c_long,
-                    WOLFSSL_FILETYPE_PEM,
+                    WOLFSSL_FILETYPE_PEM as c_int,
                 )
             },
             RootCertificate::PemFileOrDirectory(path) => {
                 let is_dir = path.is_dir();
-                let path = path
-                    .to_str()
-                    .ok_or_else(|| Error::fatal(wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_BAD_PATH))?;
+                let path = path.to_str().ok_or_else(|| {
+                    Error::fatal(wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_BAD_PATH)
+                })?;
                 let path = std::ffi::CString::new(path)
                     .map_err(|_| Error::fatal(wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_BAD_PATH))?;
                 if is_dir {
@@ -153,7 +154,7 @@ impl ContextBuilder {
             }
         };
 
-        if result == wolfssl_sys::WOLFSSL_SUCCESS {
+        if result == wolfssl_sys::WOLFSSL_SUCCESS as c_int {
             Ok(self)
         } else {
             Err(Error::fatal(result))
@@ -165,7 +166,7 @@ impl ContextBuilder {
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_ctx_set_cipher_list
     pub fn with_cipher_list(self, cipher_list: &str) -> Result<Self> {
         let cipher_list = std::ffi::CString::new(cipher_list)
-            .map_err(|_| Error::fatal(wolfssl_sys::WOLFSSL_FAILURE))?;
+            .map_err(|_| Error::fatal(wolfssl_sys::WOLFSSL_FAILURE as c_int))?;
 
         // SAFETY: [`wolfSSL_CTX_set_cipher_list`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()` and
         // `list` parameter which should be a null terminated C string pointer which is guaranteed by
@@ -180,7 +181,7 @@ impl ContextBuilder {
             )
         };
 
-        if result == wolfssl_sys::WOLFSSL_SUCCESS {
+        if result == wolfssl_sys::WOLFSSL_SUCCESS as c_int {
             Ok(self)
         } else {
             Err(Error::fatal(result))
@@ -209,7 +210,7 @@ impl ContextBuilder {
             )
         };
 
-        if result == wolfssl_sys::WOLFSSL_SUCCESS {
+        if result == wolfssl_sys::WOLFSSL_SUCCESS as c_int {
             Ok(self)
         } else {
             Err(Error::fatal(result))
@@ -238,13 +239,13 @@ impl ContextBuilder {
                     self.ctx.as_ptr(),
                     buf.as_ptr(),
                     buf.len() as std::os::raw::c_long,
-                    WOLFSSL_FILETYPE_ASN1,
+                    WOLFSSL_FILETYPE_ASN1 as c_int,
                 )
             },
             Secret::Asn1File(path) => {
-                let path = path
-                    .to_str()
-                    .ok_or_else(|| Error::fatal(wolfssl_sys::wolfCrypt_ErrorCodes_BAD_PATH_ERROR))?;
+                let path = path.to_str().ok_or_else(|| {
+                    Error::fatal(wolfssl_sys::wolfCrypt_ErrorCodes_BAD_PATH_ERROR)
+                })?;
                 let file = std::ffi::CString::new(path)
                     .map_err(|_| Error::fatal(wolfssl_sys::wolfCrypt_ErrorCodes_BAD_PATH_ERROR))?;
                 // SAFETY: [`wolfSSL_CTX_use_certificate_file`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
@@ -257,7 +258,7 @@ impl ContextBuilder {
                     wolfSSL_CTX_use_certificate_file(
                         self.ctx.as_ptr(),
                         file.as_c_str().as_ptr(),
-                        WOLFSSL_FILETYPE_ASN1,
+                        WOLFSSL_FILETYPE_ASN1 as c_int,
                     )
                 }
             }
@@ -272,13 +273,13 @@ impl ContextBuilder {
                     self.ctx.as_ptr(),
                     buf.as_ptr(),
                     buf.len() as std::os::raw::c_long,
-                    WOLFSSL_FILETYPE_PEM,
+                    WOLFSSL_FILETYPE_PEM as c_int,
                 )
             },
             Secret::PemFile(path) => {
-                let path = path
-                    .to_str()
-                    .ok_or_else(|| Error::fatal(wolfssl_sys::wolfCrypt_ErrorCodes_BAD_PATH_ERROR))?;
+                let path = path.to_str().ok_or_else(|| {
+                    Error::fatal(wolfssl_sys::wolfCrypt_ErrorCodes_BAD_PATH_ERROR)
+                })?;
                 let file = std::ffi::CString::new(path)
                     .map_err(|_| Error::fatal(wolfssl_sys::wolfCrypt_ErrorCodes_BAD_PATH_ERROR))?;
                 // SAFETY: [`wolfSSL_CTX_use_certificate_file`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
@@ -291,13 +292,13 @@ impl ContextBuilder {
                     wolfSSL_CTX_use_certificate_file(
                         self.ctx.as_ptr(),
                         file.as_c_str().as_ptr(),
-                        WOLFSSL_FILETYPE_PEM,
+                        WOLFSSL_FILETYPE_PEM as c_int,
                     )
                 }
             }
         };
 
-        if result == wolfssl_sys::WOLFSSL_SUCCESS {
+        if result == wolfssl_sys::WOLFSSL_SUCCESS as c_int {
             Ok(self)
         } else {
             Err(Error::fatal(result))
@@ -326,13 +327,13 @@ impl ContextBuilder {
                     self.ctx.as_ptr(),
                     buf.as_ptr(),
                     buf.len() as std::os::raw::c_long,
-                    WOLFSSL_FILETYPE_ASN1,
+                    WOLFSSL_FILETYPE_ASN1 as c_int,
                 )
             },
             Secret::Asn1File(path) => {
-                let path = path
-                    .to_str()
-                    .ok_or_else(|| Error::fatal(wolfssl_sys::wolfCrypt_ErrorCodes_BAD_PATH_ERROR))?;
+                let path = path.to_str().ok_or_else(|| {
+                    Error::fatal(wolfssl_sys::wolfCrypt_ErrorCodes_BAD_PATH_ERROR)
+                })?;
                 let file = std::ffi::CString::new(path)
                     .map_err(|_| Error::fatal(wolfssl_sys::wolfCrypt_ErrorCodes_BAD_PATH_ERROR))?;
                 // SAFETY: [`wolfSSL_CTX_use_PrivateKey_file`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
@@ -345,7 +346,7 @@ impl ContextBuilder {
                     wolfSSL_CTX_use_PrivateKey_file(
                         self.ctx.as_ptr(),
                         file.as_c_str().as_ptr(),
-                        WOLFSSL_FILETYPE_ASN1,
+                        WOLFSSL_FILETYPE_ASN1 as c_int,
                     )
                 }
             }
@@ -360,13 +361,13 @@ impl ContextBuilder {
                     self.ctx.as_ptr(),
                     buf.as_ptr(),
                     buf.len() as std::os::raw::c_long,
-                    WOLFSSL_FILETYPE_PEM,
+                    WOLFSSL_FILETYPE_PEM as c_int,
                 )
             },
             Secret::PemFile(path) => {
-                let path = path
-                    .to_str()
-                    .ok_or_else(|| Error::fatal(wolfssl_sys::wolfCrypt_ErrorCodes_BAD_PATH_ERROR))?;
+                let path = path.to_str().ok_or_else(|| {
+                    Error::fatal(wolfssl_sys::wolfCrypt_ErrorCodes_BAD_PATH_ERROR)
+                })?;
                 let file = std::ffi::CString::new(path)
                     .map_err(|_| Error::fatal(wolfssl_sys::wolfCrypt_ErrorCodes_BAD_PATH_ERROR))?;
                 // SAFETY: [`wolfSSL_CTX_use_PrivateKey_file`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
@@ -379,13 +380,13 @@ impl ContextBuilder {
                     wolfSSL_CTX_use_PrivateKey_file(
                         self.ctx.as_ptr(),
                         file.as_c_str().as_ptr(),
-                        WOLFSSL_FILETYPE_PEM,
+                        WOLFSSL_FILETYPE_PEM as c_int,
                     )
                 }
             }
         };
 
-        if result == wolfssl_sys::WOLFSSL_SUCCESS {
+        if result == wolfssl_sys::WOLFSSL_SUCCESS as c_int {
             Ok(self)
         } else {
             Err(Error::fatal(result))
@@ -399,7 +400,7 @@ impl ContextBuilder {
         // SAFETY: [`wolfSSL_CTX_UseSecureRenegotiation`][1] does not have proper documentation.
         // Based on the implementation, the only requirement is the context which is passed to this api has to be a valid `WOLFSSL_CTX`
         let result = unsafe { wolfssl_sys::wolfSSL_CTX_UseSecureRenegotiation(self.ctx.as_ptr()) };
-        if result == wolfssl_sys::WOLFSSL_SUCCESS {
+        if result == wolfssl_sys::WOLFSSL_SUCCESS as c_int {
             Ok(self)
         } else {
             Err(Error::fatal(result))
@@ -580,7 +581,7 @@ mod tests {
                 if ok {
                     Ok(b)
                 } else {
-                    Err(Error::fatal(wolfssl_sys::WOLFSSL_FAILURE))
+                    Err(Error::fatal(wolfssl_sys::WOLFSSL_FAILURE as c_int))
                 }
             })
             .unwrap();
@@ -599,7 +600,7 @@ mod tests {
                 if ok {
                     Ok(b)
                 } else {
-                    Err(Error::fatal(wolfssl_sys::WOLFSSL_FAILURE))
+                    Err(Error::fatal(wolfssl_sys::WOLFSSL_FAILURE as c_int))
                 }
             })
             .unwrap();
