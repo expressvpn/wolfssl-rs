@@ -12,6 +12,7 @@
 use wolfssl_sys as ffi;
 
 use std::net::TcpStream;
+use std::os::raw::c_int;
 use std::os::unix::io::AsRawFd;
 
 use std::ffi::CStr;
@@ -52,7 +53,7 @@ fn main() {
             context,
             pq_osa_ca,
             pq_osa_ca_size,
-            ffi::WOLFSSL_FILETYPE_PEM,
+            ffi::WOLFSSL_FILETYPE_PEM as c_int,
         );
 
         // Enable SNI
@@ -65,7 +66,7 @@ fn main() {
         let res = ffi::wolfSSL_UseKeyShare(ssl, ffi::WOLFSSL_P521_KYBER_LEVEL5 as u16);
 
         // Check that Kyber was enabled
-        assert_eq!(res, ffi::WOLFSSL_SUCCESS);
+        assert_eq!(res, ffi::WOLFSSL_SUCCESS as c_int);
 
         // Try to open a TCP stream to OQS test site - 6007
         let stream = TcpStream::connect(format!("{}:{}", site, port))
@@ -78,7 +79,7 @@ fn main() {
         let res = ffi::wolfSSL_connect(ssl);
 
         // Exit out here if we didn't complete the handshake
-        if res != ffi::WOLFSSL_SUCCESS {
+        if res != ffi::WOLFSSL_SUCCESS as c_int {
             println!(
                 "Connection failed with error: {}",
                 ffi::wolfSSL_get_error(ssl, res)

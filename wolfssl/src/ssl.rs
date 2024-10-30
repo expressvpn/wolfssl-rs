@@ -392,10 +392,10 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // [1]: https://www.wolfssl.com/doxygen/group__IO.html#gaf6780235ee9a7abe3f704a585eb77849
         // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe { wolfssl_sys::wolfSSL_negotiate(self.ssl.as_ptr()) } {
-            wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(())),
-            x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
-                wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Ok(Poll::PendingRead),
-                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::PendingWrite),
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(Poll::Ready(())),
+            x @ wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR => match self.get_error(x) {
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
+                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
                 wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
                     if self.is_secure_renegotiation_supported() =>
                 {
@@ -432,11 +432,11 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // [1]: https://www.wolfssl.com/doxygen/group__TLS.html#ga51f54ec99e4d87f4b25a92fe031439ae
         // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe { wolfssl_sys::wolfSSL_shutdown(self.ssl.as_ptr()) } {
-            wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(true)),
-            wolfssl_sys::WOLFSSL_SHUTDOWN_NOT_DONE => Ok(Poll::Ready(false)),
-            x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
-                wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Ok(Poll::PendingRead),
-                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::PendingWrite),
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(Poll::Ready(true)),
+            wolfssl_sys::WOLFSSL_SHUTDOWN_NOT_DONE_c_int => Ok(Poll::Ready(false)),
+            x @ wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR => match self.get_error(x) {
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
+                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
                 wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
                     if self.is_secure_renegotiation_supported() =>
                 {
@@ -483,17 +483,19 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 data_in.advance(x as usize);
                 Ok(Poll::Ready(x as usize))
             }
-            x @ (0 | wolfssl_sys::WOLFSSL_FATAL_ERROR) => match self.get_error(x) {
-                wolfssl_sys::WOLFSSL_ERROR_NONE => Ok(Poll::Ready(0)),
-                wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Ok(Poll::PendingRead),
-                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::PendingWrite),
-                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
-                    if self.is_secure_renegotiation_supported() =>
-                {
-                    self.handle_app_data().map(Poll::AppData)
+            x @ (0 | wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR) => {
+                match self.get_error(x) {
+                    wolfssl_sys::WOLFSSL_ERROR_NONE_c_int => Ok(Poll::Ready(0)),
+                    wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
+                    wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
+                    wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
+                        if self.is_secure_renegotiation_supported() =>
+                    {
+                        self.handle_app_data().map(Poll::AppData)
+                    }
+                    e => Err(Error::fatal(e)),
                 }
-                e => Err(Error::fatal(e)),
-            },
+            }
             e => Err(Error::fatal(e)),
         }
     }
@@ -534,17 +536,19 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 }
                 Ok(Poll::Ready(x as usize))
             }
-            x @ (0 | wolfssl_sys::WOLFSSL_FATAL_ERROR) => match self.get_error(x) {
-                wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Ok(Poll::PendingRead),
-                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::PendingWrite),
-                wolfssl_sys::WOLFSSL_ERROR_NONE => Ok(Poll::Ready(0)),
-                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
-                    if self.is_secure_renegotiation_supported() =>
-                {
-                    self.handle_app_data().map(Poll::AppData)
+            x @ (0 | wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR) => {
+                match self.get_error(x) {
+                    wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
+                    wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
+                    wolfssl_sys::WOLFSSL_ERROR_NONE_c_int => Ok(Poll::Ready(0)),
+                    wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
+                        if self.is_secure_renegotiation_supported() =>
+                    {
+                        self.handle_app_data().map(Poll::AppData)
+                    }
+                    e => Err(Error::fatal(e)),
                 }
-                e => Err(Error::fatal(e)),
-            },
+            }
             e => Err(Error::fatal(e)),
         }
     }
@@ -599,10 +603,10 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // [1]: https://www.wolfssl.com/doxygen/group__IO.html#ga7ba02472014a68d0717ca9243d9dd646
         // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe { wolfssl_sys::wolfSSL_Rehandshake(self.ssl.as_ptr()) } {
-            wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(())),
-            x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
-                wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Ok(Poll::PendingRead),
-                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::PendingWrite),
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(Poll::Ready(())),
+            x @ wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR => match self.get_error(x) {
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
+                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
                 wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
                     if self.is_secure_renegotiation_supported() =>
                 {
@@ -635,9 +639,9 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // [1]: https://www.wolfssl.com/doxygen/group__IO.html#ga38ef7eb0a15b65f3b68d2490dd0535a0
         // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe { wolfssl_sys::wolfSSL_update_keys(self.ssl.as_ptr()) } {
-            wolfssl_sys::WOLFSSL_SUCCESS => Ok(Poll::Ready(())),
-            e @ wolfssl_sys::BAD_FUNC_ARG => unreachable!("{e:?}"),
-            wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Ok(Poll::PendingWrite),
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(Poll::Ready(())),
+            e @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => unreachable!("{e:?}"),
+            wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
 
             e => unreachable!("Received unknown code {e}"),
         }
@@ -708,7 +712,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // [1]: https://www.wolfssl.com/doxygen/ssl_8h.html#a07da5ada53a2a68ee8e7a6dab9b5f429
         // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe { wolfssl_sys::wolfSSL_dtls_get_current_timeout(self.ssl.as_ptr()) } {
-            e @ wolfssl_sys::NOT_COMPILED_IN => unreachable!("{e:?}"),
+            e @ wolfssl_sys::wolfCrypt_ErrorCodes_NOT_COMPILED_IN => unreachable!("{e:?}"),
             x if x > 0 => Duration::from_secs(x as u64),
             e => unreachable!("{e:?}"),
         }
@@ -744,8 +748,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         match unsafe {
             wolfssl_sys::wolfSSL_dtls_set_timeout_init(self.ssl.as_ptr(), time.as_secs() as c_int)
         } {
-            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
-            x @ wolfssl_sys::BAD_FUNC_ARG => Err(Error::fatal(x)),
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
+            x @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => Err(Error::fatal(x)),
             e => unreachable!("{e:?}"),
         }
     }
@@ -777,8 +781,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         match unsafe {
             wolfssl_sys::wolfSSL_dtls_set_timeout_max(self.ssl.as_ptr(), time.as_secs() as c_int)
         } {
-            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
-            x @ wolfssl_sys::BAD_FUNC_ARG => Err(Error::fatal(x)),
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
+            x @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => Err(Error::fatal(x)),
             e => unreachable!("{e:?}"),
         }
     }
@@ -798,11 +802,11 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // [1]: https://www.wolfssl.com/doxygen/ssl_8h.html#a86c630a78e966b768332c5b19e485a51
         // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe { wolfssl_sys::wolfSSL_dtls_got_timeout(self.ssl.as_ptr()) } {
-            e @ wolfssl_sys::NOT_COMPILED_IN => unreachable!("{e:?}"),
-            wolfssl_sys::WOLFSSL_SUCCESS => Poll::Ready(false),
-            x @ wolfssl_sys::WOLFSSL_FATAL_ERROR => match self.get_error(x) {
-                wolfssl_sys::WOLFSSL_ERROR_WANT_READ => Poll::PendingRead,
-                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE => Poll::PendingWrite,
+            e @ wolfssl_sys::wolfCrypt_ErrorCodes_NOT_COMPILED_IN => unreachable!("{e:?}"),
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Poll::Ready(false),
+            x @ wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR => match self.get_error(x) {
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Poll::PendingRead,
+                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Poll::PendingWrite,
                 _ => Poll::Ready(true),
             },
             e => unreachable!("{e:?}"),
@@ -833,7 +837,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     pub fn dtls13_allow_ch_frag(&mut self, enabled: bool) -> Result<()> {
         if !self.is_dtls() {
             log::debug!("Session is not configured for DTLS");
-            return Err(Error::fatal(wolfssl_sys::WOLFSSL_FAILURE));
+            return Err(Error::fatal(wolfssl_sys::WOLFSSL_FAILURE_c_int));
         }
 
         // SAFETY: `wolfSSL_dtls13_allow_ch_frag` is
@@ -848,8 +852,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         match unsafe {
             wolfssl_sys::wolfSSL_dtls13_allow_ch_frag(self.ssl.as_ptr(), enabled as i32)
         } {
-            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
-            e @ wolfssl_sys::WOLFSSL_FAILURE => Err(Error::fatal(e)),
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
+            e @ wolfssl_sys::WOLFSSL_FAILURE_c_int => Err(Error::fatal(e)),
             e => unreachable!("{e:?}"),
         }
     }
@@ -1061,7 +1065,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // SAFETY: No documentation found for `wolfSSL_dtls_set_mtu` api,
         // From implementation, the api expects valid pointer to `WOLFSSL`
         match unsafe { wolfssl_sys::wolfSSL_dtls_set_mtu(self.ssl.as_ptr(), mtu) } {
-            wolfssl_sys::WOLFSSL_SUCCESS => {}
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => {}
             e => unreachable!("{e:?}"),
         }
     }
@@ -1105,8 +1109,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 bytes.len() as c_ushort,
             )
         } {
-            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
-            e @ wolfssl_sys::BAD_FUNC_ARG => unreachable!("{e:?}"),
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
+            e @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => unreachable!("{e:?}"),
             e => Err(Error::fatal(e)),
         }
     }
@@ -1129,8 +1133,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 domain_name.as_c_str().as_ptr(),
             )
         } {
-            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
-            x @ wolfssl_sys::WOLFSSL_FAILURE => Err(Error::fatal(self.get_error(x))),
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
+            x @ wolfssl_sys::WOLFSSL_FAILURE_c_int => Err(Error::fatal(self.get_error(x))),
             e => unreachable!("{e:?}"),
         }
     }
@@ -1151,9 +1155,9 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 curve.as_ffi() as wolfssl_sys::word16,
             )
         } {
-            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
-            wolfssl_sys::MEMORY_E => panic!("Memory Allocation Failed"),
-            e @ wolfssl_sys::BAD_FUNC_ARG => unreachable!("{e:?}"),
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
+            wolfssl_sys::wolfCrypt_ErrorCodes_MEMORY_E => panic!("Memory Allocation Failed"),
+            e @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => unreachable!("{e:?}"),
             e => unreachable!("{e:?}"),
         }
     }
@@ -1198,8 +1202,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 secret_cb,
             )
         } {
-            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
-            wolfssl_sys::WOLFSSL_FATAL_ERROR => panic!("No SSL context"),
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
+            wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR => panic!("No SSL context"),
             e => unreachable!("{e:?}"),
         }
     }

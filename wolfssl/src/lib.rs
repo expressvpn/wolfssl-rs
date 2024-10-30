@@ -20,8 +20,10 @@ pub use error::{Error, ErrorKind, Poll, Result};
 #[cfg(feature = "debug")]
 pub use debug::*;
 use wolfssl_sys::{
-    WOLFSSL_VERIFY_FAIL_EXCEPT_PSK, WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT, WOLFSSL_VERIFY_NONE,
-    WOLFSSL_VERIFY_PEER,
+    WOLFSSL_VERIFY_FAIL_EXCEPT_PSK_c_int as WOLFSSL_VERIFY_FAIL_EXCEPT_PSK,
+    WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT_c_int as WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+    WOLFSSL_VERIFY_NONE_c_int as WOLFSSL_VERIFY_NONE,
+    WOLFSSL_VERIFY_PEER_c_int as WOLFSSL_VERIFY_PEER,
 };
 
 use std::{os::raw::c_int, ptr::NonNull};
@@ -55,7 +57,7 @@ fn wolf_init() -> Result<()> {
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__TLS.html#function-wolfssl_init
         // [1]: https://www.wolfssl.com/doxygen/group__TLS.html#ga789ef74e34df659a62f06da2ea709737
         match unsafe { wolfssl_sys::wolfSSL_Init() } {
-            wolfssl_sys::WOLFSSL_SUCCESS => Ok(()),
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
             e => Err(Error::fatal(e)),
         }
     })
@@ -79,7 +81,7 @@ pub fn enable_debugging(on: bool) {
         match unsafe { wolfssl_sys::wolfSSL_Debugging_ON() } {
             0 => {}
             // This wrapper function is only enabled if we built wolfssl-sys with debugging on.
-            wolfssl_sys::NOT_COMPILED_IN => {
+            wolfssl_sys::wolfCrypt_ErrorCodes_NOT_COMPILED_IN => {
                 panic!("Inconsistent build, debug not enabled in wolfssl_sys")
             }
             e => unreachable!("{e:?}"),

@@ -89,9 +89,9 @@ impl std::convert::From<c_int> for ErrorKind {
             !matches!(
                 this,
                 Self::Other {
-                    code: wolfssl_sys::WOLFSSL_ERROR_WANT_READ
-                        | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE
-                        | wolfssl_sys::WOLFSSL_SUCCESS,
+                    code: wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int
+                        | wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int
+                        | wolfssl_sys::WOLFSSL_SUCCESS_c_int,
                     ..
                 }
             ),
