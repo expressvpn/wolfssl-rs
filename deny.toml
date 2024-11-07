@@ -31,9 +31,6 @@ wildcards = "allow"
 highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
-skip = [
-    { name = "bindgen", version = "0.68.1" },
-]
 
 [sources]
 unknown-registry = "deny"
