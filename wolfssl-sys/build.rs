@@ -118,7 +118,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .enable("supportedcurves", None)
         // Enable TLS/1.3
         .enable("tls13", None)
-        // Enable liboqs, etc
+        // Enable kyber, etc
         .enable("experimental", None)
         // CFLAGS
         .cflag("-g")
@@ -137,21 +137,10 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     }
 
     if cfg!(feature = "postquantum") {
-        // Post Quantum support is provided by liboqs
-        if let Some(include) = std::env::var_os("DEP_OQS_ROOT") {
-            let oqs_path = Path::new(&include);
-            conf.cflag(format!(
-                "-I{}",
-                oqs_path.join("build/include/").to_str().unwrap()
-            ));
-            conf.ldflag(format!(
-                "-L{}",
-                oqs_path.join("build/lib/").to_str().unwrap()
-            ));
-            conf.with("liboqs", None);
-        } else {
-            panic!("Post Quantum requested but liboqs appears to be missing?");
-        }
+        // Enable Kyber
+        conf.enable("kyber", Some("all,original"))
+            // SHA3 is needed for using WolfSSL's implementation of Kyber/ML-KEM
+            .enable("sha3", None);
     }
 
     match build_target::target_arch().unwrap() {
@@ -290,10 +279,6 @@ fn main() -> std::io::Result<()> {
 
     // Tell cargo to tell rustc to link in WolfSSL
     println!("cargo:rustc-link-lib=static=wolfssl");
-
-    if cfg!(feature = "postquantum") {
-        println!("cargo:rustc-link-lib=static=oqs");
-    }
 
     println!(
         "cargo:rustc-link-search=native={}",
