@@ -28,7 +28,7 @@ fn main() {
         .as_c_str()
         .as_ptr() as *mut ::std::os::raw::c_void;
     // The port that runs P521 Kyber Level 5 hybrid
-    let port = 6043;
+    let port = 6041;
 
     // Compile in the OQS CA at build time
     let pq_osa_ca = include_bytes!("test_certs/pq-osa-ca.crt");
@@ -68,7 +68,7 @@ fn main() {
         // Check that Kyber was enabled
         assert_eq!(res, ffi::WOLFSSL_SUCCESS as c_int);
 
-        // Try to open a TCP stream to OQS test site - 6007
+        // Try to open a TCP stream to OQS test site - 6041
         let stream = TcpStream::connect(format!("{}:{}", site, port))
             .expect("Couldn't connect to test site");
 
