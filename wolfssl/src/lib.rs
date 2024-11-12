@@ -236,6 +236,16 @@ pub enum CurveGroup {
     /// `WOLFSSL_P521_KYBER_LEVEL5`
     #[cfg(feature = "postquantum")]
     P521KyberLevel5,
+
+    /// `WOLFSSL_P256_ML_KEM_512`
+    #[cfg(feature = "postquantum")]
+    P256MLKEM512,
+    /// `WOLFSSL_P384_ML_KEM_768`
+    #[cfg(feature = "postquantum")]
+    P384MLKEM768,
+    /// `WOLFSSL_P521_ML_KEM_1024`
+    #[cfg(feature = "postquantum")]
+    P521MLKEM1024,
 }
 
 impl CurveGroup {
@@ -250,6 +260,12 @@ impl CurveGroup {
             P384KyberLevel3 => wolfssl_sys::WOLFSSL_P384_KYBER_LEVEL3,
             #[cfg(feature = "postquantum")]
             P521KyberLevel5 => wolfssl_sys::WOLFSSL_P521_KYBER_LEVEL5,
+            #[cfg(feature = "postquantum")]
+            P256MLKEM512 => wolfssl_sys::WOLFSSL_P256_ML_KEM_512,
+            #[cfg(feature = "postquantum")]
+            P384MLKEM768 => wolfssl_sys::WOLFSSL_P384_ML_KEM_768,
+            #[cfg(feature = "postquantum")]
+            P521MLKEM1024 => wolfssl_sys::WOLFSSL_P521_ML_KEM_1024,
         }
     }
 }
