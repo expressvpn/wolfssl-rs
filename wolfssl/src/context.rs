@@ -48,6 +48,9 @@ impl ContextBuilder {
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_new
         let ctx = unsafe { wolfssl_sys::wolfSSL_CTX_new(method_fn.as_ptr()) };
         let ctx = NonNull::new(ctx).ok_or(NewContextBuilderError::CreateFailed)?;
+        unsafe {
+            wolfssl_sys::wolfSSL_Debugging_ON();
+        }
 
         Ok(Self { ctx, method })
     }
