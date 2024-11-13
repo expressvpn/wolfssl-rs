@@ -129,7 +129,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .cflag("-DUSE_CERT_BUFFERS_4096")
         .cflag("-DUSE_CERT_BUFFERS_256")
         .cflag("-DWOLFSSL_NO_SPHINCS")
-        .cflag("-DWOLFSSL_TLS13_MIDDLEBOX_COMPAT");
+        .cflag("-DWOLFSSL_TLS13_MIDDLEBOX_COMPAT")
+        .cflag("-DWOLFSSL_DEBUG_TLS");
 
     if cfg!(feature = "debug") {
         conf.enable("debug", None);
@@ -138,7 +139,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
 
     if cfg!(feature = "postquantum") {
         // Enable Kyber
-        conf.enable("kyber", Some("original,all"))
+        conf.enable("kyber", Some("original,yes"))
             // SHA3 is needed for using WolfSSL's implementation of Kyber/ML-KEM
             .enable("sha3", None);
     }
