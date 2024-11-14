@@ -43,7 +43,7 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
 }
 
 const PATCH_DIR: &str = "patches";
-const PATCHES: &[&str] = &["disable-falcon-dilithium.patch", "remove_kyber_flags.patch", "remove_mlkem_flags.patch"];
+const PATCHES: &[&str] = &["disable-falcon-dilithium.patch", "fix_mlkem_flags.patch"];
 
 /**
  * Apply patch to wolfssl-src
@@ -139,7 +139,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
 
     if cfg!(feature = "postquantum") {
         // Enable Kyber
-        conf.enable("kyber", Some("original,yes"))
+        conf.enable("kyber", Some("all,original,ml-kem"))
             // SHA3 is needed for using WolfSSL's implementation of Kyber/ML-KEM
             .enable("sha3", None);
     }
