@@ -96,6 +96,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .disable_shared()
         // Disable sys ca certificate store
         .disable("sys-ca-certs", None)
+        // Disable dilithium
+        .disable("dilithium", None)
         // Enable AES bitsliced implementation (cache attack safe)
         .enable("aes-bitsliced", None)
         // Enable Curve25519
