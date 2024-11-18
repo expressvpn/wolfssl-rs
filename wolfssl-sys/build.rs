@@ -43,7 +43,13 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
 }
 
 const PATCH_DIR: &str = "patches";
-const PATCHES: &[&str] = &["disable-falcon-dilithium.patch"];
+const PATCHES: &[&str] = &[
+    "disable-falcon-dilithium.patch",
+    "make-kyber-mlkem-available.patch",
+    "fix-kyber-mlkem-benchmark.patch",
+    "fix-mlkem-get-curve-name.patch",
+    "fix-kyber-get-curve-name.patch",
+];
 
 /**
  * Apply patch to wolfssl-src
