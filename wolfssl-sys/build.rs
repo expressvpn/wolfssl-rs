@@ -43,7 +43,13 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
 }
 
 const PATCH_DIR: &str = "patches";
-const PATCHES: &[&str] = &["disable-falcon-dilithium.patch"];
+const PATCHES: &[&str] = &[
+    "include-private-key-fields-for-kyber.patch",
+    "make-kyber-mlkem-available.patch",
+    "fix-kyber-mlkem-benchmark.patch",
+    "fix-mlkem-get-curve-name.patch",
+    "fix-kyber-get-curve-name.patch",
+];
 
 /**
  * Apply patch to wolfssl-src
@@ -90,6 +96,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .disable_shared()
         // Disable sys ca certificate store
         .disable("sys-ca-certs", None)
+        // Disable dilithium
+        .disable("dilithium", None)
         // Enable AES bitsliced implementation (cache attack safe)
         .enable("aes-bitsliced", None)
         // Enable Curve25519
@@ -118,7 +126,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .enable("supportedcurves", None)
         // Enable TLS/1.3
         .enable("tls13", None)
-        // Enable liboqs, etc
+        // Enable kyber, etc
         .enable("experimental", None)
         // CFLAGS
         .cflag("-g")
@@ -137,21 +145,10 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     }
 
     if cfg!(feature = "postquantum") {
-        // Post Quantum support is provided by liboqs
-        if let Some(include) = std::env::var_os("DEP_OQS_ROOT") {
-            let oqs_path = Path::new(&include);
-            conf.cflag(format!(
-                "-I{}",
-                oqs_path.join("build/include/").to_str().unwrap()
-            ));
-            conf.ldflag(format!(
-                "-L{}",
-                oqs_path.join("build/lib/").to_str().unwrap()
-            ));
-            conf.with("liboqs", None);
-        } else {
-            panic!("Post Quantum requested but liboqs appears to be missing?");
-        }
+        // Enable Kyber
+        conf.enable("kyber", Some("all,original"))
+            // SHA3 is needed for using WolfSSL's implementation of Kyber/ML-KEM
+            .enable("sha3", None);
     }
 
     match build_target::target_arch().unwrap() {
@@ -290,10 +287,6 @@ fn main() -> std::io::Result<()> {
 
     // Tell cargo to tell rustc to link in WolfSSL
     println!("cargo:rustc-link-lib=static=wolfssl");
-
-    if cfg!(feature = "postquantum") {
-        println!("cargo:rustc-link-lib=static=oqs");
-    }
 
     println!(
         "cargo:rustc-link-search=native={}",
