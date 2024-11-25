@@ -23,6 +23,7 @@ test-case = "3.0"
 default = ["postquantum"]
 debug = []
 postquantum = []
+kyber_only = ["postquantum"]
 
 [[example]]
 name = "connect_pq"

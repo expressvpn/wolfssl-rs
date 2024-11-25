@@ -20,7 +20,7 @@ mod tests {
 
     #[cfg(feature = "postquantum")]
     #[test_case(WOLFSSL_P521_KYBER_LEVEL5)]
-    #[test_case(WOLFSSL_P521_ML_KEM_1024)]
+    #[cfg_attr(not(feature = "kyber_only"), test_case(WOLFSSL_P521_ML_KEM_1024))]
     fn test_post_quantum_available(group: std::os::raw::c_uint) {
         unsafe {
             // Init WolfSSL
