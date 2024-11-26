@@ -7,6 +7,7 @@ pub use bindings::*;
 #[cfg(test)]
 mod tests {
     use std::os::raw::c_int;
+    use test_case::test_case;
 
     use super::*;
     #[test]
@@ -17,9 +18,10 @@ mod tests {
         }
     }
 
-    #[test]
     #[cfg(feature = "postquantum")]
-    fn test_post_quantum_available() {
+    #[test_case(WOLFSSL_P521_KYBER_LEVEL5)]
+    #[cfg_attr(not(feature = "kyber_only"), test_case(WOLFSSL_P521_ML_KEM_1024))]
+    fn test_post_quantum_available(group: std::os::raw::c_uint) {
         unsafe {
             // Init WolfSSL
             let res = wolfSSL_Init();
@@ -34,10 +36,9 @@ mod tests {
             // Create new SSL stream
             let ssl = wolfSSL_new(context);
 
-            // Enable Kyber
-            let res = wolfSSL_UseKeyShare(ssl, WOLFSSL_P521_KYBER_LEVEL5.try_into().unwrap());
+            let res = wolfSSL_UseKeyShare(ssl, group.try_into().unwrap());
 
-            // Check that Kyber was enabled
+            // Check that Kyber/ML-KEM was enabled
             assert_eq!(res, WOLFSSL_SUCCESS as c_int);
         }
     }

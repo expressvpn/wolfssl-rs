@@ -16,10 +16,14 @@ bindgen = "0.70"
 autotools = "0.2"
 build-target = "0.4.0"
 
+[dev-dependencies]
+test-case = "3.0"
+
 [features]
 default = ["postquantum"]
 debug = []
 postquantum = []
+kyber_only = ["postquantum"]
 
 [[example]]
 name = "connect_pq"

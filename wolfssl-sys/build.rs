@@ -145,8 +145,13 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     }
 
     if cfg!(feature = "postquantum") {
+        let flags = if cfg!(feature = "kyber_only") {
+            "all,original"
+        } else {
+            "all,original,ml-kem"
+        };
         // Enable Kyber
-        conf.enable("kyber", Some("all,original"))
+        conf.enable("kyber", Some(flags))
             // SHA3 is needed for using WolfSSL's implementation of Kyber/ML-KEM
             .enable("sha3", None);
     }

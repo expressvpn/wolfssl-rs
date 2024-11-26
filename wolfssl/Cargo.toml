@@ -12,6 +12,7 @@ keywords = ["wolfssl", "vpn", "lightway", "post-quantum", "cryptography"]
 default = ["postquantum"]
 postquantum = ["wolfssl-sys/postquantum"]
 debug = ["wolfssl-sys/debug"] # Note that application code must also call wolfssl::enable_debugging(true)
+kyber_only = ["wolfssl-sys/kyber_only"]
 
 [lints.rust]
 missing_docs = "deny"

@@ -633,4 +633,5 @@ dependencies = [
  "autotools",
  "bindgen",
  "build-target",
+ "test-case",
 ]
