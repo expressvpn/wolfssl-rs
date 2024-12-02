@@ -607,7 +607,7 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "wolfssl"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "async-trait",
  "bytes",
