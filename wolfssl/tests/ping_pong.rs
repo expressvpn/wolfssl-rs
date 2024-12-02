@@ -1,3 +1,5 @@
+//! Test sending ping/pong messages back and forth
+
 #![deny(unsafe_code)] // unsafety should all be in the library.
 
 #[cfg(feature = "debug")]
