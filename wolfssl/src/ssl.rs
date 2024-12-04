@@ -362,7 +362,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         match unsafe { wolfssl_sys::wolfSSL_is_init_finished(self.ssl.as_ptr()) } {
             0 => false,
             1 => true,
-            e => unreachable!("{e:?}"),
+            e => unreachable!("wolfSSL_is_init_finished: {e:?}"),
         }
     }
 
@@ -566,7 +566,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         } {
             0 => false,
             1 => true,
-            e => unreachable!("{e:?}"),
+            e => unreachable!("wolfSSL_SSL_get_secure_renegotiation_support: {e:?}"),
         }
     }
 
@@ -581,7 +581,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         match unsafe { wolfssl_sys::wolfSSL_SSL_renegotiate_pending(self.ssl.as_ptr()) } {
             0 => false,
             1 => true,
-            e => unreachable!("{e:?}"),
+            e => unreachable!("wolfSSL_SSL_renegotiate_pending: {e:?}"),
         }
     }
 
@@ -640,10 +640,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe { wolfssl_sys::wolfSSL_update_keys(self.ssl.as_ptr()) } {
             wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(Poll::Ready(())),
-            e @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => unreachable!("{e:?}"),
+            e @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => {
+                unreachable!("wolfSSL_update_keys: {e:?}")
+            }
             wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
 
-            e => unreachable!("Received unknown code {e}"),
+            e => Err(Error::fatal(e)),
         }
     }
 
@@ -677,7 +679,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             0 => {}
             // panic on non-success, because `ssl` is always non-null and the
             // method here must be TLS1.3
-            e => unreachable!("{e:?}"),
+            e => unreachable!("wolfSSL_key_update_response: {e:?}"),
         }
 
         // SAFETY: Based on `wolfSSL_key_update_response`][0], required will be populated if the api returns success.
@@ -687,7 +689,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         match unsafe { required.assume_init() } {
             1 => true,
             0 => false,
-            e => unreachable!("{e:?}"),
+            e => unreachable!("wolfSSL_key_update_response: unexpected value: {e:?}"),
         }
     }
 
@@ -712,9 +714,11 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // [1]: https://www.wolfssl.com/doxygen/ssl_8h.html#a07da5ada53a2a68ee8e7a6dab9b5f429
         // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe { wolfssl_sys::wolfSSL_dtls_get_current_timeout(self.ssl.as_ptr()) } {
-            e @ wolfssl_sys::wolfCrypt_ErrorCodes_NOT_COMPILED_IN => unreachable!("{e:?}"),
+            e @ wolfssl_sys::wolfCrypt_ErrorCodes_NOT_COMPILED_IN => {
+                unreachable!("wolfSSL_dtls_get_current_timeout: {e:?}")
+            }
             x if x > 0 => Duration::from_secs(x as u64),
-            e => unreachable!("{e:?}"),
+            e => unreachable!("wolfSSL_dtls_get_current_timeout: {e:?}"),
         }
     }
 
@@ -802,14 +806,16 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // [1]: https://www.wolfssl.com/doxygen/ssl_8h.html#a86c630a78e966b768332c5b19e485a51
         // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         match unsafe { wolfssl_sys::wolfSSL_dtls_got_timeout(self.ssl.as_ptr()) } {
-            e @ wolfssl_sys::wolfCrypt_ErrorCodes_NOT_COMPILED_IN => unreachable!("{e:?}"),
+            e @ wolfssl_sys::wolfCrypt_ErrorCodes_NOT_COMPILED_IN => {
+                unreachable!("wolfSSL_dtls_got_timeout: {e:?}")
+            }
             wolfssl_sys::WOLFSSL_SUCCESS_c_int => Poll::Ready(false),
             x @ wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR => match self.get_error(x) {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Poll::PendingRead,
                 wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Poll::PendingWrite,
                 _ => Poll::Ready(true),
             },
-            e => unreachable!("{e:?}"),
+            e => unreachable!("wolfSSL_dtls_got_timeout: {e:?}"),
         }
     }
 
@@ -1066,7 +1072,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // From implementation, the api expects valid pointer to `WOLFSSL`
         match unsafe { wolfssl_sys::wolfSSL_dtls_set_mtu(self.ssl.as_ptr(), mtu) } {
             wolfssl_sys::WOLFSSL_SUCCESS_c_int => {}
-            e => unreachable!("{e:?}"),
+            e => unreachable!("wolfSSL_dtls_set_mtu: {e:?}"),
         }
     }
 
@@ -1085,7 +1091,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         match unsafe { wolfssl_sys::wolfSSL_dtls(self.ssl.as_ptr()) } {
             1 => true,
             0 => false,
-            e => unreachable!("{e:?}"),
+            e => unreachable!("wolfSSL_dtls: {e:?}"),
         }
     }
 
@@ -1110,7 +1116,9 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             )
         } {
             wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
-            e @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => unreachable!("{e:?}"),
+            e @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => {
+                unreachable!("wolfSSL_UseSNI: {e:?}")
+            }
             e => Err(Error::fatal(e)),
         }
     }
@@ -1157,7 +1165,9 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         } {
             wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
             wolfssl_sys::wolfCrypt_ErrorCodes_MEMORY_E => panic!("Memory Allocation Failed"),
-            e @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => unreachable!("{e:?}"),
+            e @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => {
+                unreachable!("wolfSSL_UseKeyShare: {e:?}")
+            }
             e => Err(Error::fatal(e)),
         }
     }

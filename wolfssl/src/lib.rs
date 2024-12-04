@@ -84,7 +84,7 @@ pub fn enable_debugging(on: bool) {
             wolfssl_sys::wolfCrypt_ErrorCodes_NOT_COMPILED_IN => {
                 panic!("Inconsistent build, debug not enabled in wolfssl_sys")
             }
-            e => unreachable!("{e:?}"),
+            e => unreachable!("wolfSSL_Debugging_ON: {e:?}"),
         }
     } else {
         // SAFETY: [`wolfSSL_Debugging_OFF`][0] ([also][1]) has no safety concerns as per documentation
