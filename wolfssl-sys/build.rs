@@ -44,6 +44,7 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
 
 const PATCH_DIR: &str = "patches";
 const PATCHES: &[&str] = &[
+    "revert-aarch64-poly1305-asm-improve-performance.patch",
     "include-private-key-fields-for-kyber.patch",
     "make-kyber-mlkem-available.patch",
     "fix-kyber-mlkem-benchmark.patch",
