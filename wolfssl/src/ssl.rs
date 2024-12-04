@@ -403,7 +403,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 }
                 e => Err(Error::fatal(e)),
             },
-            e => unreachable!("{e:?}"),
+            e => Err(Error::fatal(e)),
         }
     }
 
@@ -444,7 +444,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 }
                 x => Err(Error::fatal(x)),
             },
-            e => unreachable!("{e:?}"),
+            e => Err(Error::fatal(e)),
         }
     }
 
@@ -614,7 +614,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 }
                 e => Err(Error::fatal(e)),
             },
-            e => unreachable!("{e:?}"),
+            e => Err(Error::fatal(e)),
         }
     }
 
@@ -750,7 +750,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         } {
             wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
             x @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => Err(Error::fatal(x)),
-            e => unreachable!("{e:?}"),
+            e => Err(Error::fatal(e)),
         }
     }
 
@@ -783,7 +783,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         } {
             wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
             x @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => Err(Error::fatal(x)),
-            e => unreachable!("{e:?}"),
+            e => Err(Error::fatal(e)),
         }
     }
 
@@ -854,7 +854,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         } {
             wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
             e @ wolfssl_sys::WOLFSSL_FAILURE_c_int => Err(Error::fatal(e)),
-            e => unreachable!("{e:?}"),
+            e => Err(Error::fatal(e)),
         }
     }
 
@@ -1135,7 +1135,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         } {
             wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
             x @ wolfssl_sys::WOLFSSL_FAILURE_c_int => Err(Error::fatal(self.get_error(x))),
-            e => unreachable!("{e:?}"),
+            e => Err(Error::fatal(e)),
         }
     }
 
@@ -1158,7 +1158,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
             wolfssl_sys::wolfCrypt_ErrorCodes_MEMORY_E => panic!("Memory Allocation Failed"),
             e @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => unreachable!("{e:?}"),
-            e => unreachable!("{e:?}"),
+            e => Err(Error::fatal(e)),
         }
     }
 
@@ -1204,7 +1204,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         } {
             wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
             wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR => panic!("No SSL context"),
-            e => unreachable!("{e:?}"),
+            e => Err(Error::fatal(e)),
         }
     }
 
