@@ -6,6 +6,8 @@
 #![allow(clippy::upper_case_acronyms)]
 #![allow(clippy::unnecessary_operation)]
 #![allow(clippy::identity_op)]
+#![allow(clippy::missing_safety_doc)]
+#![allow(clippy::ptr_offset_with_cast)]
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 use std::os::raw::c_int;
