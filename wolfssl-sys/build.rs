@@ -50,6 +50,7 @@ const PATCHES: &[&str] = &[
     "fix-kyber-mlkem-benchmark.patch",
     "fix-mlkem-get-curve-name.patch",
     "fix-kyber-get-curve-name.patch",
+    "fix-kyber-prf-non-avx2.patch",
 ];
 
 /**
