@@ -2,7 +2,7 @@ VERSION 0.8
 # Importing https://github.com/earthly/lib/tree/3.0.1/rust via commit hash pinning because git tags can be changed
 IMPORT github.com/earthly/lib/rust:1a4a008e271c7a5583e7bd405da8fd3624c05610 AS lib-rust
 
-FROM rust:1.84.0
+FROM rust:1.84.1
 
 WORKDIR /wolfssl-rs
 
