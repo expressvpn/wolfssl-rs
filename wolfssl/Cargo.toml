@@ -1,12 +1,12 @@
 [package]
 name = "wolfssl"
 version = "3.0.0"
-edition = "2021"
-authors = ["lightway-developers@expressvpn.com"]
-license = "GPL-2.0-or-later"
 description = "High-level bindings for WolfSSL"
-repository = "https://github.com/expressvpn/wolfssl-rs"
-keywords = ["wolfssl", "vpn", "lightway", "post-quantum", "cryptography"]
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+edition.workspace = true
 
 [features]
 default = ["postquantum"]

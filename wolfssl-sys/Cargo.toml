@@ -1,15 +1,15 @@
 [package]
 name = "wolfssl-sys"
 version = "2.0.0"
-edition = "2021"
-authors = ["lightway-developers@expressvpn.com"]
-license = "GPL-2.0-or-later"
-readme = "README.md"
 description = "System bindings for WolfSSL"
-repository = "https://github.com/expressvpn/wolfssl-rs"
-keywords = ["wolfssl", "vpn", "lightway", "post-quantum", "cryptography"]
+readme = "README.md"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
 links = "wolfssl"
 exclude = ["wolfssl-src/**/*.pdf"] # crates.io has a size limit for publishing. Exclude unused files to keep the size under the limit.
+edition.workspace = true
 
 [build-dependencies]
 bindgen = "0.71"
