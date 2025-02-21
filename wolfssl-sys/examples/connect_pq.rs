@@ -33,7 +33,7 @@ fn main() {
     // Compile in the OQS CA at build time
     let pq_osa_ca = include_bytes!("test_certs/pq-osa-ca.crt");
     // Cast to what the ffi functions are looking for
-    let pq_osa_ca_size = pq_osa_ca.len() as i64;
+    let pq_osa_ca_size = pq_osa_ca.len() as std::os::raw::c_long;
     let pq_osa_ca = pq_osa_ca as *const u8;
 
     // We'll do everything else in an unsafe block as it's clearer than wrapping each function
