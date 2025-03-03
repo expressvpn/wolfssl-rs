@@ -577,6 +577,11 @@ fn main() -> std::io::Result<()> {
     let ignored_macros = IgnoreMacros(hash_ignored_macros);
     let wolfssl_include_dir = wolfssl_install_dir.join("include");
 
+    // Set cargo metadata to allow dependent libraries to reference the built library.
+    // https://doc.rust-lang.org/cargo/reference/build-script-examples.html#using-another-sys-crate
+    println!("cargo:root={}", wolfssl_install_dir.to_str().unwrap());
+    println!("cargo:include={}", wolfssl_include_dir.to_str().unwrap());
+
     // Build the Rust binding
     let builder = bindgen::Builder::default()
         .header("wrapper.h")
