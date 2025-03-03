@@ -146,6 +146,8 @@ const PATCHES: &[&str] = &[
     "ChaCha20-Aarch64-ASM-fix-256-bit-case-fixed.patch",
     "dtls13-rtx-timer.patch",
 ];
+const OPTIONAL_FEATURES: &[&str] = &["aesccm", "dh", "opensslall", "opensslextra", "psk"];
+const MACRO_FEATURES: &[(&str, &str)] = &[("ex_data", "HAVE_EX_DATA"), ("alpn", "HAVE_ALPN")];
 
 /**
  * Apply patch using git apply (Windows)
@@ -273,8 +275,6 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     conf.reconf("-ivf")
         // Disable benchmarks
         .disable("benchmark", None)
-        // Disable DH key exchanges
-        .disable("dh", None)
         // Disable examples
         .disable("examples", None)
         // Disable old TLS versions
@@ -329,6 +329,37 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .cflag("-DUSE_CERT_BUFFERS_256")
         .cflag("-DWOLFSSL_NO_SPHINCS")
         .cflag("-DWOLFSSL_TLS13_MIDDLEBOX_COMPAT");
+
+    for feature in OPTIONAL_FEATURES {
+        // Determine if feature is enabled, enable or disable feature in configure
+        // script based on that.
+        // For each optional feature, cargo sets the CARGO_FEATURE_<name> env var,
+        // so we check for that.
+        // Using cfg!() only works in a compile-time context, so this is the best
+        // alternative that does not require defining extra macros.
+        if env::var(format!(
+            "CARGO_FEATURE_{}",
+            feature.to_uppercase().replace("-", "_")
+        ))
+        .is_ok()
+        {
+            conf.enable(feature, None);
+        } else {
+            conf.disable(feature, None);
+        }
+    }
+    for (feature_name, feature_define) in MACRO_FEATURES {
+        // Same as above, just for features that are enabled/disabled via defines.
+        // Alongside the feature name, MACRO_FEATURES contains the define name to set.
+        if env::var(format!(
+            "CARGO_FEATURE_{}",
+            feature_name.to_uppercase().replace("-", "_")
+        ))
+        .is_ok()
+        {
+            conf.cflag(format!("-D{}", feature_define));
+        }
+    }
 
     if cfg!(feature = "debug") {
         conf.enable("debug", None);
