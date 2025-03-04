@@ -29,9 +29,11 @@ impl Random {
         }
     }
 
-    /// Generates a random u64. Advances the internal state of the RNG.
-    pub fn random_u64(&mut self) -> Result<u64> {
-        let mut buf = [0u8; 8];
+    /// Generates a random collection of bytes. Advances the internal state of the RNG.
+    pub fn random_bytes<const N: usize>(&mut self) -> Result<[u8; N]> {
+        let num_bytes: u32 = N.try_into().expect("failed to convert usize to u32");
+        let mut buf = [0u8; N];
+
         // SAFETY:
         // The following invariants required by [`wc_RNG_GenerateBlock()`][0] is satisfied:
         //      - first argument `&rng` is mutable reference to properly initialised random number generator
@@ -39,11 +41,17 @@ impl Random {
         //
         // [0]: https://www.wolfssl.com/doxygen/group__Random.html#ga9a289fb3f58f4a5f7e15c2b5a1b0d7c6
         match unsafe {
-            wolfssl_sys::wc_RNG_GenerateBlock(&mut self.0 as *mut _, buf.as_mut_ptr(), 8)
+            wolfssl_sys::wc_RNG_GenerateBlock(&mut self.0 as *mut _, buf.as_mut_ptr(), num_bytes)
         } {
-            0 => Ok(u64::from_ne_bytes(buf)),
+            0 => Ok(buf),
             e => Err(Error::fatal(e)),
         }
+    }
+
+    /// Generates a random u64. Advances the internal state of the RNG.
+    pub fn random_u64(&mut self) -> Result<u64> {
+        let buf: [u8; 8] = self.random_bytes()?;
+        Ok(u64::from_ne_bytes(buf))
     }
 }
 
@@ -72,6 +80,18 @@ mod tests {
 
         for _ in 0..10 {
             let _ = rng.random_u64().unwrap();
+        }
+
+        drop(rng)
+    }
+
+    #[test]
+    fn random_bytes_roundtrip() {
+        let mut rng = Random::new().unwrap();
+
+        for _ in 0..10 {
+            let _ = rng.random_bytes::<32>().unwrap();
+            let _: [u8; 16] = rng.random_bytes().unwrap();
         }
 
         drop(rng)
