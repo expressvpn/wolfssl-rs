@@ -34,8 +34,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      - name: Set satellite if earthly creds are available
+        shell: bash
+        run: |
+          if [[ ! -z "${EARTHLY_TOKEN}" ]]; then
+            echo "EARTHLY_SATELLITE=--org expressvpn --satellite wolfssl-rs" >> $GITHUB_ENV
+          fi
       - name: Run +${{ matrix.target }} on Earthly satellite
-        run: earthly --ci --org expressvpn --satellite wolfssl-rs +${{ matrix.target }}
+        run: earthly --ci ${EARTHLY_SATELLITE} +${{ matrix.target }}
   coverage:
     runs-on: ubuntu-latest
     env:
@@ -49,10 +55,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - name: Run +run-coverage on Earthly satellite
+      - name: Set satellite if earthly creds are available
+        shell: bash
+        run: |
+          if [[ ! -z "${EARTHLY_TOKEN}" ]]; then
+            echo "EARTHLY_SATELLITE=--org expressvpn --satellite wolfssl-rs" >> $GITHUB_ENV
+          fi
+      - name: Run +run-coverage on Earthly
         id: coverage
         run: |
-          earthly --ci --org expressvpn --satellite wolfssl-rs --artifact +run-coverage/* output/
+          earthly --ci ${EARTHLY_SATELLITE} --artifact +run-coverage/* output/
 
           cat output/summary.txt
 
