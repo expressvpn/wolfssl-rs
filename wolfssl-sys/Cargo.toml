@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 links = "wolfssl"
-exclude = ["wolfssl-src/**/*.pdf"] # crates.io has a size limit for publishing. Exclude unused files to keep the size under the limit.
+exclude = ["wolfssl-src/**/*.pdf", "*.css"] # crates.io has a size limit for publishing. Exclude unused files to keep the size under the limit.
 edition.workspace = true
 
 [build-dependencies]
