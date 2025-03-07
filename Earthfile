@@ -2,6 +2,7 @@ VERSION 0.8
 # Importing https://github.com/earthly/lib/tree/3.0.1/rust via commit hash pinning because git tags can be changed
 IMPORT github.com/earthly/lib/rust:1a4a008e271c7a5583e7bd405da8fd3624c05610 AS lib-rust
 
+# Update RUST_VERSION in github action to the same version for building iOS/tvOS
 FROM rust:1.85.0
 
 WORKDIR /wolfssl-rs
