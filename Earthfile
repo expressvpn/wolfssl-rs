@@ -8,12 +8,29 @@ WORKDIR /wolfssl-rs
 
 build-deps:
     RUN apt-get update -qq
-    RUN apt-get install --no-install-recommends -qq autoconf autotools-dev libtool-bin clang cmake bsdmainutils
+    RUN apt-get install --no-install-recommends -qq autoconf autotools-dev libtool-bin clang cmake bsdmainutils openjdk-17-jdk gcc-multilib
     DO lib-rust+INIT --keep_fingerprints=true
-    DO lib-rust+CARGO --args="install --locked cargo-deny cargo-llvm-cov"
+    DO lib-rust+CARGO --args="install --locked cargo-deny cargo-llvm-cov cargo-ndk"
     RUN rustup component add clippy
     RUN rustup component add rustfmt
     RUN rustup component add llvm-tools-preview
+
+    ARG ANDROID_HOME=/opt/android/
+    ARG ANDROID_NDK_VERSION=27.0.12077973
+
+    # Install android targets
+    RUN rustup target add aarch64-linux-android
+    RUN rustup target add armv7-linux-androideabi
+    RUN rustup target add i686-linux-android
+    RUN rustup target add x86_64-linux-android
+
+    RUN mkdir -p ${ANDROID_HOME}/cmdline-tools \
+     && wget -q 'https://dl.google.com/android/repository/commandlinetools-linux-6200805_latest.zip' -P /tmp  \
+     && unzip -q -d ${ANDROID_HOME}/cmdline-tools /tmp/commandlinetools-linux-6200805_latest.zip \
+     && yes Y | ${ANDROID_HOME}/cmdline-tools/tools/bin/sdkmanager --install "ndk;${ANDROID_NDK_VERSION}" \
+     && yes Y | ${ANDROID_HOME}/cmdline-tools/tools/bin/sdkmanager --licenses
+
+    ENV ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}
 
 copy-src:
     FROM +build-deps
@@ -61,6 +78,10 @@ build-crate:
     FROM +copy-src
     DO lib-rust+CARGO --args="package" --output="package/.*\.crate"
     SAVE ARTIFACT target/package/*.crate /package/ AS LOCAL artifacts/crate/
+
+build-android-release:
+    FROM +copy-src
+    DO lib-rust+CARGO --args="ndk -t x86_64 -t x86 -t armeabi-v7a -t arm64-v8a build --release -vv" --output="release/[^/]+"
 
 # lint runs cargo clippy on the source code
 lint:
