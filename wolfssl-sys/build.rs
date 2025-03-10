@@ -226,6 +226,56 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         conf.env("LIBS", "-llog -landroid");
     }
 
+    if build_target::target_os().unwrap() == build_target::Os::iOs {
+        // Check whether we have set IPHONEOS_DEPLOYMENT_TARGET to ensure we support older iOS
+        let ios_target = env::var("IPHONEOS_DEPLOYMENT_TARGET")
+            .expect("Must have set minimum supported iOS version");
+        if ios_target.is_empty() {
+            panic!("IPHONEOS_DEPLOYMENT_TARGET is empty")
+        }
+
+        // Build options for iOS
+        let (chost, arch_flags, arch) = match build_target::target_arch().unwrap() {
+            build_target::Arch::AARCH64 => ("arm64-apple-ios", "-O3", "arm64"),
+            _ => panic!("Unsupported build_target for iOS"),
+        };
+
+        // Per arch configurations
+        conf.config_option("host", Some(chost));
+        conf.cflag(arch_flags);
+        conf.cxxflag(arch_flags);
+        conf.env("ARCH", arch);
+
+        // General iOS specific configurations
+        conf.disable("crypttests", None);
+        conf.cflag("-D_FORTIFY_SOURCE=2");
+    }
+
+    if build_target::target_os().unwrap() == build_target::Os::from_str("tvos") {
+        // Check whether we have set TVOS_DEPLOYMENT_TARGET to ensure we support older tvOS
+        let ios_target = env::var("TVOS_DEPLOYMENT_TARGET")
+            .expect("Must have set minimum supported tvOS version");
+        if ios_target.is_empty() {
+            panic!("TVOS_DEPLOYMENT_TARGET is empty")
+        }
+
+        // Build options for tvos
+        let (chost, arch_flags, arch) = match build_target::target_arch().unwrap() {
+            build_target::Arch::AARCH64 => ("arm64-apple-ios", "-O3", "arm64"),
+            _ => panic!("Unsupported build_target for tvos"),
+        };
+
+        // Per arch configurations
+        conf.config_option("host", Some(chost));
+        conf.cflag(arch_flags);
+        conf.cxxflag(arch_flags);
+        conf.env("ARCH", arch);
+
+        // General iOS specific configurations
+        conf.disable("crypttests", None);
+        conf.cflag("-D_FORTIFY_SOURCE=2");
+    }
+
     // Build and return the config
     conf.build()
 }
