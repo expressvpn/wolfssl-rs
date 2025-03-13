@@ -174,10 +174,13 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
             conf.disable("sp-asm", None);
         }
         build_target::Arch::X86_64 => {
-            // Enable Intel ASM optmisations
-            conf.enable("intelasm", None);
-            // Enable AES hardware acceleration
-            conf.enable("aesni", None);
+            // We don't need these build flag for iOS simulator
+            if build_target::target_os().unwrap() != build_target::Os::iOs {
+                // Enable Intel ASM optmisations
+                conf.enable("intelasm", None);
+                // Enable AES hardware acceleration
+                conf.enable("aesni", None);
+            }
         }
         _ => {}
     }
@@ -237,6 +240,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         // Build options for iOS
         let (chost, arch_flags, arch) = match build_target::target_arch().unwrap() {
             build_target::Arch::AARCH64 => ("arm64-apple-ios", "-O3", "arm64"),
+            build_target::Arch::X86_64 => ("x86_64-apple-darwin", "-O3", "x86_64"),
             _ => panic!("Unsupported build_target for iOS"),
         };
 
