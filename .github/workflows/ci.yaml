@@ -164,11 +164,11 @@ jobs:
               rustup install $RUST_VERSION
               rustup default $RUST_VERSION
       - name: Install iOS platform targets
-        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
       - name: Build on iOS
         run: IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo build --release --target aarch64-apple-ios -v -v
       - name: Build on iOS Sim
-        run: IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo build --release --target aarch64-apple-ios-sim -v -v
+        run: IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo build --release --target aarch64-apple-ios-sim --target x86_64-apple-ios -v -v
   build-tvos:
     runs-on: macos-latest
     steps:
