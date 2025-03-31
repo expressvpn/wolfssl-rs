@@ -186,5 +186,5 @@ jobs:
       - name: Build on tvOS
         run: TVOS_DEPLOYMENT_TARGET=17.0 cargo +nightly-2025-01-03 build -Zbuild-std --release --target aarch64-apple-tvos -v -v
       - name: Build on tvOS Sim
-        run: TVOS_DEPLOYMENT_TARGET=17.0 cargo +nightly-2025-01-03 build -Zbuild-std --release --target aarch64-apple-tvos-sim -v -v
+        run: TVOS_DEPLOYMENT_TARGET=17.0 cargo +nightly-2025-01-03 build -Zbuild-std --release --target aarch64-apple-tvos-sim --target x86_64-apple-tvos -v -v
 
