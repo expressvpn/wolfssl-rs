@@ -9,7 +9,8 @@ concurrency:
   cancel-in-progress:  ${{ github.ref_name != 'main' }}
 
 env:
-  RUST_VERSION: 1.85.0
+  RUST_VERSION: 1.85.1
+  RUST_NIGHTLY_VERSION: nightly-2025-01-03
 
 jobs:
   ci:
@@ -152,6 +153,8 @@ jobs:
         if: steps.coverage-check.outputs.failed == 'true'
         run: exit 1
   build-ios:
+    env:
+      IPHONEOS_DEPLOYMENT_TARGET: '15.0'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -159,17 +162,18 @@ jobs:
         run: HOMEBREW_NO_AUTO_UPDATE=1 brew install autoconf automake libtool
       - name: Fetch WolfSSL
         run: git submodule update --init
-      - name: Update Rust version
-        run: | 
-              rustup install $RUST_VERSION
-              rustup default $RUST_VERSION
-      - name: Install iOS platform targets
-        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: $RUST_VERSION
+          target: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios
       - name: Build on iOS
-        run: IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo build --release --target aarch64-apple-ios -v -v
+        run: cargo build --release --target aarch64-apple-ios -v -v
       - name: Build on iOS Sim
-        run: IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo build --release --target aarch64-apple-ios-sim --target x86_64-apple-ios -v -v
+        run: cargo build --release --target aarch64-apple-ios-sim --target x86_64-apple-ios -v -v
   build-tvos:
+    env: 
+      TVOS_DEPLOYMENT_TARGET: '17.0'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -179,12 +183,13 @@ jobs:
         run: git submodule update --init
       # We would need to build the tvOS with nightly feature (-Zbuild-std) as `aarch64-apple-tvos` is a tier 3 target and does not support building host tools.
       # Since it forces us to use nightly toolchain, we download the nightly for $RUST_VERSION on the specific archieve date from https://github.com/oxalica/rust-overlay/tree/master/manifests/nightly/2025
-      - name: Setup Rust toolchain for nightly feature
-        run: |
-              rustup toolchain install nightly-2025-01-03
-              rustup component add rust-src --toolchain nightly-2025-01-03-aarch64-apple-darwin
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: $RUST_NIGHTLY_VERSION
+          components: rust-src
       - name: Build on tvOS
-        run: TVOS_DEPLOYMENT_TARGET=17.0 cargo +nightly-2025-01-03 build -Zbuild-std --release --target aarch64-apple-tvos -v -v
+        run: cargo +$RUST_NIGHTLY_VERSION build -Zbuild-std --release --target aarch64-apple-tvos -v -v
       - name: Build on tvOS Sim
-        run: TVOS_DEPLOYMENT_TARGET=17.0 cargo +nightly-2025-01-03 build -Zbuild-std --release --target aarch64-apple-tvos-sim -v -v
+        run: cargo +$RUST_NIGHTLY_VERSION build -Zbuild-std --release --target aarch64-apple-tvos-sim --target x86_64-apple-tvos -v -v
 

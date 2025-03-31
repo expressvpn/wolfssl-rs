@@ -266,6 +266,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         // Build options for tvos
         let (chost, arch_flags, arch) = match build_target::target_arch().unwrap() {
             build_target::Arch::AARCH64 => ("arm64-apple-ios", "-O3", "arm64"),
+            build_target::Arch::X86_64 => ("x86_64-apple-darwin", "-O3", "x86_64"), // for tvOS simulator
             _ => panic!("Unsupported build_target for tvos"),
         };
 
@@ -275,7 +276,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         conf.cxxflag(arch_flags);
         conf.env("ARCH", arch);
 
-        // General iOS specific configurations
+        // General tvOS specific configurations
         conf.disable("crypttests", None);
         conf.cflag("-D_FORTIFY_SOURCE=2");
     }
