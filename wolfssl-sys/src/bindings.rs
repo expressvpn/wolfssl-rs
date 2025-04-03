@@ -18,6 +18,7 @@ pub const WOLFSSL_ERROR_WANT_READ_c_int: c_int = WOLFSSL_ERROR_WANT_READ as c_in
 pub const WOLFSSL_ERROR_WANT_WRITE_c_int: c_int = WOLFSSL_ERROR_WANT_WRITE as c_int;
 pub const WOLFSSL_SHUTDOWN_NOT_DONE_c_int: c_int = WOLFSSL_SHUTDOWN_NOT_DONE as c_int;
 pub const WOLFSSL_ERROR_NONE_c_int: c_int = WOLFSSL_ERROR_NONE as c_int;
+pub const WOLFSSL_ERROR_ZERO_RETURN_c_int: c_int = WOLFSSL_ERROR_ZERO_RETURN as c_int;
 pub const WOLFSSL_VERIFY_NONE_c_int: c_int = WOLFSSL_VERIFY_NONE as c_int;
 pub const WOLFSSL_VERIFY_PEER_c_int: c_int = WOLFSSL_VERIFY_PEER as c_int;
 pub const WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT_c_int: c_int =

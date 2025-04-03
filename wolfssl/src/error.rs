@@ -4,6 +4,8 @@ use bytes::Bytes;
 use thiserror::Error;
 use wolfssl_sys::wolfSSL_ErrorCodes_DOMAIN_NAME_MISMATCH as WOLFSSL_ERROR_DOMAIN_NAME_MISMATCH;
 use wolfssl_sys::wolfSSL_ErrorCodes_DUPLICATE_MSG_E as WOLFSSL_ERROR_DUPLICATE_MSG_E;
+use wolfssl_sys::wolfSSL_ErrorCodes_ZERO_RETURN as WOLFSSL_ERROR_ZERO_RETURN_ALT;
+use wolfssl_sys::WOLFSSL_ERROR_ZERO_RETURN_c_int as WOLFSSL_ERROR_ZERO_RETURN;
 
 /// The `Result::Ok` for a non-blocking operation.
 #[derive(Debug)]
@@ -61,6 +63,9 @@ pub enum ErrorKind {
     /// Duplicate message error
     #[error("Duplicate message error")]
     DuplicateMessage,
+    /// Peer sent close notify alert
+    #[error("Peer sent close notify alert")]
+    PeerClosed,
     /// All other wolfssl fatal errors
     #[error("code: {code}, what: {what}")]
     Other {
@@ -79,6 +84,8 @@ impl std::convert::From<c_int> for ErrorKind {
         let this = match code {
             WOLFSSL_ERROR_DOMAIN_NAME_MISMATCH => Self::DomainNameMismatch,
             WOLFSSL_ERROR_DUPLICATE_MSG_E => Self::DuplicateMessage,
+            WOLFSSL_ERROR_ZERO_RETURN => Self::PeerClosed,
+            WOLFSSL_ERROR_ZERO_RETURN_ALT => Self::PeerClosed,
             _other => Self::Other {
                 what: wolf_error_string(code as std::ffi::c_ulong),
                 code,
