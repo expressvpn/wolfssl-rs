@@ -33,6 +33,9 @@ jobs:
     - name: Update Rust version in Earthfile
       run: sed -i -E 's/^(\s*FROM rust):(:?[0-9\.]+)$/\1:${{ steps.check-version.outputs.rust }}/g' Earthfile
 
+    - name: Update Rust version in Github action
+      run: sed -i -E 's/^(\s*RUST_VERSION:\s*)([0-9\.]+)$/\1${{ steps.check-version.outputs.rust }}/g' .github/workflows/ci.yaml
+
     - uses: peter-evans/create-pull-request@v6
       with:
         token: ${{ secrets.SERVICE_ACCOUNT_PAT }}
