@@ -410,7 +410,7 @@ impl ContextBuilder {
     /// Wraps `wolfSSL_CTX_set_verify`[0]([also][1])
     // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_set_verify
     // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#ga26c623e093cf15f81cdfc3bb26682089
-    pub fn with_verify_method(self, mode: SslVerifyMode) {
+    pub fn with_verify_method(self, mode: SslVerifyMode) -> Self {
         // SAFETY: [`wolfSSL_CTX_set_verify`][0] ([also][1]) requires a valid `ctx` pointer
         // from `wolfSSL_CTX_new()`.
         // Third parameter `verify_callback` if valid, will be called when verification fails.
@@ -419,6 +419,7 @@ impl ContextBuilder {
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_set_verify
         // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#ga26c623e093cf15f81cdfc3bb26682089
         unsafe { wolfssl_sys::wolfSSL_CTX_set_verify(self.ctx.as_ptr(), mode.into(), None) };
+        self
     }
 
     /// Finalizes a `WolfContext`.
