@@ -30,8 +30,10 @@ jobs:
         with:
           script: |
             const issue_number = ${{ steps.find_pr.outputs.pr }}
-            const owner = context.repo.owner
+            const owner = context.payload.organization.login
             const repo = context.repo.repo
+            console.log("Repo:", context.repo)
+            console.log("Owner:", context.payload.organization.login)
 
             const attached_labels = (await github.rest.issues.listLabelsOnIssue({ owner, repo, issue_number })).data
 
