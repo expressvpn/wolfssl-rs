@@ -1367,7 +1367,7 @@ mod tests {
     impl IOCallbacks for TestIOCallbacks {
         fn recv(&mut self, buf: &mut [u8]) -> IOCallbackResult<usize> {
             let mut r = self.r.lock().unwrap();
-            if r.len() == 0 {
+            if r.is_empty() {
                 return IOCallbackResult::WouldBlock;
             }
 
