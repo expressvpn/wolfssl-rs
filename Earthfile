@@ -17,7 +17,7 @@ build-deps:
     RUN rustup component add llvm-tools-preview
 
     ARG ANDROID_HOME=/opt/android/
-    ARG ANDROID_NDK_VERSION=27.0.12077973
+    ARG ANDROID_NDK_VERSION=27.2.12479018
 
     # Install android targets
     RUN rustup target add aarch64-linux-android
