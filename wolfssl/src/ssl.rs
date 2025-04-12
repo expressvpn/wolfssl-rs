@@ -170,8 +170,11 @@ pub struct Session<IOCB: IOCallbacks> {
 
     /// Box so we have a stable address to pass to FFI.
     io: Box<IOCB>,
-    /// The psk callback accesses this through a pointer stored in the session object, so we must own it here to keep it alive.
-    pre_shared_key: Option<Vec<u8>>,
+    /// The psk callback accesses this through a pointer stored in the session object, so we must
+    /// own it here to keep it alive. We put an additional Box around the Vec so that we can pass a
+    /// pointer to the Vec itself into the callback; that way the length is accessible from the
+    /// callback.
+    pre_shared_key: Option<Box<Vec<u8>>>,
 
     #[cfg(feature = "debug")]
     secret_cb: Option<Box<Tls13SecretCallbacksArg>>,
@@ -201,7 +204,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         let mut session = Self {
             ssl,
             io: Box::new(config.io),
-            pre_shared_key,
+            pre_shared_key: pre_shared_key.map(|v| Box::new(v)),
             #[cfg(feature = "debug")]
             secret_cb: Default::default(),
         };
@@ -387,10 +390,11 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         //
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
         if let Some(psk) = self.pre_shared_key.as_ref() {
+            let psk_ptr: *const Vec<u8> = &**psk;
             match unsafe {
                 wolfssl_sys::wolfSSL_set_psk_callback_ctx(
                     self.ssl.as_ptr(),
-                    psk.as_ptr() as *mut c_void,
+                    psk_ptr as *mut c_void,
                 )
             } {
                 wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
@@ -1530,6 +1534,20 @@ mod tests {
 
         // Internally this calls `try_negotiate`
         let _ = make_connected_clients();
+    }
+
+    #[test]
+    fn try_negotiate_psk_tls12() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let _ = make_connected_clients_with_method_psk(Method::TlsClientV1_3, Method::TlsServerV1_3);
+    }
+
+    #[test]
+    fn try_negotiate_psk_tls13() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let _ = make_connected_clients_with_method_psk(Method::TlsClientV1_3, Method::TlsServerV1_3);
     }
 
     #[test]
