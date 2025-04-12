@@ -1943,4 +1943,36 @@ mod tests {
         assert!(client_ssl.is_init_finished());
         assert!(server_ssl.is_init_finished());
     }
+
+    #[test_case(Method::TlsClientV1_2, Method::TlsServerV1_2 => panics "verify mac problem")]
+    #[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3 => panics "binder does not verify")]
+    fn test_wrong_psk(client_method: Method, server_method: Method) {
+        let client_ctx = ContextBuilder::new(client_method)
+            .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
+            .with_pre_shared_key(&[1, 2, 3, 4])
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        let server_ctx = ContextBuilder::new(server_method)
+            .unwrap_or_else(|e| panic!("new({server_method:?}): {e}"))
+            .with_pre_shared_key(&[4, 3, 2, 1])
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        let (client_io, server_io) = TestIOCallbacks::pair();
+
+        let mut client_ssl = client_ctx
+            .new_session(SessionConfig::new(client_io))
+            .unwrap();
+        let mut server_ssl = server_ctx
+            .new_session(SessionConfig::new(server_io))
+            .unwrap();
+
+        for _ in 0..7 {
+            let _ = client_ssl.try_negotiate().unwrap();
+            let _ = server_ssl.try_negotiate().unwrap();
+        }
+    }
 }
