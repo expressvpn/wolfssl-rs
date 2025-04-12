@@ -1361,6 +1361,8 @@ mod tests {
         "/tests/data/server_key_der_2048"
     ));
 
+    const PSK: [u8; 8] = [0, 99, 8, 34, 2, 42, 3, 5];
+
     static INIT_ENV_LOGGER: OnceLock<()> = OnceLock::new();
 
     // Panics if any I/O is attempted, use for tests where no I/O is expected
@@ -1453,6 +1455,34 @@ mod tests {
             .unwrap()
             .build();
 
+        make_connected_clients_from_contexts(client_ctx, server_ctx)
+    }
+
+    fn make_connected_clients_with_method_psk(
+        client_method: Method,
+        server_method: Method,
+    ) -> (TestClient, TestClient) {
+        let client_ctx = ContextBuilder::new(client_method)
+            .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
+            .with_pre_shared_key(&PSK)
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        let server_ctx = ContextBuilder::new(server_method)
+            .unwrap_or_else(|e| panic!("new({server_method:?}): {e}"))
+            .with_pre_shared_key(&PSK)
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        make_connected_clients_from_contexts(client_ctx, server_ctx)
+    }
+
+    fn make_connected_clients_from_contexts(
+        client_ctx: Context,
+        server_ctx: Context,
+    ) -> (TestClient, TestClient) {
         let (client_io, server_io) = TestIOCallbacks::pair();
 
         let client_read_buffer = client_io.r.clone();
