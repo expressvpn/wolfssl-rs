@@ -392,10 +392,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         if let Some(psk) = self.pre_shared_key.as_ref() {
             let psk_ptr: *const Vec<u8> = &**psk;
             match unsafe {
-                wolfssl_sys::wolfSSL_set_psk_callback_ctx(
-                    self.ssl.as_ptr(),
-                    psk_ptr as *mut c_void,
-                )
+                wolfssl_sys::wolfSSL_set_psk_callback_ctx(self.ssl.as_ptr(), psk_ptr as *mut c_void)
             } {
                 wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
                 e => Err(Error::fatal(e)),
@@ -1540,14 +1537,16 @@ mod tests {
     fn try_negotiate_psk_tls12() {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let _ = make_connected_clients_with_method_psk(Method::TlsClientV1_2, Method::TlsServerV1_2);
+        let _ =
+            make_connected_clients_with_method_psk(Method::TlsClientV1_2, Method::TlsServerV1_2);
     }
 
     #[test]
     fn try_negotiate_psk_tls13() {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let _ = make_connected_clients_with_method_psk(Method::TlsClientV1_3, Method::TlsServerV1_3);
+        let _ =
+            make_connected_clients_with_method_psk(Method::TlsClientV1_3, Method::TlsServerV1_3);
     }
 
     #[test]
