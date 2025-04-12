@@ -2,10 +2,13 @@ use crate::{
     callback::IOCallbacks,
     error::{Error, Result},
     ssl::{Session, SessionConfig},
-    CurveGroup, Method, NewSessionError, RootCertificate, Secret, SslVerifyMode,
+    CurveGroup, Method, NewSessionError, RootCertificate, Secret, SslVerifyMode, PSK_MAX_LENGTH,
 };
-use std::os::raw::c_int;
-use std::ptr::NonNull;
+use std::{
+    ffi::c_void,
+    os::raw::{c_int, c_uint},
+    ptr::NonNull,
+};
 use thiserror::Error;
 
 /// Produces a [`Context`] once built.
@@ -13,6 +16,7 @@ use thiserror::Error;
 pub struct ContextBuilder {
     ctx: NonNull<wolfssl_sys::WOLFSSL_CTX>,
     method: Method,
+    pre_shared_key: Option<Vec<u8>>,
 }
 
 /// Error creating a [`ContextBuilder`] object.
@@ -49,7 +53,11 @@ impl ContextBuilder {
         let ctx = unsafe { wolfssl_sys::wolfSSL_CTX_new(method_fn.as_ptr()) };
         let ctx = NonNull::new(ctx).ok_or(NewContextBuilderError::CreateFailed)?;
 
-        Ok(Self { ctx, method })
+        Ok(Self {
+            ctx,
+            method,
+            pre_shared_key: None,
+        })
     }
 
     /// When `cond` is True call fallible `func` on `Self`
@@ -393,6 +401,115 @@ impl ContextBuilder {
         }
     }
 
+    unsafe extern "C" fn psk_server_callback(
+        ssl: *mut wolfssl_sys::WOLFSSL,
+        _identity: *const i8,
+        key_output: *mut u8,
+        max_key_length: c_uint,
+    ) -> c_uint {
+        debug_assert!(!ssl.is_null());
+        debug_assert!(!key_output.is_null());
+
+        // SAFETY: `wolfSSL_get_psk_callback_ctx` is undocumented, but the implementation simply
+        // gets a field out of the WOLFSSL object.
+        let stored_key_ptr: *const c_void =
+            unsafe { wolfssl_sys::wolfSSL_get_psk_callback_ctx(ssl) };
+        // SAFETY: This is written in `Session::new_from_wolfssl_pointer` as a pointer to a boxed
+        // Vec<u8>, which should have stable address. The boxed Vec<u8> is stored until the end of
+        // the session and hence should be alive.
+        let stored_key: &Vec<u8> = unsafe { &*(stored_key_ptr as *const Vec<u8>) };
+
+        // this really shouldn't happen because we check the length of the keys are less than
+        // wolfssl's maximum when setting the key.
+        if stored_key.len() > max_key_length.try_into().unwrap() {
+            // this callback returns the length of the key on success, and 0 on error.
+            // PR REVIEW: we could panic here instead?
+            return 0;
+        }
+
+        // SAFETY: we've verified that the vec length is <= max_key_length, so we won't overrun
+        // the buffer provided to us.
+        unsafe {
+            std::ptr::copy(stored_key.as_ptr(), key_output, stored_key.len());
+        }
+
+        stored_key.len().try_into().unwrap()
+    }
+
+    unsafe extern "C" fn psk_client_callback(
+        ssl: *mut wolfssl_sys::WOLFSSL,
+        _hint: *const i8,
+        _identity: *mut i8,
+        _max_identity_length: c_uint,
+        key_output: *mut u8,
+        max_key_length: c_uint,
+    ) -> c_uint {
+        debug_assert!(!ssl.is_null());
+        debug_assert!(!key_output.is_null());
+
+        // SAFETY: See `psk_server_callback`
+        let stored_key_ptr: *const c_void =
+            unsafe { wolfssl_sys::wolfSSL_get_psk_callback_ctx(ssl) };
+        // SAFETY: See `psk_server_callback`
+        let stored_key: &Vec<u8> = unsafe { &*(stored_key_ptr as *const Vec<u8>) };
+
+        if stored_key.len() > max_key_length.try_into().unwrap() {
+            return 0;
+        }
+
+        // SAFETY: See `psk_server_callback`
+        unsafe {
+            std::ptr::copy(stored_key.as_ptr(), key_output, stored_key.len());
+        }
+
+        stored_key.len().try_into().unwrap()
+    }
+
+    /// Use a pre-shared key for authentication
+    ///
+    /// The given key buffer must be <=64 bytes long. This method installs a callback using either `wolfSSL_CTX_TODO put full name of fn
+    pub fn with_pre_shared_key(self, psk: &[u8]) -> Self {
+        // PR REVIEW: The `Error` struct as it exists right now represents only wolfSSL errors -- not custom errors. Do we want to expand it to also include PskTooLong or keep the panic?
+        assert!(
+            psk.len() <= PSK_MAX_LENGTH,
+            "Pre-shared key had length {} but must be <={}",
+            psk.len(),
+            PSK_MAX_LENGTH
+        );
+
+        if self.method.is_server() {
+            // SAFETY: `wolfSSL_CTX_set_psk_server_callback` isn't properly documented. It seems the
+            // only requirement is that the context is valid and the callback will be alive
+            // throughout the lifetime of the context and any created sessions; our callbacks are
+            // &'static.
+            unsafe {
+                wolfssl_sys::wolfSSL_CTX_set_psk_server_callback(
+                    self.ctx.as_ptr(),
+                    Some(Self::psk_server_callback),
+                );
+            };
+        } else {
+            // SAFETY: See above.
+            unsafe {
+                wolfssl_sys::wolfSSL_CTX_set_psk_client_callback(
+                    self.ctx.as_ptr(),
+                    Some(Self::psk_client_callback),
+                );
+            };
+        };
+
+        Self {
+            // this pre-shared key will be copied into the Session object. At session-creation-time,
+            // it will be installed into the session with `wolfSSL_set_psk_callback_ctx`. We could
+            // install the psk now with `wolfSSL_CTX_set_psk_callback_ctx`, but doing so would
+            // complicate memory management because we'd need to ensure that the pointer passed is
+            // valid not only throughout the current context but also any created sessions; we'd
+            // probably need an Arc<..>.
+            pre_shared_key: Some(psk.into()),
+            ..self
+        }
+    }
+
     /// Wraps `wolfSSL_CTX_UseSecureRenegotiation`
     ///
     /// NOTE: No official documentation available for this api from wolfssl
@@ -427,6 +544,7 @@ impl ContextBuilder {
         Context {
             method: self.method,
             ctx: ContextPointer(self.ctx),
+            pre_shared_key: self.pre_shared_key,
         }
     }
 }
@@ -502,6 +620,7 @@ unsafe impl Send for WolfsslPointer {}
 pub struct Context {
     method: Method,
     ctx: ContextPointer,
+    pre_shared_key: Option<Vec<u8>>,
 }
 
 impl Context {
@@ -523,7 +642,7 @@ impl Context {
 
         let ssl = WolfsslPointer(NonNull::new(ptr).ok_or(NewSessionError::CreateFailed)?);
 
-        Session::new_from_wolfssl_pointer(ssl, config)
+        Session::new_from_wolfssl_pointer(ssl, config, self.pre_shared_key.clone())
     }
 }
 

@@ -170,6 +170,8 @@ pub struct Session<IOCB: IOCallbacks> {
 
     /// Box so we have a stable address to pass to FFI.
     io: Box<IOCB>,
+    /// The psk callback accesses this through a pointer stored in the session object, so we must own it here to keep it alive.
+    pre_shared_key: Option<Vec<u8>>,
 
     #[cfg(feature = "debug")]
     secret_cb: Option<Box<Tls13SecretCallbacksArg>>,
@@ -194,10 +196,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     pub(crate) fn new_from_wolfssl_pointer(
         ssl: WolfsslPointer,
         config: SessionConfig<IOCB>,
+        pre_shared_key: Option<Vec<u8>>,
     ) -> std::result::Result<Self, NewSessionError> {
         let mut session = Self {
             ssl,
             io: Box::new(config.io),
+            pre_shared_key,
             #[cfg(feature = "debug")]
             secret_cb: Default::default(),
         };
@@ -239,6 +243,11 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         if let Some(mode) = config.ssl_verify_mode {
             session.set_verify(mode);
         }
+
+        // set_psk_callback_ctx uses the pre_shared_key stored in the session object
+        session
+            .set_psk_callback_ctx()
+            .map_err(|e| NewSessionError::SetupFailed("set_psk_callback_ctx", e))?;
 
         #[cfg(feature = "debug")]
         if let Some(keylogger) = config.keylogger {
@@ -363,6 +372,33 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             0 => false,
             1 => true,
             e => unreachable!("wolfSSL_is_init_finished: {e:?}"),
+        }
+    }
+
+    /// Set the context pointer that will be available to PSK calbacks.
+    ///
+    /// The caller is responsible for ensuring `ptr`'s target lives at least as long as the session.
+    pub(crate) fn set_psk_callback_ctx(&mut self) -> Result<()> {
+        // SAFETY: No online docs. The implementation of `wolfSSL_set_psk_callback_ctx` simply
+        // assigns to `ssl->options.psk_ctx`. Per the [Librrary design][0] access is synchronized
+        // via the requirement for `&mut self` in `WelfsslPointer::as_ptr()`
+        //
+        // The pre-shared key is guaranteed to last the lifetime of cthe
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
+        if let Some(psk) = self.pre_shared_key.as_ref() {
+            match unsafe {
+                wolfssl_sys::wolfSSL_set_psk_callback_ctx(
+                    self.ssl.as_ptr(),
+                    psk.as_ptr() as *mut c_void,
+                )
+            } {
+                wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
+                e => Err(Error::fatal(e)),
+            }
+        } else {
+            // no psk -- do nothing
+            Ok(())
         }
     }
 
