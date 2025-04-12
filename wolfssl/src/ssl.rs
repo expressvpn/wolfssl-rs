@@ -1540,7 +1540,7 @@ mod tests {
     fn try_negotiate_psk_tls12() {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let _ = make_connected_clients_with_method_psk(Method::TlsClientV1_3, Method::TlsServerV1_3);
+        let _ = make_connected_clients_with_method_psk(Method::TlsClientV1_2, Method::TlsServerV1_2);
     }
 
     #[test]
