@@ -383,8 +383,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     /// The caller is responsible for ensuring `ptr`'s target lives at least as long as the session.
     pub(crate) fn set_psk_callback_ctx(&mut self) -> Result<()> {
         // SAFETY: No online docs. The implementation of `wolfSSL_set_psk_callback_ctx` simply
-        // assigns to `ssl->options.psk_ctx`. Per the [Librrary design][0] access is synchronized
-        // via the requirement for `&mut self` in `WelfsslPointer::as_ptr()`
+        // assigns to `ssl->options.psk_ctx`. Per the [Library design][0] access is synchronized via
+        // the requirement for `&mut self` in `WelfsslPointer::as_ptr()`
         //
         // The pre-shared key is guaranteed to last the lifetime of cthe
         //

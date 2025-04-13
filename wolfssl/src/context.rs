@@ -467,7 +467,10 @@ impl ContextBuilder {
 
     /// Use a pre-shared key for authentication
     ///
-    /// The given key buffer must be <=64 bytes long. This method installs a callback using either `wolfSSL_CTX_TODO put full name of fn
+    /// The given key buffer length is limited by [`PSK_MAX_LENGTH`]. Calls either
+    /// `wolfSSL_CTX_set_psk_server_callback` or `wolfSSL_CTX_set_psk_client_callback` appropriately
+    /// using a provided callback. Later, during session constrtuction, calls
+    /// `wolfSSL_set_psk_callback_ctx` to point to make the key accessible in the callback.
     pub fn with_pre_shared_key(self, psk: &[u8]) -> Self {
         // PR REVIEW: The `Error` struct as it exists right now represents only wolfSSL errors -- not custom errors. Do we want to expand it to also include PskTooLong or keep the panic?
         assert!(
