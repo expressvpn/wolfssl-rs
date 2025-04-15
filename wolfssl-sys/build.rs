@@ -10,6 +10,7 @@ use std::env;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::fs;
 
 /**
  * Work around for bindgen creating duplicate values.
@@ -298,6 +299,11 @@ fn main() -> std::io::Result<()> {
 
     // Configure and build WolfSSL
     let wolfssl_install_dir = build_wolfssl(&wolfssl_src);
+
+    let mut config_path = PathBuf::from(&wolfssl_install_dir);
+    config_path.push("build/configure.prev");
+    let contents = fs::read_to_string(config_path)?;
+    println!("cargo::warning=WolfSsl config:{}", contents);
 
     // We want to block some macros as they are incorrectly creating duplicate values
     // https://github.com/rust-lang/rust-bindgen/issues/687
