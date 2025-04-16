@@ -170,6 +170,11 @@ pub struct Session<IOCB: IOCallbacks> {
 
     /// Box so we have a stable address to pass to FFI.
     io: Box<IOCB>,
+    /// The psk callback accesses this through a pointer stored in the session object, so we must
+    /// own it here to keep it alive. We put an additional Box around the Vec so that we can pass a
+    /// pointer to the Vec itself into the callback; that way the length is accessible from the
+    /// callback.
+    pre_shared_key: Option<Box<Vec<u8>>>,
 
     #[cfg(feature = "debug")]
     secret_cb: Option<Box<Tls13SecretCallbacksArg>>,
@@ -194,10 +199,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     pub(crate) fn new_from_wolfssl_pointer(
         ssl: WolfsslPointer,
         config: SessionConfig<IOCB>,
+        pre_shared_key: Option<Vec<u8>>,
     ) -> std::result::Result<Self, NewSessionError> {
         let mut session = Self {
             ssl,
             io: Box::new(config.io),
+            pre_shared_key: pre_shared_key.map(|v| Box::new(v)),
             #[cfg(feature = "debug")]
             secret_cb: Default::default(),
         };
@@ -239,6 +246,11 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         if let Some(mode) = config.ssl_verify_mode {
             session.set_verify(mode);
         }
+
+        // set_psk_callback_ctx uses the pre_shared_key stored in the session object
+        session
+            .set_psk_callback_ctx()
+            .map_err(|e| NewSessionError::SetupFailed("set_psk_callback_ctx", e))?;
 
         #[cfg(feature = "debug")]
         if let Some(keylogger) = config.keylogger {
@@ -363,6 +375,31 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             0 => false,
             1 => true,
             e => unreachable!("wolfSSL_is_init_finished: {e:?}"),
+        }
+    }
+
+    /// Set the context pointer that will be available to PSK calbacks.
+    ///
+    /// The caller is responsible for ensuring `ptr`'s target lives at least as long as the session.
+    pub(crate) fn set_psk_callback_ctx(&mut self) -> Result<()> {
+        // SAFETY: No online docs. The implementation of `wolfSSL_set_psk_callback_ctx` simply
+        // assigns to `ssl->options.psk_ctx`. Per the [Library design][0] access is synchronized via
+        // the requirement for `&mut self` in `WelfsslPointer::as_ptr()`
+        //
+        // The pre-shared key is guaranteed to last the lifetime of cthe
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
+        if let Some(psk) = self.pre_shared_key.as_ref() {
+            let psk_ptr: *const Vec<u8> = &**psk;
+            match unsafe {
+                wolfssl_sys::wolfSSL_set_psk_callback_ctx(self.ssl.as_ptr(), psk_ptr as *mut c_void)
+            } {
+                wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
+                e => Err(Error::fatal(e)),
+            }
+        } else {
+            // no psk -- do nothing
+            Ok(())
         }
     }
 
@@ -1325,6 +1362,8 @@ mod tests {
         "/tests/data/server_key_der_2048"
     ));
 
+    const PSK: [u8; 8] = [0, 99, 8, 34, 2, 42, 3, 5];
+
     static INIT_ENV_LOGGER: OnceLock<()> = OnceLock::new();
 
     // Panics if any I/O is attempted, use for tests where no I/O is expected
@@ -1417,6 +1456,34 @@ mod tests {
             .unwrap()
             .build();
 
+        make_connected_clients_from_contexts(client_ctx, server_ctx)
+    }
+
+    fn make_connected_clients_with_method_psk(
+        client_method: Method,
+        server_method: Method,
+    ) -> (TestClient, TestClient) {
+        let client_ctx = ContextBuilder::new(client_method)
+            .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
+            .with_pre_shared_key(&PSK)
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        let server_ctx = ContextBuilder::new(server_method)
+            .unwrap_or_else(|e| panic!("new({server_method:?}): {e}"))
+            .with_pre_shared_key(&PSK)
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        make_connected_clients_from_contexts(client_ctx, server_ctx)
+    }
+
+    fn make_connected_clients_from_contexts(
+        client_ctx: Context,
+        server_ctx: Context,
+    ) -> (TestClient, TestClient) {
         let (client_io, server_io) = TestIOCallbacks::pair();
 
         let client_read_buffer = client_io.r.clone();
@@ -1464,6 +1531,22 @@ mod tests {
 
         // Internally this calls `try_negotiate`
         let _ = make_connected_clients();
+    }
+
+    #[test]
+    fn try_negotiate_psk_tls12() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let _ =
+            make_connected_clients_with_method_psk(Method::TlsClientV1_2, Method::TlsServerV1_2);
+    }
+
+    #[test]
+    fn try_negotiate_psk_tls13() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let _ =
+            make_connected_clients_with_method_psk(Method::TlsClientV1_3, Method::TlsServerV1_3);
     }
 
     #[test]
@@ -1859,5 +1942,37 @@ mod tests {
 
         assert!(client_ssl.is_init_finished());
         assert!(server_ssl.is_init_finished());
+    }
+
+    #[test_case(Method::TlsClientV1_2, Method::TlsServerV1_2 => panics "verify mac problem")]
+    #[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3 => panics "binder does not verify")]
+    fn test_wrong_psk(client_method: Method, server_method: Method) {
+        let client_ctx = ContextBuilder::new(client_method)
+            .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
+            .with_pre_shared_key(&[1, 2, 3, 4])
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        let server_ctx = ContextBuilder::new(server_method)
+            .unwrap_or_else(|e| panic!("new({server_method:?}): {e}"))
+            .with_pre_shared_key(&[4, 3, 2, 1])
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        let (client_io, server_io) = TestIOCallbacks::pair();
+
+        let mut client_ssl = client_ctx
+            .new_session(SessionConfig::new(client_io))
+            .unwrap();
+        let mut server_ssl = server_ctx
+            .new_session(SessionConfig::new(server_io))
+            .unwrap();
+
+        for _ in 0..7 {
+            let _ = client_ssl.try_negotiate().unwrap();
+            let _ = server_ssl.try_negotiate().unwrap();
+        }
     }
 }
