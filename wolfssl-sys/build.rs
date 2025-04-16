@@ -51,6 +51,7 @@ const PATCHES: &[&str] = &[
     "fix-mlkem-get-curve-name.patch",
     "fix-kyber-get-curve-name.patch",
     "fix-kyber-prf-non-avx2.patch",
+    "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
 ];
 
 /**
