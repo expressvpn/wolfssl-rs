@@ -20,11 +20,11 @@ pub enum Aes256GcmError {
     Fatal(ErrorKind),
 }
 
-struct AesProtected(Aes);
+struct AesProtected(Box<Aes>);
 
 impl AesProtected {
     fn new() -> Result<Self, Aes256GcmError> {
-        let mut aes = MaybeUninit::<Aes>::uninit();
+        let mut aes = Box::new(MaybeUninit::<Aes>::uninit());
 
         // SAFETY: [`wc_AesInit`] have the following requirements from:
         // https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesinit
@@ -49,8 +49,13 @@ impl AesProtected {
 
     fn set_key(&mut self, key: [u8; Aes256Gcm::KEY_SIZE]) -> Result<(), Aes256GcmError> {
         // SAFETY: aes is already initialized by new()
-        let ret =
-            unsafe { wc_AesGcmSetKey(&mut self.0, key.as_ptr(), key.len() as wolfssl_sys::word32) };
+        let ret = unsafe {
+            wc_AesGcmSetKey(
+                self.0.as_mut(),
+                key.as_ptr(),
+                key.len() as wolfssl_sys::word32,
+            )
+        };
         if ret != 0 {
             return Err(Aes256GcmError::Fatal(ErrorKind::from(ret)));
         }
@@ -67,7 +72,7 @@ impl Drop for AesProtected {
         //
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesfree
         unsafe {
-            wc_AesFree(&mut self.0);
+            wc_AesFree(self.0.as_mut());
         }
     }
 }
@@ -115,7 +120,7 @@ impl Aes256Gcm {
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__AES.html#function-wc_aesgcmencrypt
         match unsafe {
             wc_AesGcmEncrypt(
-                &mut self.enc.0,
+                self.enc.0.as_mut(),
                 cipher_text.as_mut_ptr(),
                 plain_text.as_ptr(),
                 plain_text.len() as u32,
@@ -153,7 +158,7 @@ impl Aes256Gcm {
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__AES.html#function-wc_aesgcmdecrypt
         match unsafe {
             wc_AesGcmDecrypt(
-                &mut self.dec.0,
+                self.dec.0.as_mut(),
                 plain_text.as_mut_ptr(),
                 cipher_text.as_ptr(),
                 cipher_text.len() as u32,
@@ -214,7 +219,7 @@ mod tests {
     #[test]
     fn test_aes_size() {
         assert_eq!(std::mem::size_of::<Aes>(), 123728);
-        assert_eq!(std::mem::size_of::<AesProtected>(), 123728);
+        assert_eq!(std::mem::size_of::<AesProtected>(), 8);
     }
 
     #[test]
