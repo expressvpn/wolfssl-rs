@@ -8,7 +8,7 @@ use wolfssl_sys::{
 
 use crate::ErrorKind;
 
-#[derive(Clone, Error, Debug)]
+#[derive(Error, Debug)]
 /// The failure result of an operation.
 pub enum Aes256GcmError {
     /// Aes init failed
@@ -20,10 +20,62 @@ pub enum Aes256GcmError {
     Fatal(ErrorKind),
 }
 
+struct AesProtected(Aes);
+
+impl AesProtected {
+    fn new() -> Result<Self, Aes256GcmError> {
+        let mut aes = MaybeUninit::<Aes>::uninit();
+
+        // SAFETY: [`wc_AesInit`] have the following requirements from:
+        // https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesinit
+        //
+        // First argument `aes` structure should be valid mutable pointer pointing to `Aes`
+        // We create a Uninit memory and then sending the mutable pointer to satisfy it.
+        let aes_init_status =
+            unsafe { wc_AesInit(aes.as_mut_ptr(), std::ptr::null_mut(), INVALID_DEVID) };
+        if aes_init_status != 0 {
+            return Err(Aes256GcmError::AesInitFailed);
+        };
+
+        // SAFETY: Since [`wc_AesInit`][0] api returns successfully with 0, memory pointed
+        // by `aes` is now valid
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesinit
+        let aes = unsafe { aes.assume_init() };
+
+        // Since aes is init'ed, safe to construct AesProtected
+        Ok(AesProtected(aes))
+    }
+
+    fn set_key(&mut self, key: [u8; Aes256Gcm::KEY_SIZE]) -> Result<(), Aes256GcmError> {
+        // SAFETY: aes is already initialized by new()
+        let ret =
+            unsafe { wc_AesGcmSetKey(&mut self.0, key.as_ptr(), key.len() as wolfssl_sys::word32) };
+        if ret != 0 {
+            return Err(Aes256GcmError::Fatal(ErrorKind::from(ret)));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for AesProtected {
+    fn drop(&mut self) {
+        // SAFETY: Based on [`wc_AesFree`][0], the argument should be valid Aes Struct
+        // initialized by `wc_AesInit`
+        //
+        // Since we contruct AesProtected only after `wc_AesInit` call, safe to call `wc_AesFree`
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesfree
+        unsafe {
+            wc_AesFree(&mut self.0);
+        }
+    }
+}
+
 /// Struct for encrypt/decrypt using Aes256Gcm cipher
 pub struct Aes256Gcm {
-    enc: Aes,
-    dec: Aes,
+    enc: AesProtected,
+    dec: AesProtected,
 }
 
 impl Aes256Gcm {
@@ -38,91 +90,11 @@ impl Aes256Gcm {
 
     /// Creates new `Aes256`
     pub fn new(key: [u8; Self::KEY_SIZE]) -> Result<Self, Aes256GcmError> {
-        let mut enc = MaybeUninit::<Aes>::uninit();
-        let mut dec = MaybeUninit::<Aes>::uninit();
+        let mut enc = AesProtected::new()?;
+        enc.set_key(key)?;
 
-        // SAFETY: [`wc_AesInit`] have the following requirements from:
-        // https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesinit
-        //
-        // First argument `aes` structure should be valid mutable pointer pointing to `Aes`
-        // We create a Uninit memory and then sending the mutable pointer to satisfy it.
-        let enc_init_status =
-            unsafe { wc_AesInit(enc.as_mut_ptr(), std::ptr::null_mut(), INVALID_DEVID) };
-        if enc_init_status != 0 {
-            return Err(Aes256GcmError::AesInitFailed);
-        };
-
-        // SAFETY: Since [`wc_AesInit`][0] api returns successfully with 0, memory pointed
-        // by `enc` is not valid
-        //
-        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesinit
-        let mut enc = unsafe { enc.assume_init() };
-
-        // SAFETY: [`wc_AesInit`] have the following requirements from:
-        // https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesinit
-        //
-        // First argument `aes` structure should be valid mutable pointer pointing to `Aes`
-        // We create a Uninit memory and then sending the mutable pointer to satisfy it.
-        let dec_init_status =
-            unsafe { wc_AesInit(dec.as_mut_ptr(), std::ptr::null_mut(), INVALID_DEVID) };
-        if dec_init_status != 0 {
-            // SAFETY: Based on [`wc_AesFree`][0], the argument should be valid Aes Struct
-            // initialized by `wc_AesInit`
-            //
-            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesfree
-            unsafe {
-                wc_AesFree(&mut enc);
-            }
-            return Err(Aes256GcmError::AesInitFailed);
-        }
-
-        // SAFETY: Since [`wc_AesInit`][0] api returns successfully with 0, memory pointed
-        // by `dec` is not valid
-        //
-        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesinit
-        let mut dec = unsafe { dec.assume_init() };
-
-        // SAFETY: enc is already initialized
-        let ret =
-            unsafe { wc_AesGcmSetKey(&mut enc, key.as_ptr(), key.len() as wolfssl_sys::word32) };
-        if ret != 0 {
-            // SAFETY: Based on [`wc_AesFree`][0], the argument should be valid Aes Struct
-            // initialized by `wc_AesInit`
-            //
-            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesfree
-            unsafe {
-                wc_AesFree(&mut enc);
-            }
-            // SAFETY: Based on [`wc_AesFree`][0], the argument should be valid Aes Struct
-            // initialized by `wc_AesInit`
-            //
-            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesfree
-            unsafe {
-                wc_AesFree(&mut dec);
-            }
-            return Err(Aes256GcmError::Fatal(ErrorKind::from(ret)));
-        }
-
-        // SAFETY: dec is already initialized
-        let ret =
-            unsafe { wc_AesGcmSetKey(&mut dec, key.as_ptr(), key.len() as wolfssl_sys::word32) };
-        if ret != 0 {
-            // SAFETY: Based on [`wc_AesFree`][0], the argument should be valid Aes Struct
-            // initialized by `wc_AesInit`
-            //
-            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesfree
-            unsafe {
-                wc_AesFree(&mut enc);
-            }
-            // SAFETY: Based on [`wc_AesFree`][0], the argument should be valid Aes Struct
-            // initialized by `wc_AesInit`
-            //
-            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesfree
-            unsafe {
-                wc_AesFree(&mut dec);
-            }
-            return Err(Aes256GcmError::Fatal(ErrorKind::from(ret)));
-        }
+        let mut dec = AesProtected::new()?;
+        dec.set_key(key)?;
 
         Ok(Self { enc, dec })
     }
@@ -135,7 +107,7 @@ impl Aes256Gcm {
         iv: [u8; Self::IV_SIZE],
         plain_text: &[u8],
         auth_vec: &[u8],
-    ) -> Result<(BytesMut, [u8; Self::AUTHTAG_SIZE]), String> {
+    ) -> Result<(BytesMut, [u8; Self::AUTHTAG_SIZE]), Aes256GcmError> {
         let mut cipher_text = BytesMut::with_capacity(plain_text.len());
         let mut auth_tag = [0u8; Self::AUTHTAG_SIZE];
 
@@ -143,7 +115,7 @@ impl Aes256Gcm {
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__AES.html#function-wc_aesgcmencrypt
         match unsafe {
             wc_AesGcmEncrypt(
-                &mut self.dec,
+                &mut self.enc.0,
                 cipher_text.as_mut_ptr(),
                 plain_text.as_ptr(),
                 plain_text.len() as u32,
@@ -163,7 +135,7 @@ impl Aes256Gcm {
                 }
                 Ok((cipher_text, auth_tag))
             }
-            _ => Err(String::from("Encrypt failed")),
+            ret => Err(Aes256GcmError::Fatal(ErrorKind::from(ret))),
         }
     }
 
@@ -174,14 +146,14 @@ impl Aes256Gcm {
         cipher_text: &[u8],
         auth_vec: &[u8],
         auth_tag: &[u8; Self::AUTHTAG_SIZE],
-    ) -> Result<BytesMut, String> {
+    ) -> Result<BytesMut, Aes256GcmError> {
         let mut plain_text = BytesMut::with_capacity(cipher_text.len());
 
         // SAFETY: [`wc_AesGcmDecrypt`][0] have the following requirements:
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__AES.html#function-wc_aesgcmdecrypt
         match unsafe {
             wc_AesGcmDecrypt(
-                &mut self.enc,
+                &mut self.dec.0,
                 plain_text.as_mut_ptr(),
                 cipher_text.as_ptr(),
                 cipher_text.len() as u32,
@@ -201,33 +173,14 @@ impl Aes256Gcm {
                 }
                 Ok(plain_text)
             }
-            _ => Err(String::from("Decrypt failed")),
-        }
-    }
-}
-
-impl Drop for Aes256Gcm {
-    fn drop(&mut self) {
-        // SAFETY: Based on [`wc_AesFree`][0], the argument should be valid Aes Struct
-        // initialized by `wc_AesInit`
-        //
-        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesfree
-        unsafe {
-            wc_AesFree(&mut self.enc);
-        }
-        // SAFETY: Based on [`wc_AesFree`][0], the argument should be valid Aes Struct
-        // initialized by `wc_AesInit`
-        //
-        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesfree
-        unsafe {
-            wc_AesFree(&mut self.dec);
+            ret => Err(Aes256GcmError::Fatal(ErrorKind::from(ret))),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Aes256Gcm;
+    use super::{Aes, Aes256Gcm, AesProtected};
 
     const KEY: [u8; Aes256Gcm::KEY_SIZE] = [
         0xfe, 0xff, 0xe9, 0x92, 0x86, 0x65, 0x73, 0x1c, 0x6d, 0x6a, 0x8f, 0x94, 0x67, 0x30, 0x83,
@@ -257,6 +210,17 @@ mod tests {
         0x76, 0xfc, 0x6e, 0xce, 0xf, 0x4e, 0x17, 0x68, 0xcd, 0xdf, 0x88, 0x53, 0xbb, 0x2d, 0x55,
         0x1b,
     ];
+
+    #[test]
+    fn test_aes_size() {
+        assert_eq!(std::mem::size_of::<Aes>(), 123728);
+        assert_eq!(std::mem::size_of::<AesProtected>(), 123728);
+    }
+
+    #[test]
+    fn test_aes256gcm() {
+        let _ = Aes256Gcm::new(KEY).unwrap();
+    }
 
     #[test]
     fn test_aes256gcm_encrypt() {
