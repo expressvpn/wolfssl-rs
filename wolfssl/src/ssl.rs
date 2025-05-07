@@ -1,6 +1,6 @@
 use crate::{
     callback::{IOCallbackResult, IOCallbacks},
-    context::WolfsslPointer,
+    context::{PreSharedKeyCallbacks, WolfsslPointer},
     error::{Error, Poll, PollResult, Result},
     CurveGroup, ProtocolVersion, SslVerifyMode, TLS_MAX_RECORD_SIZE,
 };
@@ -10,6 +10,7 @@ use thiserror::Error;
 
 use std::{
     ffi::{c_int, c_uchar, c_ushort, c_void},
+    sync::Arc,
     time::Duration,
 };
 
@@ -174,7 +175,7 @@ pub struct Session<IOCB: IOCallbacks> {
     /// own it here to keep it alive. We put an additional Box around the Vec so that we can pass a
     /// pointer to the Vec itself into the callback; that way the length is accessible from the
     /// callback.
-    pre_shared_key: Option<Box<Vec<u8>>>,
+    pre_shared_key_callbacks: Option<Box<Arc<dyn PreSharedKeyCallbacks>>>,
 
     #[cfg(feature = "debug")]
     secret_cb: Option<Box<Tls13SecretCallbacksArg>>,
@@ -199,12 +200,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     pub(crate) fn new_from_wolfssl_pointer(
         ssl: WolfsslPointer,
         config: SessionConfig<IOCB>,
-        pre_shared_key: Option<Vec<u8>>,
+        pre_shared_key_callbacks: Option<Arc<dyn PreSharedKeyCallbacks>>,
     ) -> std::result::Result<Self, NewSessionError> {
         let mut session = Self {
             ssl,
             io: Box::new(config.io),
-            pre_shared_key: pre_shared_key.map(|v| Box::new(v)),
+            pre_shared_key_callbacks: pre_shared_key_callbacks.map(Box::new),
             #[cfg(feature = "debug")]
             secret_cb: Default::default(),
         };
@@ -384,15 +385,19 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     pub(crate) fn set_psk_callback_ctx(&mut self) -> Result<()> {
         // SAFETY: No online docs. The implementation of `wolfSSL_set_psk_callback_ctx` simply
         // assigns to `ssl->options.psk_ctx`. Per the [Library design][0] access is synchronized via
-        // the requirement for `&mut self` in `WelfsslPointer::as_ptr()`
+        // the requirement for `&mut self` in `WelfsslPointer::as_ptr()`. Casting const to mut is
+        // safe since wolfSSL never the callback ctx, and we don't either.
         //
-        // The pre-shared key is guaranteed to last the lifetime of cthe
+        // The pre-shared key callbacks are guaranteed to last the lifetime of the context
         //
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
-        if let Some(psk) = self.pre_shared_key.as_ref() {
-            let psk_ptr: *const Vec<u8> = &**psk;
+        if let Some(psk_cbs) = self.pre_shared_key_callbacks.as_ref() {
+            let psk_cbs_ptr: *const Arc<dyn PreSharedKeyCallbacks> = &**psk_cbs;
             match unsafe {
-                wolfssl_sys::wolfSSL_set_psk_callback_ctx(self.ssl.as_ptr(), psk_ptr as *mut c_void)
+                wolfssl_sys::wolfSSL_set_psk_callback_ctx(
+                    self.ssl.as_ptr(),
+                    psk_cbs_ptr as *mut c_void,
+                )
             } {
                 wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
                 e => Err(Error::fatal(e)),

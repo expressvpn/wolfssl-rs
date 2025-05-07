@@ -5,9 +5,11 @@ use crate::{
     CurveGroup, Method, NewSessionError, RootCertificate, Secret, SslVerifyMode, PSK_MAX_LENGTH,
 };
 use std::{
-    ffi::c_void,
-    os::raw::{c_int, c_uint},
+    ffi::{c_void, CStr},
+    fmt::Debug,
+    os::raw::{c_char, c_int, c_uint},
     ptr::NonNull,
+    sync::Arc,
 };
 use thiserror::Error;
 
@@ -16,7 +18,7 @@ use thiserror::Error;
 pub struct ContextBuilder {
     ctx: NonNull<wolfssl_sys::WOLFSSL_CTX>,
     method: Method,
-    pre_shared_key: Option<Vec<u8>>,
+    pre_shared_key_callbacks: Option<Arc<dyn PreSharedKeyCallbacks>>,
 }
 
 /// Error creating a [`ContextBuilder`] object.
@@ -56,7 +58,7 @@ impl ContextBuilder {
         Ok(Self {
             ctx,
             method,
-            pre_shared_key: None,
+            pre_shared_key_callbacks: None,
         })
     }
 
@@ -403,66 +405,101 @@ impl ContextBuilder {
 
     unsafe extern "C" fn psk_server_callback(
         ssl: *mut wolfssl_sys::WOLFSSL,
-        _identity: *const i8,
-        key_output: *mut u8,
-        max_key_length: c_uint,
+        identity_ptr: *const c_char,
+        key_output_ptr: *mut u8,
+        max_key_length_c_uint: c_uint,
     ) -> c_uint {
         debug_assert!(!ssl.is_null());
-        debug_assert!(!key_output.is_null());
+        debug_assert!(!identity_ptr.is_null()); // TODO: verify, can this be null in some cases?
+        debug_assert!(!key_output_ptr.is_null());
+
+        // SAFETY: identity_ptr is in fact a C string
+        let identity: &CStr = unsafe { CStr::from_ptr(identity_ptr) };
+        let max_key_length: usize = max_key_length_c_uint.try_into().unwrap();
 
         // SAFETY: `wolfSSL_get_psk_callback_ctx` is undocumented, but the implementation simply
         // gets a field out of the WOLFSSL object.
-        let stored_key_ptr: *const c_void =
+        let stored_cbs_ptr_ptr: *const c_void =
             unsafe { wolfssl_sys::wolfSSL_get_psk_callback_ctx(ssl) };
-        // SAFETY: This is written in `Session::new_from_wolfssl_pointer` as a pointer to a boxed
-        // Vec<u8>, which should have stable address. The boxed Vec<u8> is stored until the end of
-        // the session and hence should be alive.
-        let stored_key: &Vec<u8> = unsafe { &*(stored_key_ptr as *const Vec<u8>) };
+        // SAFETY: This is written in `Session::new_from_wolfssl_pointer` as a pointer to the
+        // contents of an Arc, so should have stable address. The Arc is stored until the end of the
+        // session and hence should be alive.
+        let stored_cbs: &Arc<dyn PreSharedKeyCallbacks> =
+            unsafe { &*(stored_cbs_ptr_ptr as *const Arc<dyn PreSharedKeyCallbacks>) };
 
-        // this really shouldn't happen because we check the length of the keys are less than
-        // wolfssl's maximum when setting the key.
-        if stored_key.len() > max_key_length.try_into().unwrap() {
-            // this callback returns the length of the key on success, and 0 on error.
-            // PR REVIEW: we could panic here instead?
-            return 0;
+        let maybe_key = stored_cbs.psk_server_callback(identity, max_key_length);
+        match maybe_key {
+            Some(key) => {
+                assert!(
+                    key.len() <= max_key_length,
+                    "Key length {} returned by server callback was longer than maximum {}",
+                    key.len(),
+                    max_key_length
+                );
+                // SAFETY: we've verified that the vec length is <= max_key_length, so we won't overrun
+                // the buffer provided to us.
+                unsafe { std::ptr::copy(key.as_ptr(), key_output_ptr, key.len()) };
+                key.len().try_into().unwrap()
+            }
+            None => 0,
         }
-
-        // SAFETY: we've verified that the vec length is <= max_key_length, so we won't overrun
-        // the buffer provided to us.
-        unsafe {
-            std::ptr::copy(stored_key.as_ptr(), key_output, stored_key.len());
-        }
-
-        stored_key.len().try_into().unwrap()
     }
 
     unsafe extern "C" fn psk_client_callback(
         ssl: *mut wolfssl_sys::WOLFSSL,
-        _hint: *const i8,
-        _identity: *mut i8,
-        _max_identity_length: c_uint,
+        _hint: *const c_char,
+        identity_output: *mut c_char,
+        max_identity_length_c_uint: c_uint,
         key_output: *mut u8,
-        max_key_length: c_uint,
+        max_key_length_c_uint: c_uint,
     ) -> c_uint {
         debug_assert!(!ssl.is_null());
+        debug_assert!(!identity_output.is_null());
         debug_assert!(!key_output.is_null());
 
+        let max_identity_length: usize = max_identity_length_c_uint.try_into().unwrap();
+        let max_key_length: usize = max_key_length_c_uint.try_into().unwrap();
+
         // SAFETY: See `psk_server_callback`
-        let stored_key_ptr: *const c_void =
+        let stored_cbs_ptr_ptr: *const c_void =
             unsafe { wolfssl_sys::wolfSSL_get_psk_callback_ctx(ssl) };
         // SAFETY: See `psk_server_callback`
-        let stored_key: &Vec<u8> = unsafe { &*(stored_key_ptr as *const Vec<u8>) };
+        let stored_cbs: &Arc<dyn PreSharedKeyCallbacks> =
+            unsafe { &*(stored_cbs_ptr_ptr as *const Arc<dyn PreSharedKeyCallbacks>) };
 
-        if stored_key.len() > max_key_length.try_into().unwrap() {
-            return 0;
+        let maybe_result = stored_cbs.psk_client_callback(max_identity_length, max_key_length);
+        match maybe_result {
+            Some(PreSharedKeyClientCallbackResult { identity, key }) => {
+                // TODO verify that max_identity_length is without nul byte
+                assert!(
+                    identity.count_bytes() <= max_identity_length,
+                    "Identity length {} was not less than maximum {}",
+                    identity.count_bytes(),
+                    max_identity_length
+                );
+                assert!(
+                    key.len() <= max_key_length,
+                    "Key length {} was not less than maximum {}",
+                    key.len(),
+                    max_key_length
+                );
+
+                // SAFETY: See `psk_server_callback`. The +1 is to include the nul terminator.
+                // TODO verify that the nul terminator is not included in max_identity_length
+                unsafe { std::ptr::copy(key.as_ptr(), key_output, key.len()) };
+                // SAFETY: See immediately above. +1 to account for nul terminator.
+                unsafe {
+                    std::ptr::copy(
+                        identity.as_ptr(),
+                        identity_output,
+                        identity.count_bytes() + 1,
+                    )
+                };
+
+                key.len().try_into().unwrap()
+            }
+            None => 0,
         }
-
-        // SAFETY: See `psk_server_callback`
-        unsafe {
-            std::ptr::copy(stored_key.as_ptr(), key_output, stored_key.len());
-        }
-
-        stored_key.len().try_into().unwrap()
     }
 
     /// Use a pre-shared key for authentication
@@ -480,6 +517,17 @@ impl ContextBuilder {
             PSK_MAX_LENGTH
         );
 
+        self.with_pre_shared_key_callbacks(FixedPskCallbacks::new(psk))
+    }
+
+    // PR REVIEW: Is it appropriate to use a generic argument here? Or should it just be Arc<dyn PreSharedKeyCallbacks> ?
+    /// Use pre-shared key callbacks for authentication
+    ///
+    /// Install custom client and server callbacks for pre-shared-key authentication.
+    pub fn with_pre_shared_key_callbacks<T>(self, callbacks: impl Into<Arc<T>>) -> Self
+    where
+        T: PreSharedKeyCallbacks + 'static,
+    {
         if self.method.is_server() {
             // SAFETY: `wolfSSL_CTX_set_psk_server_callback` isn't properly documented. It seems the
             // only requirement is that the context is valid and the callback will be alive
@@ -502,13 +550,7 @@ impl ContextBuilder {
         };
 
         Self {
-            // this pre-shared key will be copied into the Session object. At session-creation-time,
-            // it will be installed into the session with `wolfSSL_set_psk_callback_ctx`. We could
-            // install the psk now with `wolfSSL_CTX_set_psk_callback_ctx`, but doing so would
-            // complicate memory management because we'd need to ensure that the pointer passed is
-            // valid not only throughout the current context but also any created sessions; we'd
-            // probably need an Arc<..>.
-            pre_shared_key: Some(psk.into()),
+            pre_shared_key_callbacks: Some(callbacks.into()),
             ..self
         }
     }
@@ -547,7 +589,7 @@ impl ContextBuilder {
         Context {
             method: self.method,
             ctx: ContextPointer(self.ctx),
-            pre_shared_key: self.pre_shared_key,
+            pre_shared_key_callbacks: self.pre_shared_key_callbacks,
         }
     }
 }
@@ -623,7 +665,7 @@ unsafe impl Send for WolfsslPointer {}
 pub struct Context {
     method: Method,
     ctx: ContextPointer,
-    pre_shared_key: Option<Vec<u8>>,
+    pre_shared_key_callbacks: Option<Arc<dyn PreSharedKeyCallbacks>>,
 }
 
 impl Context {
@@ -645,7 +687,7 @@ impl Context {
 
         let ssl = WolfsslPointer(NonNull::new(ptr).ok_or(NewSessionError::CreateFailed)?);
 
-        Session::new_from_wolfssl_pointer(ssl, config, self.pre_shared_key.clone())
+        Session::new_from_wolfssl_pointer(ssl, config, self.pre_shared_key_callbacks.clone())
     }
 }
 
@@ -663,6 +705,80 @@ impl Drop for Context {
         // [2]: https://github.com/wolfSSL/wolfssl/blob/v5.6.3-stable/src/ssl.c#L31235
         // [3]: https://github.com/wolfSSL/wolfssl/blob/v5.6.3-stable/src/ssl.c#L1357
         unsafe { wolfssl_sys::wolfSSL_CTX_free(self.ctx.as_ptr()) }
+    }
+}
+
+/// Returned from the client callback in [PreSharedKeyCallbacks]
+pub struct PreSharedKeyClientCallbackResult<'a> {
+    /// Should be an empty string if you don't need multiple identities
+    identity: &'a CStr,
+    /// The pre-shared key itself.
+    key: &'a [u8],
+}
+
+/// Callbacks that are used to provide a pre-shared key to wolfSSL.
+pub trait PreSharedKeyCallbacks: Debug {
+    /// Called on the client before starting the connection.
+    ///
+    /// The installed wolfSSL callback will return 0 if None is returned from the Rust callback,
+    /// which means "fail". The wolfSSL docs are unclear what happens when the callback fails in
+    /// this way.
+    fn psk_client_callback<'a>(
+        &'a self,
+        max_identity_length: usize,
+        max_key_length: usize,
+    ) -> Option<PreSharedKeyClientCallbackResult<'a>>;
+
+    /// Called on the server after receiving the client hello.
+    ///
+    /// Receives the identity set in the client callback (which defaults to empty string). Should put the key into the key_buf.
+    fn psk_server_callback<'a>(
+        &'a self,
+        identity: &CStr,
+        max_key_length: usize,
+    ) -> Option<&'a [u8]>;
+}
+
+/// An implementation of PreSharedKeyCallbacks that uses a fixed buffer as the pre-shared key, which
+/// is the most common usecase for pre shared keys.
+#[derive(Debug)]
+struct FixedPskCallbacks {
+    key: Vec<u8>,
+}
+
+impl FixedPskCallbacks {
+    /// Construct a FixedPskCallbacks object that will always use the given key.
+    fn new<T: Into<Vec<u8>>>(key: T) -> FixedPskCallbacks {
+        FixedPskCallbacks { key: key.into() }
+    }
+}
+
+impl PreSharedKeyCallbacks for FixedPskCallbacks {
+    fn psk_client_callback<'a>(
+        &'a self,
+        _max_identity_length: usize,
+        max_key_length: usize,
+    ) -> Option<PreSharedKeyClientCallbackResult<'a>> {
+        if self.key.len() > max_key_length {
+            return None;
+        }
+
+        Some(PreSharedKeyClientCallbackResult {
+            identity: c"",
+            key: self.key.as_slice(),
+        })
+    }
+
+    fn psk_server_callback<'a>(
+        &'a self,
+        _identity: &CStr,
+        max_key_length: usize,
+    ) -> Option<&'a [u8]> {
+        if self.key.len() > max_key_length {
+            return None;
+        }
+
+        Some(self.key.as_slice())
     }
 }
 
