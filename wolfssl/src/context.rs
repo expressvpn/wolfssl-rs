@@ -18,7 +18,7 @@ use thiserror::Error;
 pub struct ContextBuilder {
     ctx: NonNull<wolfssl_sys::WOLFSSL_CTX>,
     method: Method,
-    pre_shared_key_callbacks: Option<Arc<dyn PreSharedKeyCallbacks>>,
+    pre_shared_key_callbacks: Option<Box<dyn PreSharedKeyCallbacks>>,
 }
 
 /// Error creating a [`ContextBuilder`] object.
@@ -410,7 +410,7 @@ impl ContextBuilder {
         max_key_length_c_uint: c_uint,
     ) -> c_uint {
         debug_assert!(!ssl.is_null());
-        debug_assert!(!identity_ptr.is_null()); // TODO: verify, can this be null in some cases?
+        debug_assert!(!identity_ptr.is_null()); // this is never null, it points to an array in an `Arrays` struct
         debug_assert!(!key_output_ptr.is_null());
 
         // SAFETY: identity_ptr is in fact a C string
@@ -422,10 +422,10 @@ impl ContextBuilder {
         let stored_cbs_ptr_ptr: *const c_void =
             unsafe { wolfssl_sys::wolfSSL_get_psk_callback_ctx(ssl) };
         // SAFETY: This is written in `Session::new_from_wolfssl_pointer` as a pointer to the
-        // contents of an Arc, so should have stable address. The Arc is stored until the end of the
-        // session and hence should be alive.
-        let stored_cbs: &Arc<dyn PreSharedKeyCallbacks> =
-            unsafe { &*(stored_cbs_ptr_ptr as *const Arc<dyn PreSharedKeyCallbacks>) };
+        // contents of an Box, so should have stable address. The Box is stored at least until the
+        // end of the session and hence should be alive.
+        let stored_cbs: &Box<dyn PreSharedKeyCallbacks> =
+            unsafe { &*(stored_cbs_ptr_ptr as *const Box<dyn PreSharedKeyCallbacks>) };
 
         let maybe_key = stored_cbs.psk_server_callback(identity, max_key_length);
         match maybe_key {
@@ -464,13 +464,12 @@ impl ContextBuilder {
         let stored_cbs_ptr_ptr: *const c_void =
             unsafe { wolfssl_sys::wolfSSL_get_psk_callback_ctx(ssl) };
         // SAFETY: See `psk_server_callback`
-        let stored_cbs: &Arc<dyn PreSharedKeyCallbacks> =
-            unsafe { &*(stored_cbs_ptr_ptr as *const Arc<dyn PreSharedKeyCallbacks>) };
+        let stored_cbs: &Box<dyn PreSharedKeyCallbacks> =
+            unsafe { &*(stored_cbs_ptr_ptr as *const Box<dyn PreSharedKeyCallbacks>) };
 
         let maybe_result = stored_cbs.psk_client_callback(max_identity_length, max_key_length);
         match maybe_result {
             Some(PreSharedKeyClientCallbackResult { identity, key }) => {
-                // TODO verify that max_identity_length is without nul byte
                 assert!(
                     identity.count_bytes() <= max_identity_length,
                     "Identity length {} was not less than maximum {}",
@@ -484,10 +483,13 @@ impl ContextBuilder {
                     max_key_length
                 );
 
-                // SAFETY: See `psk_server_callback`. The +1 is to include the nul terminator.
-                // TODO verify that the nul terminator is not included in max_identity_length
+                // SAFETY: See `psk_server_callback`.
                 unsafe { std::ptr::copy(key.as_ptr(), key_output, key.len()) };
                 // SAFETY: See immediately above. +1 to account for nul terminator.
+                // `max_identity_length` is not including the nul terminator (the definition of the
+                // `client_identity` field in the `Arrays` struct in wolfssl `internal.h` has length
+                // `MAX_PSK_ID_LEN + NULL_TERM_LEN`, and `MAX_PSK_ID_LEN` is what is passed as the
+                // `max_identity_length`)
                 unsafe {
                     std::ptr::copy(
                         identity.as_ptr(),
@@ -508,13 +510,13 @@ impl ContextBuilder {
     /// appropriately using a provided callback. Later, during session constrtuction, calls
     /// `wolfSSL_set_psk_callback_ctx` to point to make the key accessible in the callback.
     pub fn with_pre_shared_key(self, psk: &[u8]) -> Self {
-        self.with_pre_shared_key_callbacks(Arc::new(FixedPskCallbacks::new(psk)))
+        self.with_pre_shared_key_callbacks(Box::new(FixedPskCallbacks::new(psk)))
     }
 
     /// Use pre-shared key callbacks for authentication
     ///
     /// Install custom client and server callbacks for pre-shared-key authentication.
-    pub fn with_pre_shared_key_callbacks(self, callbacks: Arc<dyn PreSharedKeyCallbacks>) -> Self {
+    pub fn with_pre_shared_key_callbacks(self, callbacks: Box<dyn PreSharedKeyCallbacks>) -> Self {
         if self.method.is_server() {
             // SAFETY: `wolfSSL_CTX_set_psk_server_callback` isn't properly documented. It seems the
             // only requirement is that the context is valid and the callback will be alive
@@ -537,7 +539,7 @@ impl ContextBuilder {
         };
 
         Self {
-            pre_shared_key_callbacks: Some(callbacks.into()),
+            pre_shared_key_callbacks: Some(callbacks),
             ..self
         }
     }
@@ -576,7 +578,7 @@ impl ContextBuilder {
         Context {
             method: self.method,
             ctx: ContextPointer(self.ctx),
-            pre_shared_key_callbacks: self.pre_shared_key_callbacks,
+            pre_shared_key_callbacks: self.pre_shared_key_callbacks.map(Arc::new),
         }
     }
 }
@@ -652,7 +654,7 @@ unsafe impl Send for WolfsslPointer {}
 pub struct Context {
     method: Method,
     ctx: ContextPointer,
-    pre_shared_key_callbacks: Option<Arc<dyn PreSharedKeyCallbacks>>,
+    pre_shared_key_callbacks: Option<Arc<Box<dyn PreSharedKeyCallbacks>>>,
 }
 
 impl Context {
@@ -718,7 +720,8 @@ pub trait PreSharedKeyCallbacks: Debug {
 
     /// Called on the server after receiving the client hello.
     ///
-    /// Receives the identity set in the client callback (which defaults to empty string). Should put the key into the key_buf.
+    /// Receives the identity set in the client callback (which defaults to empty string). Return
+    /// the key, or None on failure.
     fn psk_server_callback(&self, identity: &CStr, max_key_length: usize) -> Option<Vec<u8>>;
 }
 
@@ -730,7 +733,7 @@ struct FixedPskCallbacks {
 }
 
 impl FixedPskCallbacks {
-    /// Construct a FixedPskCallbacks object that will always use the given key.
+    /// Construct a FixedPskCallbacks object that will always use the given key, ignoring identity.
     fn new<T: Into<Vec<u8>>>(key: T) -> FixedPskCallbacks {
         FixedPskCallbacks { key: key.into() }
     }

@@ -171,11 +171,13 @@ pub struct Session<IOCB: IOCallbacks> {
 
     /// Box so we have a stable address to pass to FFI.
     io: Box<IOCB>,
-    /// The psk callback accesses this through a pointer stored in the session object, so we must
-    /// own it here to keep it alive. We put an additional Box around the Vec so that we can pass a
-    /// pointer to the Vec itself into the callback; that way the length is accessible from the
-    /// callback.
-    pre_shared_key_callbacks: Option<Box<Arc<dyn PreSharedKeyCallbacks>>>,
+    /// The Arc is to ensure that the PreSharedKeyCallbacks live as long as any [Context] or
+    /// [Session] that is using them. We need to store a pointer to the PreSharedKeyCallbacks in the
+    /// wolfssl context object in order to be able to actually call the callbacks, but we can't
+    /// store an `&dyn PreSharedKeyCallbacks` in the wolfssl context because that's a fat pointer
+    /// and cannot be cast to a C pointer. Instead, we use an extra `Box`, and store a pointer to
+    /// that `Box` in the wolfSSL object.
+    pre_shared_key_callbacks: Option<Arc<Box<dyn PreSharedKeyCallbacks>>>,
 
     #[cfg(feature = "debug")]
     secret_cb: Option<Box<Tls13SecretCallbacksArg>>,
@@ -200,12 +202,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     pub(crate) fn new_from_wolfssl_pointer(
         ssl: WolfsslPointer,
         config: SessionConfig<IOCB>,
-        pre_shared_key_callbacks: Option<Arc<dyn PreSharedKeyCallbacks>>,
+        pre_shared_key_callbacks: Option<Arc<Box<dyn PreSharedKeyCallbacks>>>,
     ) -> std::result::Result<Self, NewSessionError> {
         let mut session = Self {
             ssl,
             io: Box::new(config.io),
-            pre_shared_key_callbacks: pre_shared_key_callbacks.map(Box::new),
+            pre_shared_key_callbacks: pre_shared_key_callbacks.clone(),
             #[cfg(feature = "debug")]
             secret_cb: Default::default(),
         };
@@ -248,7 +250,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             session.set_verify(mode);
         }
 
-        // set_psk_callback_ctx uses the pre_shared_key stored in the session object
+        // set_psk_callback_ctx uses the pre_shared_key_callbacks stored in the session object
         session
             .set_psk_callback_ctx()
             .map_err(|e| NewSessionError::SetupFailed("set_psk_callback_ctx", e))?;
@@ -380,17 +382,16 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     }
 
     /// Set the context pointer that will be available to PSK calbacks.
-    ///
-    /// The caller is responsible for ensuring `ptr`'s target lives at least as long as the session.
     pub(crate) fn set_psk_callback_ctx(&mut self) -> Result<()> {
         if let Some(psk_cbs) = self.pre_shared_key_callbacks.as_ref() {
-            let psk_cbs_ptr: *const Arc<dyn PreSharedKeyCallbacks> = &**psk_cbs;
+            let psk_cbs_ptr: *const Box<dyn PreSharedKeyCallbacks> = &**psk_cbs;
             // SAFETY: No online docs. The implementation of `wolfSSL_set_psk_callback_ctx` simply
             // assigns to `ssl->options.psk_ctx`. Per the [Library design][0] access is synchronized
             // via the requirement for `&mut self` in `WelfsslPointer::as_ptr()`. Casting const to
-            // mut is safe since wolfSSL never the callback ctx, and we don't either.
+            // mut is safe since wolfSSL never mutates the callback ctx, and we don't either.
             //
-            // The pre-shared key callbacks are guaranteed to last the lifetime of the context
+            // The pre-shared key callbacks are guaranteed to last the lifetime of the SSL object
+            // because they're stored in the Session object.
             //
             // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
             match unsafe {
@@ -1430,7 +1431,7 @@ mod tests {
         }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     struct PskTrivialIdentityCallbacks {}
 
     impl PreSharedKeyCallbacks for PskTrivialIdentityCallbacks {
@@ -1519,7 +1520,7 @@ mod tests {
         client_method: Method,
         server_method: Method,
     ) -> (TestClient, TestClient) {
-        let callbacks = Arc::new(PskTrivialIdentityCallbacks {});
+        let callbacks = Box::new(PskTrivialIdentityCallbacks {});
 
         let client_ctx = ContextBuilder::new(client_method)
             .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
