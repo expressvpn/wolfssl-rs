@@ -173,10 +173,10 @@ pub struct Session<IOCB: IOCallbacks> {
     io: Box<IOCB>,
     /// The Arc is to ensure that the PreSharedKeyCallbacks live as long as any [Context] or
     /// [Session] that is using them. We need to store a pointer to the PreSharedKeyCallbacks in the
-    /// wolfssl context object in order to be able to actually call the callbacks, but we can't
-    /// store an `&dyn PreSharedKeyCallbacks` in the wolfssl context because that's a fat pointer
-    /// and cannot be cast to a C pointer. Instead, we use an extra `Box`, and store a pointer to
-    /// that `Box` in the wolfSSL object.
+    /// WOLFSSL object in order to be able to actually call the callbacks, but we can't store an
+    /// `&dyn PreSharedKeyCallbacks` in the WOLFSSL context because that's a fat pointer and cannot
+    /// be cast to a C pointer. Instead, we use an extra `Box`, and store a pointer to that `Box` in
+    /// the WOLFSSL object.
     pre_shared_key_callbacks: Option<Arc<Box<dyn PreSharedKeyCallbacks>>>,
 
     #[cfg(feature = "debug")]

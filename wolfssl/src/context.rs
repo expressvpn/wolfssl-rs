@@ -424,6 +424,7 @@ impl ContextBuilder {
         // SAFETY: This is written in `Session::new_from_wolfssl_pointer` as a pointer to the
         // contents of an Box, so should have stable address. The Box is stored at least until the
         // end of the session and hence should be alive.
+        #[allow(clippy::borrowed_box)]
         let stored_cbs: &Box<dyn PreSharedKeyCallbacks> =
             unsafe { &*(stored_cbs_ptr_ptr as *const Box<dyn PreSharedKeyCallbacks>) };
 
@@ -464,6 +465,7 @@ impl ContextBuilder {
         let stored_cbs_ptr_ptr: *const c_void =
             unsafe { wolfssl_sys::wolfSSL_get_psk_callback_ctx(ssl) };
         // SAFETY: See `psk_server_callback`
+        #[allow(clippy::borrowed_box)]
         let stored_cbs: &Box<dyn PreSharedKeyCallbacks> =
             unsafe { &*(stored_cbs_ptr_ptr as *const Box<dyn PreSharedKeyCallbacks>) };
 
@@ -504,18 +506,21 @@ impl ContextBuilder {
         }
     }
 
-    /// Use a pre-shared key for authentication
+    /// Use a fixed pre-shared key for authentication
     ///
-    /// Calls either `wolfSSL_CTX_set_psk_server_callback` or `wolfSSL_CTX_set_psk_client_callback`
-    /// appropriately using a provided callback. Later, during session constrtuction, calls
-    /// `wolfSSL_set_psk_callback_ctx` to point to make the key accessible in the callback.
+    /// See also: [with_pre_shared_key_callbacks]
     pub fn with_pre_shared_key(self, psk: &[u8]) -> Self {
         self.with_pre_shared_key_callbacks(Box::new(FixedPskCallbacks::new(psk)))
     }
 
     /// Use pre-shared key callbacks for authentication
     ///
-    /// Install custom client and server callbacks for pre-shared-key authentication.
+    /// Install custom client and server callbacks for pre-shared-key authentication. Calls either
+    /// `wolfSSL_CTX_set_psk_server_callback` or `wolfSSL_CTX_set_psk_client_callback` appropriately
+    /// using fixed callbacks provided by wolfssl-rs. Later, during session constrtuction, calls
+    /// `wolfSSL_set_psk_callback_ctx` to point to make the user-provided safe callbacks accessible
+    /// in the fixed callback. The fixed callback does the unsafe work and delegates the interesting
+    /// logic to the safe user-provided callback.
     pub fn with_pre_shared_key_callbacks(self, callbacks: Box<dyn PreSharedKeyCallbacks>) -> Self {
         if self.method.is_server() {
             // SAFETY: `wolfSSL_CTX_set_psk_server_callback` isn't properly documented. It seems the
@@ -699,7 +704,8 @@ impl Drop for Context {
 
 /// Returned from the client callback in [PreSharedKeyCallbacks]
 pub struct PreSharedKeyClientCallbackResult {
-    /// Should be an empty string if you don't need multiple identities
+    /// Should be an empty string if you don't need multiple identities. Else, an arbitrary string
+    /// that the server will be able to read to determine which PSK to use.
     pub identity: CString,
     /// The pre-shared key itself.
     pub key: Vec<u8>,
@@ -720,8 +726,7 @@ pub trait PreSharedKeyCallbacks: Debug {
 
     /// Called on the server after receiving the client hello.
     ///
-    /// Receives the identity set in the client callback (which defaults to empty string). Return
-    /// the key, or None on failure.
+    /// Receives the identity set in the client callback. Return the key, or None on failure.
     fn psk_server_callback(&self, identity: &CStr, max_key_length: usize) -> Option<Vec<u8>>;
 }
 
