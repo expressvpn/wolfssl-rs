@@ -1523,14 +1523,14 @@ mod tests {
 
         let client_ctx = ContextBuilder::new(client_method)
             .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
-            .with_pre_shared_key_callbacks::<PskTrivialIdentityCallbacks>(callbacks.clone())
+            .with_pre_shared_key_callbacks(callbacks.clone())
             .with_secure_renegotiation()
             .unwrap()
             .build();
 
         let server_ctx = ContextBuilder::new(server_method)
             .unwrap_or_else(|e| panic!("new({server_method:?}): {e}"))
-            .with_pre_shared_key_callbacks::<PskTrivialIdentityCallbacks>(callbacks)
+            .with_pre_shared_key_callbacks(callbacks)
             .with_secure_renegotiation()
             .unwrap()
             .build();

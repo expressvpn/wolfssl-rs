@@ -517,17 +517,13 @@ impl ContextBuilder {
             PSK_MAX_LENGTH
         );
 
-        self.with_pre_shared_key_callbacks(FixedPskCallbacks::new(psk))
+        self.with_pre_shared_key_callbacks(Arc::new(FixedPskCallbacks::new(psk)))
     }
 
-    // PR REVIEW: Is it appropriate to use a generic argument here? Or should it just be Arc<dyn PreSharedKeyCallbacks> ?
     /// Use pre-shared key callbacks for authentication
     ///
     /// Install custom client and server callbacks for pre-shared-key authentication.
-    pub fn with_pre_shared_key_callbacks<T>(self, callbacks: impl Into<Arc<T>>) -> Self
-    where
-        T: PreSharedKeyCallbacks + 'static,
-    {
+    pub fn with_pre_shared_key_callbacks(self, callbacks: Arc<dyn PreSharedKeyCallbacks>) -> Self {
         if self.method.is_server() {
             // SAFETY: `wolfSSL_CTX_set_psk_server_callback` isn't properly documented. It seems the
             // only requirement is that the context is valid and the callback will be alive
