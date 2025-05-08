@@ -5,7 +5,7 @@ use crate::{
     CurveGroup, Method, NewSessionError, RootCertificate, Secret, SslVerifyMode, PSK_MAX_LENGTH,
 };
 use std::{
-    ffi::{c_void, CStr},
+    ffi::{c_void, CStr, CString},
     fmt::Debug,
     os::raw::{c_char, c_int, c_uint},
     ptr::NonNull,
@@ -709,11 +709,11 @@ impl Drop for Context {
 }
 
 /// Returned from the client callback in [PreSharedKeyCallbacks]
-pub struct PreSharedKeyClientCallbackResult<'a> {
+pub struct PreSharedKeyClientCallbackResult {
     /// Should be an empty string if you don't need multiple identities
-    identity: &'a CStr,
+    pub identity: CString,
     /// The pre-shared key itself.
-    key: &'a [u8],
+    pub key: Vec<u8>,
 }
 
 /// Callbacks that are used to provide a pre-shared key to wolfSSL.
@@ -723,20 +723,16 @@ pub trait PreSharedKeyCallbacks: Debug {
     /// The installed wolfSSL callback will return 0 if None is returned from the Rust callback,
     /// which means "fail". The wolfSSL docs are unclear what happens when the callback fails in
     /// this way.
-    fn psk_client_callback<'a>(
-        &'a self,
+    fn psk_client_callback(
+        &self,
         max_identity_length: usize,
         max_key_length: usize,
-    ) -> Option<PreSharedKeyClientCallbackResult<'a>>;
+    ) -> Option<PreSharedKeyClientCallbackResult>;
 
     /// Called on the server after receiving the client hello.
     ///
     /// Receives the identity set in the client callback (which defaults to empty string). Should put the key into the key_buf.
-    fn psk_server_callback<'a>(
-        &'a self,
-        identity: &CStr,
-        max_key_length: usize,
-    ) -> Option<&'a [u8]>;
+    fn psk_server_callback(&self, identity: &CStr, max_key_length: usize) -> Option<Vec<u8>>;
 }
 
 /// An implementation of PreSharedKeyCallbacks that uses a fixed buffer as the pre-shared key, which
@@ -754,31 +750,27 @@ impl FixedPskCallbacks {
 }
 
 impl PreSharedKeyCallbacks for FixedPskCallbacks {
-    fn psk_client_callback<'a>(
-        &'a self,
+    fn psk_client_callback(
+        &self,
         _max_identity_length: usize,
         max_key_length: usize,
-    ) -> Option<PreSharedKeyClientCallbackResult<'a>> {
+    ) -> Option<PreSharedKeyClientCallbackResult> {
         if self.key.len() > max_key_length {
             return None;
         }
 
         Some(PreSharedKeyClientCallbackResult {
-            identity: c"",
-            key: self.key.as_slice(),
+            identity: c"".into(),
+            key: self.key.clone(),
         })
     }
 
-    fn psk_server_callback<'a>(
-        &'a self,
-        _identity: &CStr,
-        max_key_length: usize,
-    ) -> Option<&'a [u8]> {
+    fn psk_server_callback(&self, _identity: &CStr, max_key_length: usize) -> Option<Vec<u8>> {
         if self.key.len() > max_key_length {
             return None;
         }
 
-        Some(self.key.as_slice())
+        Some(self.key.clone())
     }
 }
 

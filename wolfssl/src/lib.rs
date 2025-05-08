@@ -226,7 +226,7 @@ impl Method {
 
     /// Returns true if this method is a server method
     fn is_server(self) -> bool {
-        return match self {
+        match self {
             Self::DtlsClient => false,
             Self::DtlsClientV1_2 => false,
             Self::DtlsClientV1_3 => false,
@@ -239,7 +239,7 @@ impl Method {
             Self::TlsServer => true,
             Self::TlsServerV1_2 => true,
             Self::TlsServerV1_3 => true,
-        };
+        }
     }
 }
 
