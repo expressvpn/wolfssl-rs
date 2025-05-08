@@ -2,7 +2,7 @@ use crate::{
     callback::IOCallbacks,
     error::{Error, Result},
     ssl::{Session, SessionConfig},
-    CurveGroup, Method, NewSessionError, RootCertificate, Secret, SslVerifyMode, PSK_MAX_LENGTH,
+    CurveGroup, Method, NewSessionError, RootCertificate, Secret, SslVerifyMode,
 };
 use std::{
     ffi::{c_void, CStr, CString},
@@ -504,19 +504,10 @@ impl ContextBuilder {
 
     /// Use a pre-shared key for authentication
     ///
-    /// The given key buffer length is limited by [`PSK_MAX_LENGTH`]. Calls either
-    /// `wolfSSL_CTX_set_psk_server_callback` or `wolfSSL_CTX_set_psk_client_callback` appropriately
-    /// using a provided callback. Later, during session constrtuction, calls
+    /// Calls either `wolfSSL_CTX_set_psk_server_callback` or `wolfSSL_CTX_set_psk_client_callback`
+    /// appropriately using a provided callback. Later, during session constrtuction, calls
     /// `wolfSSL_set_psk_callback_ctx` to point to make the key accessible in the callback.
     pub fn with_pre_shared_key(self, psk: &[u8]) -> Self {
-        // PR REVIEW: The `Error` struct as it exists right now represents only wolfSSL errors -- not custom errors. Do we want to expand it to also include PskTooLong or keep the panic?
-        assert!(
-            psk.len() <= PSK_MAX_LENGTH,
-            "Pre-shared key had length {} but must be <={}",
-            psk.len(),
-            PSK_MAX_LENGTH
-        );
-
         self.with_pre_shared_key_callbacks(Arc::new(FixedPskCallbacks::new(psk)))
     }
 

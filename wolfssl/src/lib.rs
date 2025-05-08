@@ -40,13 +40,6 @@ use std::{os::raw::c_int, ptr::NonNull};
 /// [0]: https://www.rfc-editor.org/rfc/rfc8446#section-5.4
 const TLS_MAX_RECORD_SIZE: usize = 2usize.pow(14) + 1;
 
-/// WolfSSL limits PSK length to 64 bytes
-///
-/// Defined in the wolfSSL implementation[0]
-///
-/// [0]: https://github.com/wolfSSL/wolfssl/blob/v5.7.6-stable/wolfssl/internal.h#L1353
-const PSK_MAX_LENGTH: usize = 64;
-
 /// Wraps [`wolfSSL_Init`][0]
 ///
 /// This must be called internally by any binding which uses a library function.
