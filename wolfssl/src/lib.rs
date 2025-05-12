@@ -95,6 +95,29 @@ pub fn enable_debugging(on: bool) {
     }
 }
 
+#[cfg(feature = "debug")]
+pub use wolfssl_sys::wolfSSL_Logging_cb as WolfsslLoggingCallback;
+
+/// Wraps [`wolfSSL_SetLoggingCb`][0]. You must call [`enable_debugging`] first to enable logging at runtime before setting the callback.
+///
+/// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Logging.html#function-wolfssl_setloggingcb
+#[cfg(feature = "debug")]
+pub fn set_logging_callback(cb: WolfsslLoggingCallback) {
+    wolf_init().expect("Unable to initialize wolfSSL");
+
+    // SAFETY: [`wolfSSL_SetLoggingCb`][0] would return an error if a function pointer is not provided, or we failed to set logging callback.
+    // This function will be compiled only on enabling feature `debug`
+    //
+    // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Logging.html#function-wolfssl_setloggingcb
+    match unsafe { wolfssl_sys::wolfSSL_SetLoggingCb(cb) } {
+        0 => {}
+        wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => {
+            panic!("Function pointer is not provided")
+        }
+        e => unreachable!("wolfSSL_SetLoggingCb: {e:?}"),
+    }
+}
+
 /// TLS/DTLS protocol versions
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ProtocolVersion {
