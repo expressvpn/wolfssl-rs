@@ -1,6 +1,7 @@
 //! The `wolfssl` crate is designed to be a Rust layer built on top of
 //! the `wolfssl-sys` crate (a C passthrough crate).
 
+mod aes256;
 mod callback;
 mod chacha20_poly1305;
 mod context;
@@ -9,6 +10,7 @@ mod error;
 mod rng;
 mod ssl;
 
+pub use aes256::*;
 pub use callback::*;
 pub use chacha20_poly1305::*;
 pub use context::*;
