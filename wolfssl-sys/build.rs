@@ -169,6 +169,11 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
             if build_target::target_os().unwrap() != build_target::Os::Android {
                 conf.enable("armasm", None);
             }
+
+            // This is needed to support 4096 bits keys
+            // Otherwise, INIT_MP_INT_SIZE failed error happens
+            // Reference: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter02.html#sp_int_bits
+            conf.cflag("-DSP_INT_BITS=4096");
         }
         build_target::Arch::X86 => {
             // Disable sp asm optmisations which has been enabled earlier
