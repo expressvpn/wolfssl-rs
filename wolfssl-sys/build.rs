@@ -43,16 +43,7 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
 }
 
 const PATCH_DIR: &str = "patches";
-const PATCHES: &[&str] = &[
-    "fix-poly1305-aarch64-asm.patch",
-    "include-private-key-fields-for-kyber.patch",
-    "make-kyber-mlkem-available.patch",
-    "fix-kyber-mlkem-benchmark.patch",
-    "fix-mlkem-get-curve-name.patch",
-    "fix-kyber-get-curve-name.patch",
-    "fix-kyber-prf-non-avx2.patch",
-    "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
-];
+const PATCHES: &[&str] = &["CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch"];
 
 /**
  * Apply patch to wolfssl-src
