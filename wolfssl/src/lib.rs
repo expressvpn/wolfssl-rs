@@ -241,6 +241,24 @@ impl Method {
 
         NonNull::new(ptr)
     }
+
+    /// Returns true if this method is a server method
+    fn is_server(self) -> bool {
+        match self {
+            Self::DtlsClient => false,
+            Self::DtlsClientV1_2 => false,
+            Self::DtlsClientV1_3 => false,
+            Self::TlsClient => false,
+            Self::TlsClientV1_2 => false,
+            Self::TlsClientV1_3 => false,
+            Self::DtlsServer => true,
+            Self::DtlsServerV1_2 => true,
+            Self::DtlsServerV1_3 => true,
+            Self::TlsServer => true,
+            Self::TlsServerV1_2 => true,
+            Self::TlsServerV1_3 => true,
+        }
+    }
 }
 
 /// Corresponds to the various defined `WOLFSSL_*` curves
