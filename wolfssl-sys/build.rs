@@ -46,6 +46,7 @@ const PATCH_DIR: &str = "patches";
 const PATCHES: &[&str] = &[
     "fix-poly1305-aarch64-asm.patch",
     "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
+    "use-proper-warnings-on-MSVC.patch",
 ];
 
 /**
