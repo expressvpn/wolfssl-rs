@@ -83,6 +83,11 @@ pub struct Aes256Gcm {
     dec: AesProtected,
 }
 
+/// Safety: todo
+unsafe impl Send for Aes256Gcm {}
+/// Safety: todo
+unsafe impl Sync for Aes256Gcm {}
+
 impl Aes256Gcm {
     /// Size of key
     pub const KEY_SIZE: usize = wolfssl_sys::AES_256_KEY_SIZE as usize;
