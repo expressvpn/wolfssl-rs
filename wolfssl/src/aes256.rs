@@ -30,6 +30,21 @@ pub struct Aes256Gcm {
     valid_key: bool,
 }
 
+/// Safety: Aes256Gcm is safe to Send between threads because:
+/// - Each instance owns its WolfSSL Aes context completely (`Box<Aes>`)
+/// - The underlying Aes structure contains only per-instance cryptographic state
+/// - No shared mutable state exists between different Aes256Gcm instances
+/// - WolfSSL is built with single-threaded mode, placing thread synchronization
+///   responsibility on the application (which Rust's ownership system handles)
+unsafe impl Send for Aes256Gcm {}
+
+/// Safety: Aes256Gcm is safe to Sync (concurrent access from multiple threads) because:
+/// - Each Aes256Gcm instance maintains completely separate cryptographic state
+/// - The underlying WolfSSL Aes structure has no internal shared mutable state
+/// - Concurrent access means multiple threads each using their own Aes256Gcm instance,
+///   not multiple threads accessing the same instance (which &mut self prevents)
+unsafe impl Sync for Aes256Gcm {}
+
 impl Aes256Gcm {
     /// Size of key
     pub const KEY_SIZE: usize = wolfssl_sys::AES_256_KEY_SIZE as usize;
