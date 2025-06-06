@@ -44,14 +44,10 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
 
 const PATCH_DIR: &str = "patches";
 const PATCHES: &[&str] = &[
-    "fix-poly1305-aarch64-asm.patch",
-    "include-private-key-fields-for-kyber.patch",
-    "make-kyber-mlkem-available.patch",
-    "fix-kyber-mlkem-benchmark.patch",
-    "fix-mlkem-get-curve-name.patch",
-    "fix-kyber-get-curve-name.patch",
-    "fix-kyber-prf-non-avx2.patch",
     "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
+    "mlkem-code-point-backward-compatible.patch",
+    "fix-apple-native-cert-validation.patch",
+    "fix-dn-check-apple-native-cert-validation.patch",
 ];
 
 /**
@@ -149,11 +145,12 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
 
     if cfg!(feature = "postquantum") {
         let flags = if cfg!(feature = "kyber_only") {
-            "all,original"
+            "yes,kyber"
         } else {
-            "all,original,ml-kem"
+            conf.cflag("-DWOLFSSL_ML_KEM_USE_OLD_IDS");
+            "all"
         };
-        // Enable Kyber
+        // Enable Kyber/ML-KEM
         conf.enable("kyber", Some(flags))
             // SHA3 is needed for using WolfSSL's implementation of Kyber/ML-KEM
             .enable("sha3", None);
