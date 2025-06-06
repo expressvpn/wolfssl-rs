@@ -160,11 +160,11 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     }
 
     match build_target::target_arch().unwrap() {
-        build_target::Arch::AARCH64 => {
+        build_target::Arch::AArch64 => {
             // Enable ARM ASM optimisations
             conf.enable("armasm", None);
         }
-        build_target::Arch::ARM => {
+        build_target::Arch::Arm => {
             // Enable ARM ASM optimisations, except for android armeabi-v7a
             if build_target::target_os().unwrap() != build_target::Os::Android {
                 conf.enable("armasm", None);
@@ -181,12 +181,18 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         }
         build_target::Arch::X86_64 => {
             // We don't need these build flag for iOS simulator
-            if build_target::target_os().unwrap() != build_target::Os::iOs {
+            if build_target::target_os().unwrap() != build_target::Os::iOS {
                 // Enable Intel ASM optmisations
                 conf.enable("intelasm", None);
                 // Enable AES hardware acceleration
                 conf.enable("aesni", None);
             }
+        }
+        build_target::Arch::Riscv64 => {
+            // Enable the RISCV acceleration
+            conf.enable("riscv-asm", None);
+            // Disable sp asm optmisations on RISC-V
+            conf.disable("sp-asm", None);
         }
         _ => {}
     }
@@ -195,13 +201,13 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         // Build options for Android
         let (chost, arch_flags, arch, configure_platform) =
             match build_target::target_arch().unwrap() {
-                build_target::Arch::ARM => (
+                build_target::Arch::Arm => (
                     "armv7a-linux-androideabi",
                     "-march=armv7-a -mfloat-abi=softfp -mfpu=vfpv3-d16 -O3",
                     "armeabi-v7a",
                     "android-arm",
                 ),
-                build_target::Arch::AARCH64 => (
+                build_target::Arch::AArch64 => (
                     "aarch64-linux-android",
                     "-march=armv8-a+crypto -O3",
                     "arm64-v8a",
@@ -235,7 +241,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         conf.env("LIBS", "-llog -landroid");
     }
 
-    if build_target::target_os().unwrap() == build_target::Os::iOs {
+    if build_target::target_os().unwrap() == build_target::Os::iOS {
         // Check whether we have set IPHONEOS_DEPLOYMENT_TARGET to ensure we support older iOS
         let ios_target = env::var("IPHONEOS_DEPLOYMENT_TARGET")
             .expect("Must have set minimum supported iOS version");
@@ -245,7 +251,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
 
         // Build options for iOS
         let (chost, arch_flags, arch) = match build_target::target_arch().unwrap() {
-            build_target::Arch::AARCH64 => ("arm64-apple-ios", "-O3", "arm64"),
+            build_target::Arch::AArch64 => ("arm64-apple-ios", "-O3", "arm64"),
             build_target::Arch::X86_64 => ("x86_64-apple-darwin", "-O3", "x86_64"),
             _ => panic!("Unsupported build_target for iOS"),
         };
@@ -271,7 +277,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
 
         // Build options for tvos
         let (chost, arch_flags, arch) = match build_target::target_arch().unwrap() {
-            build_target::Arch::AARCH64 => ("arm64-apple-ios", "-O3", "arm64"),
+            build_target::Arch::AArch64 => ("arm64-apple-ios", "-O3", "arm64"),
             build_target::Arch::X86_64 => ("x86_64-apple-darwin", "-O3", "x86_64"), // for tvOS simulator
             _ => panic!("Unsupported build_target for tvos"),
         };
