@@ -43,7 +43,10 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
 }
 
 const PATCH_DIR: &str = "patches";
-const PATCHES: &[&str] = &["CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch"];
+const PATCHES: &[&str] = &[
+    "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
+    "mlkem-code-point-backward-compatible.patch",
+];
 
 /**
  * Apply patch to wolfssl-src
@@ -142,6 +145,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         let flags = if cfg!(feature = "kyber_only") {
             "yes,kyber"
         } else {
+            conf.cflag("-DWOLFSSL_ML_KEM_USE_OLD_IDS");
             "all"
         };
         // Enable Kyber/ML-KEM
