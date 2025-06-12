@@ -193,6 +193,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
             conf.enable("riscv-asm", None);
             // Disable sp asm optmisations on RISC-V
             conf.disable("sp-asm", None);
+            // Stop frame pointer s0 in RISC-V from being contested
+            conf.cflag("-fomit-frame-pointer");
         }
         _ => {}
     }
