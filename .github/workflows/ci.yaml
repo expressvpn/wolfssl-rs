@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [run-tests, build-release, fmt, lint, check-dependencies, build-android-release]
+        target: [run-tests, build-release, fmt, lint, check-dependencies, build-android-release, build-riscv64, test-riscv64]
     runs-on: ubuntu-latest
     env:
       EARTHLY_TOKEN: "${{ secrets.EARTHLY_TOKEN }}"
@@ -193,4 +193,3 @@ jobs:
         run: cargo +$RUST_NIGHTLY_VERSION build -Zbuild-std --release --target aarch64-apple-tvos -v -v
       - name: Build on tvOS Sim
         run: cargo +$RUST_NIGHTLY_VERSION build -Zbuild-std --release --target aarch64-apple-tvos-sim --target x86_64-apple-tvos -v -v
-
