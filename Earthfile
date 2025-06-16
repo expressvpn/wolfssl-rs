@@ -33,6 +33,13 @@ build-deps:
 
     ENV ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}
 
+build-deps-riscv64:
+    DO lib-rust+INIT --keep_fingerprints=true
+    RUN apt-get update -qq && \
+        rustup target add riscv64gc-unknown-linux-gnu && \
+        apt-get install -y gcc-riscv64-linux-gnu build-essential autoconf autotools-dev libtool-bin clang cmake qemu-system-riscv64 qemu-user-static
+    COPY --keep-ts --dir Cargo.toml Cargo.lock deny.toml wolfssl wolfssl-sys ./.cargo ./
+
 copy-src:
     FROM +build-deps
     COPY --keep-ts --dir Cargo.toml Cargo.lock deny.toml wolfssl wolfssl-sys ./
@@ -73,6 +80,14 @@ run-coverage:
 build:
     BUILD +run-tests
     BUILD +build-release
+
+build-riscv64:
+    FROM +build-deps-riscv64
+    DO lib-rust+CARGO --args="build --release --target=riscv64gc-unknown-linux-gnu"
+
+test-riscv64:
+    FROM +build-deps-riscv64
+    DO lib-rust+CARGO --args="test --release --target=riscv64gc-unknown-linux-gnu"
 
 # build-crate creates a .crate file for distribution of source code
 build-crate:
