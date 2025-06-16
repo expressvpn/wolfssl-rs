@@ -195,6 +195,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
             conf.disable("sp-asm", None);
             // Stop frame pointer s0 in RISC-V from being contested
             conf.cflag("-fomit-frame-pointer");
+            // Fix INIT_MP_INT_SIZE failed errors
+            conf.cflag("-DSP_INT_BITS=4096");
         }
         _ => {}
     }
