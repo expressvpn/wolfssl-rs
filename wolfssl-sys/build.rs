@@ -115,8 +115,9 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .enable("singlethreaded", None)
         // Enable SNI
         .enable("sni", None)
-        // Enable single precision
-        .enable("sp", None)
+        // Enable single precision 4096 bits RSA/DH support
+        // https://www.wolfssl.com/documentation/manuals/wolfssl/chapter02.html#-enable-spopt
+        .enable("sp", Some("yes,4096"))
         // Enable single precision ASM
         .enable("sp-asm", None)
         // Only build the static library
@@ -166,11 +167,6 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
             if build_target::target_os().unwrap() != build_target::Os::Android {
                 conf.enable("armasm", None);
             }
-
-            // This is needed to support 4096 bits keys
-            // Otherwise, INIT_MP_INT_SIZE failed error happens
-            // Reference: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter02.html#sp_int_bits
-            conf.cflag("-DSP_INT_BITS=4096");
         }
         build_target::Arch::X86 => {
             // Disable sp asm optmisations which has been enabled earlier
