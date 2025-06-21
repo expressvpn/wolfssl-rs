@@ -466,6 +466,17 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     // update encryption keys). This can be seen in
     // [`Self::trigger_update_keys`].
     pub fn try_write(&mut self, data_in: &mut BytesMut) -> PollResult<usize> {
+        match self.try_write_slice(data_in) {
+            res @ Ok(Poll::Ready(len)) => {
+                data_in.advance(len);
+                res
+            }
+            other => other,
+        }
+    }
+
+    /// Like try_write, but reads from a simple slice instead.
+    pub fn try_write_slice(&mut self, data_in: &[u8]) -> PollResult<usize> {
         // SAFETY: [`wolfSSL_write`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
         // [Library design][2] access is synchronized via the requirement for `&mut self` in `WolfsslPointer::as_ptr()`.
         //
@@ -479,10 +490,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 data_in.len() as c_int,
             )
         } {
-            x if x > 0 => {
-                data_in.advance(x as usize);
-                Ok(Poll::Ready(x as usize))
-            }
+            x if x > 0 => Ok(Poll::Ready(x as usize)),
             x @ (0 | wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR) => {
                 match self.get_error(x) {
                     wolfssl_sys::WOLFSSL_ERROR_NONE_c_int => Ok(Poll::Ready(0)),
@@ -513,7 +521,31 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     // is no space to allow WolfSSL's internal state to advance.
     pub fn try_read(&mut self, data_out: &mut BytesMut) -> PollResult<usize> {
         let buf = data_out.spare_capacity_mut();
+        // SAFETY: the length is obviously correct
+        match unsafe { self.try_read_ptr(buf.as_mut_ptr() as *mut c_void, buf.len() as c_int) } {
+            res @ Ok(Poll::Ready(read_len)) => {
+                // SAFETY: wolfSSL told us this memory region is now initialized
+                unsafe {
+                    data_out.set_len(data_out.len() + read_len);
+                }
+                res
+            }
+            other => other,
+        }
+    }
 
+    /// Like try_read, but writes into a mutable slice instead.
+    pub fn try_read_slice(&mut self, data_out: &mut [u8]) -> PollResult<usize> {
+        // SAFETY: the length is obviously correct
+        unsafe {
+            self.try_read_ptr(
+                data_out.as_mut_ptr() as *mut c_void,
+                data_out.len() as c_int,
+            )
+        }
+    }
+
+    unsafe fn try_read_ptr(&mut self, out_ptr: *mut c_void, out_len: c_int) -> PollResult<usize> {
         // SAFETY: [`wolfSSL_read`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
         // [Library design][2] access is synchronized via the requirement for `&mut self` in `WolfsslPointer::as_ptr()`.
         // The input `buf` is a valid mutable buffer, with proper length.
@@ -521,21 +553,8 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_read
         // [1]: https://www.wolfssl.com/doxygen/group__IO.html#ga80c3ccd3c0441c77307df3afe88a5c35
         // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
-        match unsafe {
-            wolfssl_sys::wolfSSL_read(
-                self.ssl.as_ptr(),
-                buf.as_mut_ptr() as *mut c_void,
-                buf.len() as c_int,
-            )
-        } {
-            x if x > 0 => {
-                // SAFETY: Now that we've initialized this memory segment, it is safe to update the
-                // length to account for the initialized data
-                unsafe {
-                    data_out.set_len(data_out.len() + x as usize);
-                }
-                Ok(Poll::Ready(x as usize))
-            }
+        match unsafe { wolfssl_sys::wolfSSL_read(self.ssl.as_ptr(), out_ptr, out_len) } {
+            x if x > 0 => Ok(Poll::Ready(x as usize)),
             x @ (0 | wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR) => {
                 match self.get_error(x) {
                     wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
