@@ -12,7 +12,7 @@ exclude = ["wolfssl-src/**/*.pdf"] # crates.io has a size limit for publishing. 
 edition.workspace = true
 
 [build-dependencies]
-bindgen = "0.71"
+bindgen = "0.72"
 autotools = "0.2"
 build-target = "0.7.0"
 
