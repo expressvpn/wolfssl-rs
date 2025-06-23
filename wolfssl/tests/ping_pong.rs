@@ -13,9 +13,12 @@ use bytes::BytesMut;
 use test_case::test_case;
 use tokio::net::{UnixDatagram, UnixStream};
 
-const CA_CERT: &[u8] = &include!("data/ca_cert_der_2048");
-const SERVER_CERT: &[u8] = &include!("data/server_cert_der_2048");
-const SERVER_KEY: &[u8] = &include!("data/server_key_der_2048");
+const CA_CERT_2048: &[u8] = &include!("data/ca_cert_der_2048");
+const SERVER_CERT_2048: &[u8] = &include!("data/server_cert_der_2048");
+const SERVER_KEY_2048: &[u8] = &include!("data/server_key_der_2048");
+const CA_CERT_4096: &[u8] = &include!("data/ca_cert_der_4096");
+const SERVER_CERT_4096: &[u8] = &include!("data/server_cert_der_4096");
+const SERVER_KEY_4096: &[u8] = &include!("data/server_key_der_4096");
 
 #[async_trait]
 trait SockIO {
@@ -116,10 +119,18 @@ impl Tls13SecretCallbacks for KeyLogger {
     }
 }
 
-async fn client<S: SockIO>(sock: S, method: Method, exp_protocol_version: ProtocolVersion) {
+async fn client<S: SockIO>(
+    sock: S,
+    method: Method,
+    exp_protocol_version: ProtocolVersion,
+    suite_key_size: &TestSuiteKeySize,
+) {
     let sock = std::rc::Rc::new(sock);
 
-    let ca_cert = RootCertificate::Asn1Buffer(CA_CERT);
+    let ca_cert = RootCertificate::Asn1Buffer(match suite_key_size {
+        TestSuiteKeySize::Bits2048 => CA_CERT_2048,
+        TestSuiteKeySize::Bits4096 => CA_CERT_4096,
+    });
 
     let ctx = ContextBuilder::new(method)
         .expect("[Client] new ContextBuilder")
@@ -166,12 +177,26 @@ async fn client<S: SockIO>(sock: S, method: Method, exp_protocol_version: Protoc
     println!("[Client] Finished");
 }
 
-async fn server<S: SockIO>(sock: S, method: Method, exp_protocol_version: ProtocolVersion) {
+async fn server<S: SockIO>(
+    sock: S,
+    method: Method,
+    exp_protocol_version: ProtocolVersion,
+    suite_key_size: &TestSuiteKeySize,
+) {
     let sock = std::rc::Rc::new(sock);
 
-    let ca_cert = RootCertificate::Asn1Buffer(CA_CERT);
-    let cert = Secret::Asn1Buffer(SERVER_CERT);
-    let key = Secret::Asn1Buffer(SERVER_KEY);
+    let ca_cert = RootCertificate::Asn1Buffer(match suite_key_size {
+        TestSuiteKeySize::Bits2048 => CA_CERT_2048,
+        TestSuiteKeySize::Bits4096 => CA_CERT_4096,
+    });
+    let cert = Secret::Asn1Buffer(match suite_key_size {
+        TestSuiteKeySize::Bits2048 => SERVER_CERT_2048,
+        TestSuiteKeySize::Bits4096 => SERVER_CERT_4096,
+    });
+    let key = Secret::Asn1Buffer(match suite_key_size {
+        TestSuiteKeySize::Bits2048 => SERVER_KEY_2048,
+        TestSuiteKeySize::Bits4096 => SERVER_KEY_4096,
+    });
 
     let ctx = ContextBuilder::new(method)
         .expect("[Server] new ContextBuilder")
@@ -221,50 +246,102 @@ async fn server<S: SockIO>(sock: S, method: Method, exp_protocol_version: Protoc
     println!("[Server] Finished");
 }
 
-#[test_case(Method::DtlsClientV1_2, Method::DtlsServerV1_3, ProtocolVersion::Unknown => panics "record layer version error"; "client_1.2_server_1.3")]
-#[test_case(Method::DtlsClientV1_2, Method::DtlsServerV1_2, ProtocolVersion::DtlsV1_2; "client_1.2_server_1.2")]
-#[test_case(Method::DtlsClientV1_2, Method::DtlsServer, ProtocolVersion::DtlsV1_2; "client_1.2_server_any")]
-#[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_3, ProtocolVersion::DtlsV1_3; "client_1.3_server_1.3")]
-#[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_2, ProtocolVersion::Unknown => panics "record layer version error"; "client_1.3_server_1.2")]
-#[test_case(Method::DtlsClientV1_3, Method::DtlsServer, ProtocolVersion::DtlsV1_3; "client_any_1.3_server_any")]
-#[test_case(Method::DtlsClient, Method::DtlsServerV1_3, ProtocolVersion::DtlsV1_3; "client_any_server_1.3")]
+enum TestSuiteKeySize {
+    Bits2048,
+    Bits4096,
+}
+
 // TODO: WolfSSL downgrade bug
 // #[test_case(Method::DtlsClient, Method::DtlsServerV1_2; "client_server_1.2")]
-#[test_case(Method::DtlsClient, Method::DtlsServer, ProtocolVersion::DtlsV1_3; "client_any_server_any")]
+#[test_case(Method::DtlsClientV1_2, Method::DtlsServerV1_3, ProtocolVersion::Unknown, &TestSuiteKeySize::Bits2048 => panics "record layer version error"; "client_1.2_server_1.3_2048_bits")]
+#[test_case(Method::DtlsClientV1_2, Method::DtlsServerV1_2, ProtocolVersion::DtlsV1_2, &TestSuiteKeySize::Bits2048; "client_1.2_server_1.2_2048_bits")]
+#[test_case(Method::DtlsClientV1_2, Method::DtlsServer, ProtocolVersion::DtlsV1_2, &TestSuiteKeySize::Bits2048; "client_1.2_server_any_2048_bits")]
+#[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_3, ProtocolVersion::DtlsV1_3, &TestSuiteKeySize::Bits2048; "client_1.3_server_1.3_2048_bits")]
+#[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_2, ProtocolVersion::Unknown, &TestSuiteKeySize::Bits2048 => panics "record layer version error"; "client_1.3_server_1.2_2048_bits")]
+#[test_case(Method::DtlsClientV1_3, Method::DtlsServer, ProtocolVersion::DtlsV1_3, &TestSuiteKeySize::Bits2048; "client_any_1.3_server_any_2048_bits")]
+#[test_case(Method::DtlsClient, Method::DtlsServerV1_3, ProtocolVersion::DtlsV1_3, &TestSuiteKeySize::Bits2048; "client_any_server_1.3_2048_bits")]
+#[test_case(Method::DtlsClient, Method::DtlsServer, ProtocolVersion::DtlsV1_3, &TestSuiteKeySize::Bits2048; "client_any_server_any_2048_bits")]
+#[test_case(Method::DtlsClientV1_2, Method::DtlsServerV1_3, ProtocolVersion::Unknown, &TestSuiteKeySize::Bits4096 => panics "record layer version error"; "client_1.2_server_1.3_4096_bits")]
+#[test_case(Method::DtlsClientV1_2, Method::DtlsServerV1_2, ProtocolVersion::DtlsV1_2, &TestSuiteKeySize::Bits4096; "client_1.2_server_1.2_4096_bits")]
+#[test_case(Method::DtlsClientV1_2, Method::DtlsServer, ProtocolVersion::DtlsV1_2, &TestSuiteKeySize::Bits4096; "client_1.2_server_any_4096_bits")]
+#[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_3, ProtocolVersion::DtlsV1_3, &TestSuiteKeySize::Bits4096; "client_1.3_server_1.3_4096_bits")]
+#[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_2, ProtocolVersion::Unknown, &TestSuiteKeySize::Bits4096 => panics "record layer version error"; "client_1.3_server_1.2_4096_bits")]
+#[test_case(Method::DtlsClientV1_3, Method::DtlsServer, ProtocolVersion::DtlsV1_3, &TestSuiteKeySize::Bits4096; "client_any_1.3_server_any_4096_bits")]
+#[test_case(Method::DtlsClient, Method::DtlsServerV1_3, ProtocolVersion::DtlsV1_3, &TestSuiteKeySize::Bits4096; "client_any_server_1.3_4096_bits")]
+#[test_case(Method::DtlsClient, Method::DtlsServer, ProtocolVersion::DtlsV1_3, &TestSuiteKeySize::Bits4096; "client_any_server_any_4096_bits")]
 #[tokio::test]
-async fn dtls(client_method: Method, server_method: Method, exp_protocol_version: ProtocolVersion) {
+async fn dtls(
+    client_method: Method,
+    server_method: Method,
+    exp_protocol_version: ProtocolVersion,
+    suite_key_size: &TestSuiteKeySize,
+) {
     #[cfg(feature = "debug")]
     wolfssl::enable_debugging(true);
 
     // Communicate over a local datagram socket for simplicity
     let (client_sock, server_sock) = UnixDatagram::pair().expect("UnixDatagram");
 
-    let client = client(client_sock, client_method, exp_protocol_version);
-    let server = server(server_sock, server_method, exp_protocol_version);
+    let client = client(
+        client_sock,
+        client_method,
+        exp_protocol_version,
+        suite_key_size,
+    );
+    let server = server(
+        server_sock,
+        server_method,
+        exp_protocol_version,
+        suite_key_size,
+    );
 
     // Note that this runs concurrently but not in parallel
     tokio::join!(client, server);
 }
 
-#[test_case(Method::TlsClientV1_2, Method::TlsServerV1_3, ProtocolVersion::Unknown => panics "record layer version error"; "client_1.2_server_1.3")]
-#[test_case(Method::TlsClientV1_2, Method::TlsServerV1_2, ProtocolVersion::TlsV1_2; "client_1.2_server_1.2")]
-#[test_case(Method::TlsClientV1_2, Method::TlsServer, ProtocolVersion::TlsV1_2; "client_1.2_server_any")]
-#[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3, ProtocolVersion::TlsV1_3; "client_1.3_server_1.3")]
-#[test_case(Method::TlsClientV1_3, Method::TlsServerV1_2, ProtocolVersion::Unknown => panics "malformed buffer input error"; "client_1.3_server_1.2")]
-#[test_case(Method::TlsClientV1_3, Method::TlsServer, ProtocolVersion::TlsV1_3; "client_1.3_server_any")]
-#[test_case(Method::TlsClient, Method::TlsServerV1_3, ProtocolVersion::TlsV1_3; "client_any_server_1.3")]
-#[test_case(Method::TlsClient, Method::TlsServerV1_2, ProtocolVersion::TlsV1_2; "client_any_server_1.2")]
-#[test_case(Method::TlsClient, Method::TlsServer, ProtocolVersion::TlsV1_3; "client_any_server_any")]
+#[test_case(Method::TlsClientV1_2, Method::TlsServerV1_3, ProtocolVersion::Unknown, &TestSuiteKeySize::Bits2048 => panics "record layer version error"; "client_1.2_server_1.3_2048_bits")]
+#[test_case(Method::TlsClientV1_2, Method::TlsServerV1_2, ProtocolVersion::TlsV1_2, &TestSuiteKeySize::Bits2048; "client_1.2_server_1.2")]
+#[test_case(Method::TlsClientV1_2, Method::TlsServer, ProtocolVersion::TlsV1_2, &TestSuiteKeySize::Bits2048; "client_1.2_server_any_2048_bits")]
+#[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3, ProtocolVersion::TlsV1_3, &TestSuiteKeySize::Bits2048; "client_1.3_server_1.3_2048_bits")]
+#[test_case(Method::TlsClientV1_3, Method::TlsServerV1_2, ProtocolVersion::Unknown, &TestSuiteKeySize::Bits2048 => panics "malformed buffer input error"; "client_1.3_server_1.2_2048_bits")]
+#[test_case(Method::TlsClientV1_3, Method::TlsServer, ProtocolVersion::TlsV1_3, &TestSuiteKeySize::Bits2048; "client_1.3_server_any_2048_bits")]
+#[test_case(Method::TlsClient, Method::TlsServerV1_3, ProtocolVersion::TlsV1_3, &TestSuiteKeySize::Bits2048; "client_any_server_1.3_2048_bits")]
+#[test_case(Method::TlsClient, Method::TlsServerV1_2, ProtocolVersion::TlsV1_2, &TestSuiteKeySize::Bits2048; "client_any_server_1.2_2048_bits")]
+#[test_case(Method::TlsClient, Method::TlsServer, ProtocolVersion::TlsV1_3, &TestSuiteKeySize::Bits2048; "client_any_server_any_2048_bits")]
+#[test_case(Method::TlsClientV1_2, Method::TlsServerV1_3, ProtocolVersion::Unknown, &TestSuiteKeySize::Bits4096 => panics "record layer version error"; "client_1.2_server_1.3_4096_bits")]
+#[test_case(Method::TlsClientV1_2, Method::TlsServerV1_2, ProtocolVersion::TlsV1_2, &TestSuiteKeySize::Bits4096; "client_1.2_server_1.2_4096_bits")]
+#[test_case(Method::TlsClientV1_2, Method::TlsServer, ProtocolVersion::TlsV1_2, &TestSuiteKeySize::Bits4096; "client_1.2_server_any_4096_bits")]
+#[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3, ProtocolVersion::TlsV1_3, &TestSuiteKeySize::Bits4096; "client_1.3_server_1.3_4096_bits")]
+#[test_case(Method::TlsClientV1_3, Method::TlsServerV1_2, ProtocolVersion::Unknown, &TestSuiteKeySize::Bits4096 => panics "malformed buffer input error"; "client_1.3_server_1.2_4096_bits")]
+#[test_case(Method::TlsClientV1_3, Method::TlsServer, ProtocolVersion::TlsV1_3, &TestSuiteKeySize::Bits4096; "client_1.3_server_any_4096_bits")]
+#[test_case(Method::TlsClient, Method::TlsServerV1_3, ProtocolVersion::TlsV1_3, &TestSuiteKeySize::Bits4096; "client_any_server_1.3_4096_bits")]
+#[test_case(Method::TlsClient, Method::TlsServerV1_2, ProtocolVersion::TlsV1_2, &TestSuiteKeySize::Bits4096; "client_any_server_1.2_4096_bits")]
+#[test_case(Method::TlsClient, Method::TlsServer, ProtocolVersion::TlsV1_3, &TestSuiteKeySize::Bits4096; "client_any_server_any_4096_bits")]
 #[tokio::test]
-async fn tls(client_method: Method, server_method: Method, exp_protocol_version: ProtocolVersion) {
+async fn tls(
+    client_method: Method,
+    server_method: Method,
+    exp_protocol_version: ProtocolVersion,
+    suite_key_size: &TestSuiteKeySize,
+) {
     #[cfg(feature = "debug")]
     wolfssl::enable_debugging(true);
 
     // Communicate over a local stream socket for simplicity
     let (client_sock, server_sock) = UnixStream::pair().expect("UnixStream");
 
-    let client = client(client_sock, client_method, exp_protocol_version);
-    let server = server(server_sock, server_method, exp_protocol_version);
+    let client = client(
+        client_sock,
+        client_method,
+        exp_protocol_version,
+        suite_key_size,
+    );
+    let server = server(
+        server_sock,
+        server_method,
+        exp_protocol_version,
+        suite_key_size,
+    );
 
     // Note that this runs concurrently but not in parallel
     tokio::join!(client, server);
