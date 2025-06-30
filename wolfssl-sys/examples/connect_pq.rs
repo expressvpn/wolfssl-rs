@@ -69,8 +69,8 @@ fn main() {
         assert_eq!(res, ffi::WOLFSSL_SUCCESS as c_int);
 
         // Try to open a TCP stream to OQS test site - 6007
-        let stream = TcpStream::connect(format!("{site}:{port}"))
-            .expect("Couldn't connect to test site");
+        let stream =
+            TcpStream::connect(format!("{site}:{port}")).expect("Couldn't connect to test site");
 
         // Tell WolfSSL what the file descriptor is for the stream
         ffi::wolfSSL_set_fd(ssl, stream.as_raw_fd());
