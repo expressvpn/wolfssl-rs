@@ -301,7 +301,7 @@ fn main() -> std::io::Result<()> {
 
     // Apply patches
     PATCHES.iter().for_each(|&f| apply_patch(&wolfssl_src, f));
-    println!("cargo:rerun-if-changed={}", PATCH_DIR);
+    println!("cargo:rerun-if-changed={PATCH_DIR}");
 
     // Configure and build WolfSSL
     let wolfssl_install_dir = build_wolfssl(&wolfssl_src);

@@ -29,12 +29,12 @@ pub trait Tls13SecretCallbacks {
 
         random
             .iter()
-            .for_each(|i| keylog.push_str(&format!("{:02x}", i)));
+            .for_each(|i| keylog.push_str(&format!("{i:02x}")));
         keylog.push(' ');
 
         secret
             .iter()
-            .for_each(|f| keylog.push_str(&format!("{:02x}", f)));
+            .for_each(|f| keylog.push_str(&format!("{f:02x}")));
         keylog.push('\n');
 
         self.wireshark_keylog(keylog);
@@ -80,7 +80,7 @@ impl Display for Tls13Secret {
             ExporterSecret => "EXPORTER_SECRET",
             UnknownSecret(_e) => "UNKNOWN_SECRET",
         };
-        write!(f, "{}", secret)
+        write!(f, "{secret}")
     }
 }
 
