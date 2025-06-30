@@ -115,7 +115,7 @@ struct KeyLogger;
 #[cfg(feature = "debug")]
 impl Tls13SecretCallbacks for KeyLogger {
     fn wireshark_keylog(&self, secret: String) {
-        eprintln!("{}", secret);
+        eprintln!("{secret}");
     }
 }
 
@@ -154,7 +154,7 @@ async fn client<S: SockIO>(
     assert!(session.is_init_finished());
 
     let version = session.version();
-    println!("[Client] with {:?}", version);
+    println!("[Client] with {version:?}");
     assert_eq!(exp_protocol_version, version);
 
     println!("[Client] Starting ping/pong loop");
@@ -220,7 +220,7 @@ async fn server<S: SockIO>(
     assert!(session.is_init_finished());
 
     let version = session.version();
-    println!("[Server] connected with {:?}", version);
+    println!("[Server] connected with {version:?}");
     assert_eq!(exp_protocol_version, version);
 
     let mut buf = BytesMut::with_capacity(1900);

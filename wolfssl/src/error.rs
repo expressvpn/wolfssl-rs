@@ -103,7 +103,6 @@ impl std::convert::From<c_int> for ErrorKind {
                 }
             ),
             "Attempting to construct a `ErrorKind` from a non-error code {code}",
-            code = code,
         );
 
         this
