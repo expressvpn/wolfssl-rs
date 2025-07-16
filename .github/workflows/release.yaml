@@ -44,7 +44,6 @@ jobs:
     needs: check_label
     if: needs.check_label.outputs.is_release_label_attached == 'true'
     env:
-      EARTHLY_TOKEN: "${{ secrets.EARTHLY_TOKEN }}"
       CARGO_REGISTRY_TOKEN: "${{ secrets.CARGO_REGISTRY_TOKEN }}"
       FORCE_COLOR: 1
     steps:
@@ -157,7 +156,7 @@ jobs:
 
                 crates_to_publish.push({ name, version_on_file, version_on_crate_io, release_status: ":white_check_mark: Release", comment: "" })
 
-                run_command_stream(["earthly", "--push", "--ci", "--org", "expressvpn", "--satellite", "wolfssl-rs", "--secret", "CARGO_REGISTRY_TOKEN", "+publish", `--PACKAGE=${name}`, `--DRY_RUN=${is_dry_run}`])
+                run_command_stream(["earthly", "--push", "--ci", "--secret", "CARGO_REGISTRY_TOKEN", "+publish", `--PACKAGE=${name}`, `--DRY_RUN=${is_dry_run}`])
                 if (!is_dry_run) {
                   await create_github_release(name, version_on_file)
                 }
