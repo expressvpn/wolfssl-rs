@@ -157,6 +157,10 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
             .enable("sha3", None);
     }
 
+    if cfg!(feature = "system_ca_certs") {
+        conf.enable("sys-ca-certs", None);
+    }
+
     match build_target::target_arch().unwrap() {
         build_target::Arch::AArch64 => {
             // Enable ARM ASM optimisations

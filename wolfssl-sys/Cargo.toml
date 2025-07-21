@@ -24,6 +24,7 @@ default = ["postquantum"]
 debug = []
 postquantum = []
 kyber_only = ["postquantum"]
+system_ca_certs = []
 
 [[example]]
 name = "connect_pq"
