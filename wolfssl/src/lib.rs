@@ -296,6 +296,7 @@ impl CurveGroup {
 }
 
 /// Defines a CA certificate
+#[derive(Debug, Copy, Clone)]
 pub enum RootCertificate<'a> {
     /// In-memory PEM buffer
     PemBuffer(&'a [u8]),
@@ -306,6 +307,7 @@ pub enum RootCertificate<'a> {
 }
 
 /// Defines either a public or private key
+#[derive(Debug, Copy, Clone)]
 pub enum Secret<'a> {
     /// In-memory ASN1 buffer
     Asn1Buffer(&'a [u8]),
@@ -319,7 +321,7 @@ pub enum Secret<'a> {
 
 /// SSL Verification method
 /// Ref: `https://www.wolfssl.com/doxygen/group__Setup.html#gaf9198658e31dd291088be18262ef2354`
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum SslVerifyMode {
     /// No verification done
     SslVerifyNone,
