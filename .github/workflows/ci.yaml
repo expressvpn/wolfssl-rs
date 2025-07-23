@@ -157,9 +157,9 @@ jobs:
           toolchain: $RUST_VERSION
           target: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios
       - name: Build on iOS
-        run: cargo build --release --target aarch64-apple-ios -v -v
+        run: cargo build --release --target aarch64-apple-ios --features system_ca_certs -v -v
       - name: Build on iOS Sim
-        run: cargo build --release --target aarch64-apple-ios-sim --target x86_64-apple-ios -v -v
+        run: cargo build --release --target aarch64-apple-ios-sim --target x86_64-apple-ios --features system_ca_certs -v -v
   build-tvos:
     env:
       TVOS_DEPLOYMENT_TARGET: '17.0'
@@ -176,6 +176,6 @@ jobs:
           toolchain: $RUST_NIGHTLY_VERSION
           components: rust-src
       - name: Build on tvOS
-        run: cargo +$RUST_NIGHTLY_VERSION build -Zbuild-std --release --target aarch64-apple-tvos -v -v
+        run: cargo +$RUST_NIGHTLY_VERSION build -Zbuild-std --release --target aarch64-apple-tvos --features system_ca_certs -v -v
       - name: Build on tvOS Sim
-        run: cargo +$RUST_NIGHTLY_VERSION build -Zbuild-std --release --target aarch64-apple-tvos-sim --target x86_64-apple-tvos -v -v
+        run: cargo +$RUST_NIGHTLY_VERSION build -Zbuild-std --release --target aarch64-apple-tvos-sim --target x86_64-apple-tvos --features system_ca_certs -v -v
