@@ -264,9 +264,12 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         // General iOS specific configurations
         conf.disable("crypttests", None);
         conf.cflag("-D_FORTIFY_SOURCE=2");
+        if cfg!(feature = "system_ca_certs") {
+            conf.cflag("-DWOLFSSL_APPLE_NATIVE_CERT_VALIDATION");
+        }
     }
 
-    if build_target::target_os().unwrap() == build_target::Os::from_str("tvos") {
+    if build_target::target_os().unwrap() == build_target::Os::TvOS {
         // Check whether we have set TVOS_DEPLOYMENT_TARGET to ensure we support older tvOS
         let ios_target = env::var("TVOS_DEPLOYMENT_TARGET")
             .expect("Must have set minimum supported tvOS version");
@@ -290,6 +293,9 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         // General tvOS specific configurations
         conf.disable("crypttests", None);
         conf.cflag("-D_FORTIFY_SOURCE=2");
+        if cfg!(feature = "system_ca_certs") {
+            conf.cflag("-DWOLFSSL_APPLE_NATIVE_CERT_VALIDATION");
+        }
     }
 
     // Build and return the config
