@@ -139,9 +139,9 @@ checksum = "1b8e56985ec62d17e9c1001dc89c88ecd7dc08e47eba5ec7c29c7b5eeecde967"
 
 [[package]]
 name = "build-target"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1055a02f38cfe1e1c9a388669c7104875c9bc5a4270c6037f468e4193d17bc96"
+checksum = "78e2ceaf91e22593e194211930aea78a41af58e49e872474ebf4335bf649aad1"
 
 [[package]]
 name = "bytes"
