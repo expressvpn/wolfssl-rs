@@ -15,15 +15,48 @@ pub enum Aes256GcmError {
     #[error("Aes Init Failed ")]
     AesInitFailed,
 
+    /// Invalid key
+    #[error("Invalid key")]
+    InvalidKey,
+
     /// Top-level errors from WolfSSL API invocations.
     #[error("Fatal: {0}")]
     Fatal(ErrorKind),
 }
 
-struct AesProtected(Box<Aes>);
+/// Struct for encrypt/decrypt using Aes256Gcm cipher
+pub struct Aes256Gcm {
+    aes: Box<Aes>,
+    valid_key: bool,
+}
 
-impl AesProtected {
-    fn new() -> Result<Self, Aes256GcmError> {
+/// Safety: Aes256Gcm is safe to Send between threads because:
+/// - Each instance owns its WolfSSL Aes context completely (`Box<Aes>`)
+/// - The underlying Aes structure contains only per-instance cryptographic state
+/// - No shared mutable state exists between different Aes256Gcm instances
+/// - WolfSSL is built with single-threaded mode, placing thread synchronization
+///   responsibility on the application (which Rust's ownership system handles)
+unsafe impl Send for Aes256Gcm {}
+
+/// Safety: Aes256Gcm is safe to Sync (concurrent access from multiple threads) because:
+/// - Each Aes256Gcm instance maintains completely separate cryptographic state
+/// - The underlying WolfSSL Aes structure has no internal shared mutable state
+/// - Concurrent access means multiple threads each using their own Aes256Gcm instance,
+///   not multiple threads accessing the same instance (which &mut self prevents)
+unsafe impl Sync for Aes256Gcm {}
+
+impl Aes256Gcm {
+    /// Size of key
+    pub const KEY_SIZE: usize = wolfssl_sys::AES_256_KEY_SIZE as usize;
+
+    /// Size of Initialisation vector
+    pub const IV_SIZE: usize = 12;
+
+    /// Size of auth tag
+    pub const AUTHTAG_SIZE: usize = 16;
+
+    /// Creates new `Aes256Gcm`
+    pub fn new() -> Result<Self, Aes256GcmError> {
         let mut aes = Box::new(MaybeUninit::<Aes>::uninit());
 
         // SAFETY: [`wc_AesInit`] have the following requirements from:
@@ -44,14 +77,18 @@ impl AesProtected {
         let aes = unsafe { aes.assume_init() };
 
         // Since aes is init'ed, safe to construct AesProtected
-        Ok(AesProtected(aes))
+        Ok(Aes256Gcm {
+            aes,
+            valid_key: false,
+        })
     }
 
-    fn set_key(&mut self, key: [u8; Aes256Gcm::KEY_SIZE]) -> Result<(), Aes256GcmError> {
+    /// Set key for Aes256Gcm cipher
+    pub fn set_key(&mut self, key: [u8; Aes256Gcm::KEY_SIZE]) -> Result<(), Aes256GcmError> {
         // SAFETY: aes is already initialized by new()
         let ret = unsafe {
             wc_AesGcmSetKey(
-                self.0.as_mut(),
+                self.aes.as_mut(),
                 key.as_ptr(),
                 key.len() as wolfssl_sys::word32,
             )
@@ -59,49 +96,8 @@ impl AesProtected {
         if ret != 0 {
             return Err(Aes256GcmError::Fatal(ErrorKind::from(ret)));
         }
+        self.valid_key = true;
         Ok(())
-    }
-}
-
-impl Drop for AesProtected {
-    fn drop(&mut self) {
-        // SAFETY: Based on [`wc_AesFree`][0], the argument should be valid Aes Struct
-        // initialized by `wc_AesInit`
-        //
-        // Since we contruct AesProtected only after `wc_AesInit` call, safe to call `wc_AesFree`
-        //
-        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesfree
-        unsafe {
-            wc_AesFree(self.0.as_mut());
-        }
-    }
-}
-
-/// Struct for encrypt/decrypt using Aes256Gcm cipher
-pub struct Aes256Gcm {
-    enc: AesProtected,
-    dec: AesProtected,
-}
-
-impl Aes256Gcm {
-    /// Size of key
-    pub const KEY_SIZE: usize = wolfssl_sys::AES_256_KEY_SIZE as usize;
-
-    /// Size of Initialisation vector
-    pub const IV_SIZE: usize = 12;
-
-    /// Size of auth tag
-    pub const AUTHTAG_SIZE: usize = 16;
-
-    /// Creates new `Aes256`
-    pub fn new(key: [u8; Self::KEY_SIZE]) -> Result<Self, Aes256GcmError> {
-        let mut enc = AesProtected::new()?;
-        enc.set_key(key)?;
-
-        let mut dec = AesProtected::new()?;
-        dec.set_key(key)?;
-
-        Ok(Self { enc, dec })
     }
 
     /// This function encrypts an input message `plain_text`, using AES-GCM cipher,
@@ -109,23 +105,27 @@ impl Aes256Gcm {
     /// and stores the generated authentication tag in the output buffer
     pub fn encrypt(
         &mut self,
-        iv: [u8; Self::IV_SIZE],
+        iv: [u8; Aes256Gcm::IV_SIZE],
         plain_text: &[u8],
         auth_vec: &[u8],
-    ) -> Result<(BytesMut, [u8; Self::AUTHTAG_SIZE]), Aes256GcmError> {
+    ) -> Result<(BytesMut, [u8; Aes256Gcm::AUTHTAG_SIZE]), Aes256GcmError> {
+        if !self.valid_key {
+            return Err(Aes256GcmError::InvalidKey);
+        }
+
         let mut cipher_text = BytesMut::with_capacity(plain_text.len());
-        let mut auth_tag = [0u8; Self::AUTHTAG_SIZE];
+        let mut auth_tag = [0u8; Aes256Gcm::AUTHTAG_SIZE];
 
         // SAFETY: [`wc_AesGcmEncrypt`][0] have the following requirements:
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__AES.html#function-wc_aesgcmencrypt
         match unsafe {
             wc_AesGcmEncrypt(
-                self.enc.0.as_mut(),
+                self.aes.as_mut(),
                 cipher_text.as_mut_ptr(),
                 plain_text.as_ptr(),
                 plain_text.len() as u32,
                 iv.as_ptr(),
-                Self::IV_SIZE as u32,
+                Aes256Gcm::IV_SIZE as u32,
                 auth_tag.as_mut_ptr(),
                 auth_tag.len() as u32,
                 auth_vec.as_ptr(),
@@ -147,23 +147,27 @@ impl Aes256Gcm {
     /// This function decrypts input `cipher_text`, using the Aes256Gcm block cipher.
     pub fn decrypt(
         &mut self,
-        iv: [u8; Self::IV_SIZE],
+        iv: [u8; Aes256Gcm::IV_SIZE],
         cipher_text: &[u8],
         auth_vec: &[u8],
-        auth_tag: &[u8; Self::AUTHTAG_SIZE],
+        auth_tag: &[u8; Aes256Gcm::AUTHTAG_SIZE],
     ) -> Result<BytesMut, Aes256GcmError> {
+        if !self.valid_key {
+            return Err(Aes256GcmError::InvalidKey);
+        }
+
         let mut plain_text = BytesMut::with_capacity(cipher_text.len());
 
         // SAFETY: [`wc_AesGcmDecrypt`][0] have the following requirements:
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__AES.html#function-wc_aesgcmdecrypt
         match unsafe {
             wc_AesGcmDecrypt(
-                self.dec.0.as_mut(),
+                self.aes.as_mut(),
                 plain_text.as_mut_ptr(),
                 cipher_text.as_ptr(),
                 cipher_text.len() as u32,
                 iv.as_ptr(),
-                Self::IV_SIZE as u32,
+                Aes256Gcm::IV_SIZE as u32,
                 auth_tag.as_ptr(),
                 auth_tag.len() as u32,
                 auth_vec.as_ptr(),
@@ -183,9 +187,25 @@ impl Aes256Gcm {
     }
 }
 
+impl Drop for Aes256Gcm {
+    fn drop(&mut self) {
+        // SAFETY: Based on [`wc_AesFree`][0], the argument should be valid Aes Struct
+        // initialized by `wc_AesInit`
+        //
+        // Since we contruct AesProtected only after `wc_AesInit` call, safe to call `wc_AesFree`
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/aes_8h.html#function-wc_aesfree
+        unsafe {
+            wc_AesFree(self.aes.as_mut());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Aes, Aes256Gcm, AesProtected};
+    use crate::Aes256GcmError;
+
+    use super::{Aes, Aes256Gcm};
 
     const KEY: [u8; Aes256Gcm::KEY_SIZE] = [
         0xfe, 0xff, 0xe9, 0x92, 0x86, 0x65, 0x73, 0x1c, 0x6d, 0x6a, 0x8f, 0x94, 0x67, 0x30, 0x83,
@@ -219,17 +239,18 @@ mod tests {
     #[test]
     fn test_aes_size() {
         assert_eq!(std::mem::size_of::<Aes>(), 123728);
-        assert_eq!(std::mem::size_of::<AesProtected>(), 8);
+        assert_eq!(std::mem::size_of::<Aes256Gcm>(), 16);
     }
 
     #[test]
     fn test_aes256gcm() {
-        let _ = Aes256Gcm::new(KEY).unwrap();
+        let _ = Aes256Gcm::new().unwrap();
     }
 
     #[test]
     fn test_aes256gcm_encrypt() {
-        let mut cipher = Aes256Gcm::new(KEY).unwrap();
+        let mut cipher = Aes256Gcm::new().unwrap();
+        cipher.set_key(KEY).unwrap();
 
         let (cipher_text, auth_tag) = cipher.encrypt(IV, &PLAIN_TEXT, AUTH_VEC).unwrap();
         assert_eq!(&cipher_text[..], &CIPHER_TEXT);
@@ -237,8 +258,23 @@ mod tests {
     }
 
     #[test]
+    fn test_aes256gcm_encrypt_wo_key() {
+        let mut cipher = Aes256Gcm::new().unwrap();
+        let res = cipher.encrypt(IV, &PLAIN_TEXT, AUTH_VEC);
+        assert!(matches!(res, Err(Aes256GcmError::InvalidKey)));
+    }
+
+    #[test]
+    fn test_aes256gcm_decrypt_wo_key() {
+        let mut cipher = Aes256Gcm::new().unwrap();
+        let res = cipher.decrypt(IV, CIPHER_TEXT.as_ref(), AUTH_VEC, EXP_AUTH_TAG);
+        assert!(matches!(res, Err(Aes256GcmError::InvalidKey)));
+    }
+
+    #[test]
     fn test_aes256gcm_decrypt() {
-        let mut cipher = Aes256Gcm::new(KEY).unwrap();
+        let mut cipher = Aes256Gcm::new().unwrap();
+        cipher.set_key(KEY).unwrap();
 
         let plaint_text = cipher
             .decrypt(IV, CIPHER_TEXT.as_ref(), AUTH_VEC, EXP_AUTH_TAG)
