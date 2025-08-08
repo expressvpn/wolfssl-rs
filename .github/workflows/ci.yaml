@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress:  ${{ github.ref_name != 'main' }}
 
 env:
-  RUST_VERSION: 1.88.0
+  RUST_VERSION: 1.89.0
   # We pin to a specific nightly Rust version (the one that eventually became $RUST_VERSION)
   # to ensure consistent behavior and prevent unexpected changes.
   # Reference: https://releases.rs/ (Use the branched from master date on the specific release)
