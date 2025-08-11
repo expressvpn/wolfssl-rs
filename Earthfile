@@ -3,7 +3,7 @@ VERSION 0.8
 IMPORT github.com/earthly/lib/rust:1a4a008e271c7a5583e7bd405da8fd3624c05610 AS lib-rust
 
 # Update RUST_VERSION in github action to the same version for building iOS/tvOS
-FROM rust:1.88.0
+FROM rust:1.89.0
 
 WORKDIR /wolfssl-rs
 
