@@ -18,8 +18,8 @@ allow = [
 ]
 confidence-threshold = 0.8
 exceptions = [
-    { name = "wolfssl", allow = ["GPL-2.0", "GPL-3.0"], version = "*" },
-    { name = "wolfssl-sys", allow = ["GPL-2.0", "GPL-3.0"], version = "*" },
+    { name = "wolfssl", allow = ["GPL-2.0-or-later"], version = "*" },
+    { name = "wolfssl-sys", allow = ["GPL-2.0-or-later"], version = "*" },
 ]
 
 [licenses.private]
