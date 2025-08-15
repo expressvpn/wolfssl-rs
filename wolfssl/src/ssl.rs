@@ -1816,13 +1816,13 @@ mod tests {
     }
 
     #[test_case(SslVerifyMode::SslVerifyNone, SslVerifyMode::SslVerifyNone)]
-    #[test_case(SslVerifyMode::SslVerifyNone, SslVerifyMode::SslVerifyPeer => panics "ASN no signer error to confirm failure")]
+    #[test_case(SslVerifyMode::SslVerifyNone, SslVerifyMode::SslVerifyPeer => panics "CaCertNotAvailable")]
     #[test_case(SslVerifyMode::SslVerifyPeer, SslVerifyMode::SslVerifyNone)]
-    #[test_case(SslVerifyMode::SslVerifyPeer, SslVerifyMode::SslVerifyPeer => panics "ASN no signer error to confirm failure")]
+    #[test_case(SslVerifyMode::SslVerifyPeer, SslVerifyMode::SslVerifyPeer => panics "CaCertNotAvailable")]
     #[test_case(SslVerifyMode::SslVerifyFailIfNoPeerCert, SslVerifyMode::SslVerifyNone => panics "peer did not return a certificate")]
-    #[test_case(SslVerifyMode::SslVerifyFailIfNoPeerCert, SslVerifyMode::SslVerifyPeer => panics "ASN no signer error to confirm failure")]
+    #[test_case(SslVerifyMode::SslVerifyFailIfNoPeerCert, SslVerifyMode::SslVerifyPeer => panics "CaCertNotAvailable")]
     #[test_case(SslVerifyMode::SslVerifyFailExceptPsk, SslVerifyMode::SslVerifyNone)]
-    #[test_case(SslVerifyMode::SslVerifyFailExceptPsk, SslVerifyMode::SslVerifyPeer => panics "ASN no signer error to confirm failure")]
+    #[test_case(SslVerifyMode::SslVerifyFailExceptPsk, SslVerifyMode::SslVerifyPeer => panics "CaCertNotAvailable")]
     fn test_client_set_verify(server_mode: SslVerifyMode, client_mode: SslVerifyMode) {
         let client_method = Method::TlsClientV1_3;
         // Create context without server CA certificate
