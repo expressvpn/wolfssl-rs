@@ -10,6 +10,7 @@ use std::env;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::fs;
 
 /**
  * Work around for bindgen creating duplicate values.
@@ -31,15 +32,22 @@ impl bindgen::callbacks::ParseCallbacks for IgnoreMacros {
  * Copy WolfSSL
  */
 fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
-    println!("cargo:rerun-if-changed=wolfssl-src");
-    Command::new("cp")
-        .arg("-rf")
-        .arg("wolfssl-src")
-        .arg(dest)
-        .status()
-        .unwrap();
+    let mut dest: PathBuf = dest.into();
+    dest.push("wolfssl-src");
 
-    Ok(dest.join("wolfssl-src"))
+    println!("cargo:rerun-if-changed=wolfssl-src");
+    dircpy::copy_dir("wolfssl-src", &dest).expect("Copying source failed");
+
+    let settings_path = dest.join("wolfssl").join("user_settings.h");
+    println!("Copying user settings to {}", settings_path.display());
+    fs::copy("windows/user_settings.h", settings_path).unwrap();
+
+    let settings_path = dest.join("IDE").join("WIN").join("user_settings.h");
+    println!("Copying user settings to {}", settings_path.display());
+    fs::copy("windows/user_settings.h", settings_path).unwrap();
+    
+
+    Ok(dest)
 }
 
 const PATCH_DIR: &str = "patches";
@@ -58,12 +66,9 @@ fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) {
 
     println!("cargo:rerun-if-changed={}", full_patch.display());
 
-    let patch_buffer = File::open(full_patch).unwrap();
-    let status = Command::new("patch")
-        .arg("-d")
-        .arg(wolfssl_path)
-        .arg("-p1")
-        .stdin(patch_buffer)
+    let status = Command::new("git")
+        .arg("apply")
+        .arg(full_patch)
         .status()
         .unwrap();
     assert!(
@@ -73,10 +78,17 @@ fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) {
     );
 }
 
+fn build_win(wolfssl_src: &Path) -> PathBuf {
+    wolfssl_src.to_path_buf()
+}
+
 /**
 Builds WolfSSL
 */
 fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
+    if build_target::target_os() == build_target::Os::Windows {
+        return build_win(wolfssl_src);
+    }
     // Create the config
     let mut conf = Config::new(wolfssl_src);
     // Configure it
@@ -307,10 +319,11 @@ fn main() -> std::io::Result<()> {
 
     // Extract WolfSSL
     let wolfssl_src = copy_wolfssl(&out_dir)?;
+    println!("WolfSsl source directory: {}", wolfssl_src.display());
 
     // Apply patches
-    PATCHES.iter().for_each(|&f| apply_patch(&wolfssl_src, f));
-    println!("cargo:rerun-if-changed={PATCH_DIR}");
+    // PATCHES.iter().for_each(|&f| apply_patch(&wolfssl_src, f));
+    // println!("cargo:rerun-if-changed={PATCH_DIR}");
 
     // Configure and build WolfSSL
     let wolfssl_install_dir = build_wolfssl(&wolfssl_src);
@@ -337,22 +350,26 @@ fn main() -> std::io::Result<()> {
     let ignored_macros = IgnoreMacros(hash_ignored_macros);
     let wolfssl_include_dir = wolfssl_install_dir.join("include");
 
+    let user_settings_path = wolfssl_install_dir.join("wolfssl").join("user_settings.h");
+
     // Build the Rust binding
     let builder = bindgen::Builder::default()
         .header("wrapper.h")
+        .clang_arg(format!("-include{}", user_settings_path.to_str().unwrap()))
+        .clang_arg(format!("-I{}/", wolfssl_install_dir.to_str().unwrap()))
         .clang_arg(format!("-I{}/", wolfssl_include_dir.to_str().unwrap()))
         .parse_callbacks(Box::new(ignored_macros))
         .formatter(bindgen::Formatter::Rustfmt);
 
-    let builder = [
-        "wolfssl/.*.h",
-        "wolfssl/wolfcrypt/.*.h",
-        "wolfssl/openssl/compat_types.h",
-    ]
-    .iter()
-    .fold(builder, |b, p| {
-        b.allowlist_file(wolfssl_include_dir.join(p).to_str().unwrap())
-    });
+    // let builder = [
+    //     "wolfssl/.*.h",
+    //     "wolfssl/wolfcrypt/.*.h",
+    //     "wolfssl/openssl/compat_types.h",
+    // ]
+    // .iter()
+    // .fold(builder, |b, p| {
+    //     b.allowlist_file(wolfssl_include_dir.join(p).to_str().unwrap())
+    // });
 
     let builder = builder.blocklist_function("wolfSSL_BIO_vprintf");
 
@@ -364,7 +381,7 @@ fn main() -> std::io::Result<()> {
         .expect("Couldn't write bindings!");
 
     // Tell cargo to tell rustc to link in WolfSSL
-    println!("cargo:rustc-link-lib=static=wolfssl");
+    // println!("cargo:rustc-link-lib=static=wolfssl");
 
     println!(
         "cargo:rustc-link-search=native={}",

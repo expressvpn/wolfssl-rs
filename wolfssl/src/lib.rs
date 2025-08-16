@@ -276,7 +276,7 @@ pub enum CurveGroup {
 impl CurveGroup {
     fn as_ffi(&self) -> std::os::raw::c_uint {
         use CurveGroup::*;
-        match self {
+        let a = match self {
             EccSecp256R1 => wolfssl_sys::WOLFSSL_ECC_SECP256R1,
             EccX25519 => wolfssl_sys::WOLFSSL_ECC_X25519,
             #[cfg(feature = "postquantum")]
@@ -291,7 +291,8 @@ impl CurveGroup {
             P384MLKEM768 => wolfssl_sys::WOLFSSL_P384_ML_KEM_768,
             #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
             P521MLKEM1024 => wolfssl_sys::WOLFSSL_P521_ML_KEM_1024,
-        }
+        };
+        a as std::os::raw::c_uint
     }
 }
 
