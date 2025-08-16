@@ -9,10 +9,12 @@
 ///       features. In the meantime, you can see it here, but do not base any real
 ///       world system on this raw code!
 ///
+extern crate wolfssl_sys;
 use wolfssl_sys as ffi;
 
 use std::net::TcpStream;
 use std::os::raw::c_int;
+#[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 
 use std::ffi::CStr;
@@ -73,6 +75,7 @@ fn main() {
             TcpStream::connect(format!("{site}:{port}")).expect("Couldn't connect to test site");
 
         // Tell WolfSSL what the file descriptor is for the stream
+        #[cfg(unix)]
         ffi::wolfSSL_set_fd(ssl, stream.as_raw_fd());
 
         // Try to connect

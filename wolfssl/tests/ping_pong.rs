@@ -11,7 +11,10 @@ use wolfssl::{
 use async_trait::async_trait;
 use bytes::BytesMut;
 use test_case::test_case;
+#[cfg(unix)]
 use tokio::net::{UnixDatagram, UnixStream};
+#[cfg(not(unix))]
+use tokio::net::windows::named_pipe::*;
 
 const CA_CERT_2048: &[u8] = &include!("data/ca_cert_der_2048");
 const SERVER_CERT_2048: &[u8] = &include!("data/server_cert_der_2048");
@@ -80,6 +83,7 @@ impl<IOCB: SockIO> IOCallbacks for SockIOCallbacks<IOCB> {
 }
 
 #[async_trait]
+#[cfg(unix)]
 impl SockIO for tokio::net::UnixDatagram {
     async fn ready(&self, interest: tokio::io::Interest) -> std::io::Result<tokio::io::Ready> {
         Self::ready(self, interest).await
@@ -95,6 +99,7 @@ impl SockIO for tokio::net::UnixDatagram {
 }
 
 #[async_trait]
+#[cfg(unix)]
 impl SockIO for tokio::net::UnixStream {
     async fn ready(&self, interest: tokio::io::Interest) -> std::io::Result<tokio::io::Ready> {
         Self::ready(self, interest).await
@@ -270,6 +275,7 @@ enum TestSuiteKeySize {
 #[test_case(Method::DtlsClient, Method::DtlsServerV1_3, ProtocolVersion::DtlsV1_3, &TestSuiteKeySize::Bits4096; "client_any_server_1.3_4096_bits")]
 #[test_case(Method::DtlsClient, Method::DtlsServer, ProtocolVersion::DtlsV1_3, &TestSuiteKeySize::Bits4096; "client_any_server_any_4096_bits")]
 #[tokio::test]
+#[cfg(unix)]
 async fn dtls(
     client_method: Method,
     server_method: Method,
@@ -328,7 +334,10 @@ async fn tls(
     wolfssl::enable_debugging(true);
 
     // Communicate over a local stream socket for simplicity
+    #[cfg(unix)]
     let (client_sock, server_sock) = UnixStream::pair().expect("UnixStream");
+    #[cfg(not(unix))]
+    let (client_sock, server_sock) = LocalStream::pair().expect("UnixStream");
 
     let client = client(
         client_sock,
@@ -345,4 +354,50 @@ async fn tls(
 
     // Note that this runs concurrently but not in parallel
     tokio::join!(client, server);
+}
+
+const PIPE_NAME: &str = r"\\.\pipe\mynamedpipe";
+
+#[cfg(not(unix))]
+struct LocalStream;
+
+impl LocalStream {
+    fn pair() -> std::io::Result<(NamedPipeServer, NamedPipeClient)> {
+        let server = ServerOptions::new().create(PIPE_NAME)?;
+        let client = ClientOptions::new().open(PIPE_NAME)?;
+
+        Ok((server, client))
+    }
+}
+
+#[async_trait]
+#[cfg(not(unix))]
+impl SockIO for NamedPipeClient {
+    async fn ready(&self, interest: tokio::io::Interest) -> std::io::Result<tokio::io::Ready> {
+        Self::ready(self, interest).await
+    }
+
+    fn try_recv(&self, buf: &mut [u8]) -> std::io::Result<usize> {
+        Self::try_read(self, buf)
+    }
+
+    fn try_send(&self, buf: &[u8]) -> std::io::Result<usize> {
+        Self::try_write(self, buf)
+    }
+}
+
+#[async_trait]
+#[cfg(not(unix))]
+impl SockIO for NamedPipeServer {
+    async fn ready(&self, interest: tokio::io::Interest) -> std::io::Result<tokio::io::Ready> {
+        Self::ready(self, interest).await
+    }
+
+    fn try_recv(&self, buf: &mut [u8]) -> std::io::Result<usize> {
+        Self::try_read(self, buf)
+    }
+
+    fn try_send(&self, buf: &[u8]) -> std::io::Result<usize> {
+        Self::try_write(self, buf)
+    }
 }

@@ -79,6 +79,16 @@ fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) {
 }
 
 fn build_win(wolfssl_src: &Path) -> PathBuf {
+    let status = Command::new(r"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\MSBuild\\Current\\Bin\\\MsBuild.exe")
+        .current_dir(wolfssl_src)
+        .arg(".\\wolfssl.vcxproj")
+        .arg("-t:Build")
+        .arg("-p:Configuration=Release")
+        .arg("-p:Platform=x64")
+        .arg("-p:PlatformToolset=v143")
+        .status()
+        .unwrap();
+    assert!(status.success(), "Failed to compile wolfssl");
     wolfssl_src.to_path_buf()
 }
 
@@ -368,7 +378,7 @@ fn main() -> std::io::Result<()> {
     // ]
     // .iter()
     // .fold(builder, |b, p| {
-    //     b.allowlist_file(wolfssl_include_dir.join(p).to_str().unwrap())
+    //     b.allowlist_file(wolfssl_install_dir.join(p).to_str().unwrap())
     // });
 
     let builder = builder.blocklist_function("wolfSSL_BIO_vprintf");
@@ -383,10 +393,17 @@ fn main() -> std::io::Result<()> {
     // Tell cargo to tell rustc to link in WolfSSL
     // println!("cargo:rustc-link-lib=static=wolfssl");
 
-    println!(
-        "cargo:rustc-link-search=native={}",
-        wolfssl_install_dir.join("lib").to_str().unwrap()
-    );
+    // println!(
+    //     "cargo:rustc-link-search=native={}",
+    //     wolfssl_install_dir.join("lib").to_str().unwrap()
+    // );
+
+    let windows_lib = wolfssl_install_dir.join("Release").join("x64");
+    println!("cargo:rustc-link-search=native={}", windows_lib.to_str().unwrap());
+    println!("cargo:rustc-link-lib=static=wolfssl");
+
+    // Needed for Random lib using windows API
+    println!("cargo:rustc-link-lib=dylib=Advapi32");
 
     // Invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=wrapper.h");
