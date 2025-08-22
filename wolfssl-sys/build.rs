@@ -39,6 +39,16 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
 
     copy_dir_recursive(src, &dest_dir)?;
 
+    if build_target::target_os() == build_target::Os::Windows {
+        let settings_path = dest_dir.join("wolfssl").join("user_settings.h");
+        println!("Copying user settings to {}", settings_path.display());
+        fs::copy("windows/user_settings.h", settings_path).unwrap();
+
+        let settings_path = dest_dir.join("IDE").join("WIN").join("user_settings.h");
+        println!("Copying user settings to {}", settings_path.display());
+        fs::copy("windows/user_settings.h", settings_path).unwrap();
+    }
+
     Ok(dest_dir)
 }
 
@@ -434,7 +444,10 @@ fn main() -> std::io::Result<()> {
         .formatter(bindgen::Formatter::Rustfmt);
 
     let builder = if build_target::target_os() == build_target::Os::Windows {
-        builder.clang_arg(format!("-I{}/", wolfssl_install_dir.to_str().unwrap()))
+        let user_settings_path = wolfssl_install_dir.join("wolfssl").join("user_settings.h");
+        builder
+            .clang_arg(format!("-include{}", user_settings_path.to_str().unwrap()))
+            .clang_arg(format!("-I{}/", wolfssl_install_dir.to_str().unwrap()))
     } else {
         [
             "wolfssl/.*.h",
