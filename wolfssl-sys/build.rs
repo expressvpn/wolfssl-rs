@@ -7,7 +7,7 @@ extern crate bindgen;
 use autotools::Config;
 use std::collections::HashSet;
 use std::env;
-use std::fs::File;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -32,14 +32,36 @@ impl bindgen::callbacks::ParseCallbacks for IgnoreMacros {
  */
 fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
     println!("cargo:rerun-if-changed=wolfssl-src");
-    Command::new("cp")
-        .arg("-rf")
-        .arg("wolfssl-src")
-        .arg(dest)
-        .status()
-        .unwrap();
 
-    Ok(dest.join("wolfssl-src"))
+    let src = Path::new("wolfssl-src");
+    let dest_dir = dest.join("wolfssl-src");
+
+    copy_dir_recursive(src, &dest_dir)?;
+
+    Ok(dest_dir)
+}
+
+/**
+ * Recursively copy a directory and its contents
+ */
+fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
+    if !dest.exists() {
+        fs::create_dir_all(dest)?;
+    }
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?;
+        } else {
+            fs::copy(&src_path, &dest_path)?;
+        }
+    }
+
+    Ok(())
 }
 
 const PATCH_DIR: &str = "patches";
