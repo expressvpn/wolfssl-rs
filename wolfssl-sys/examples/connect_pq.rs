@@ -13,7 +13,10 @@ use wolfssl_sys as ffi;
 
 use std::net::TcpStream;
 use std::os::raw::c_int;
+#[cfg(unix)]
 use std::os::unix::io::AsRawFd;
+#[cfg(windows)]
+use std::os::windows::io::AsRawSocket;
 
 use std::ffi::CStr;
 use std::ffi::CString;
@@ -73,7 +76,10 @@ fn main() {
             TcpStream::connect(format!("{site}:{port}")).expect("Couldn't connect to test site");
 
         // Tell WolfSSL what the file descriptor is for the stream
+        #[cfg(unix)]
         ffi::wolfSSL_set_fd(ssl, stream.as_raw_fd());
+        #[cfg(windows)]
+        ffi::wolfSSL_set_fd(ssl, stream.as_raw_socket() as i32);
 
         // Try to connect
         let res = ffi::wolfSSL_connect(ssl);
