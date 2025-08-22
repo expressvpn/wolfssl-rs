@@ -139,10 +139,27 @@ fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) -> Result<(), Strin
     Ok(())
 }
 
+fn build_win(wolfssl_src: &Path) -> PathBuf {
+    let status = Command::new(r"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\MSBuild\\Current\\Bin\\\MsBuild.exe")
+        .current_dir(wolfssl_src)
+        .arg(".\\wolfssl.vcxproj")
+        .arg("-t:Build")
+        .arg("-p:Configuration=Release")
+        .arg("-p:Platform=x64")
+        .arg("-p:PlatformToolset=v143")
+        .status()
+        .unwrap();
+    assert!(status.success(), "Failed to compile wolfssl");
+    wolfssl_src.to_path_buf()
+}
+
 /**
 Builds WolfSSL
 */
 fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
+    if build_target::target_os() == build_target::Os::Windows {
+        return build_win(wolfssl_src);
+    }
     // Create the config
     let mut conf = Config::new(wolfssl_src);
     // Configure it
@@ -413,15 +430,19 @@ fn main() -> std::io::Result<()> {
         .parse_callbacks(Box::new(ignored_macros))
         .formatter(bindgen::Formatter::Rustfmt);
 
-    let builder = [
-        "wolfssl/.*.h",
-        "wolfssl/wolfcrypt/.*.h",
-        "wolfssl/openssl/compat_types.h",
-    ]
-    .iter()
-    .fold(builder, |b, p| {
-        b.allowlist_file(wolfssl_include_dir.join(p).to_str().unwrap())
-    });
+    let builder = if build_target::target_os() == build_target::Os::Windows {
+        builder.clang_arg(format!("-I{}/", wolfssl_install_dir.to_str().unwrap()))
+    } else {
+        [
+            "wolfssl/.*.h",
+            "wolfssl/wolfcrypt/.*.h",
+            "wolfssl/openssl/compat_types.h",
+        ]
+        .iter()
+        .fold(builder, |b, p| {
+            b.allowlist_file(wolfssl_include_dir.join(p).to_str().unwrap())
+        })
+    };
 
     let builder = builder.blocklist_function("wolfSSL_BIO_vprintf");
 
@@ -433,12 +454,29 @@ fn main() -> std::io::Result<()> {
         .expect("Couldn't write bindings!");
 
     // Tell cargo to tell rustc to link in WolfSSL
-    println!("cargo:rustc-link-lib=static=wolfssl");
+    if build_target::target_os() == build_target::Os::Windows {
+        println!(
+            "cargo:rustc-link-search=native={}",
+            wolfssl_install_dir
+                .join("Release")
+                .join("x64")
+                .to_str()
+                .unwrap()
+        );
+        // On Windows, we link the static library with whole-archive to avoid issues with
+        // missing symbols when using the wolfSSL library.
+        // Ref: https://doc.rust-lang.org/rustc/command-line-arguments.html#linking-modifiers-whole-archive
+        println!("cargo:rustc-link-lib=static:+whole-archive=wolfssl");
 
-    println!(
-        "cargo:rustc-link-search=native={}",
-        wolfssl_install_dir.join("lib").to_str().unwrap()
-    );
+        // Windows system libraries needed by wolfSSL random object
+        println!("cargo:rustc-link-lib=dylib=Advapi32");
+    } else {
+        println!(
+            "cargo:rustc-link-search=native={}",
+            wolfssl_install_dir.join("lib").to_str().unwrap()
+        );
+        println!("cargo:rustc-link-lib=static=wolfssl");
+    }
 
     // Invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=wrapper.h");

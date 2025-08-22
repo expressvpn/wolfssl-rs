@@ -1,5 +1,8 @@
 /* Contains the individual headers we want to pull in */
+
+#ifndef _WIN32
 #include <wolfssl/options.h>
+#endif
 #include <wolfssl/error-ssl.h>
 #include <wolfssl/ssl.h>
 #include <wolfssl/wolfcrypt/settings.h>
