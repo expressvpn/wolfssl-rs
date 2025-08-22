@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::env;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /**
  * Work around for bindgen creating duplicate values.
@@ -55,7 +55,9 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
         let dest_path = dest.join(entry.file_name());
 
         if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dest_path)?;
+            copy_dir_recursive(&src_path, &dest_path)?
+        } else if entry.file_name() == ".git" {
+            // Skip copying .git
         } else {
             fs::copy(&src_path, &dest_path)?;
         }
@@ -73,26 +75,68 @@ const PATCHES: &[&str] = &[
 ];
 
 /**
- * Apply patch to wolfssl-src
+ * Apply patch using git apply (cross-platform, works on Windows)
  */
-fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) {
+fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) -> Result<(), String> {
+    let command = Command::new("git")
+        .args(["init", "."])
+        .current_dir(wolfssl_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to execute git init: {}", e))?;
+
+    let output = command
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait for git init: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        panic!(
+            "Failed to git init: {}\nStdout: {}\nStderr: {}",
+            output.status, stdout, stderr
+        );
+    }
+
     let full_patch = Path::new(PATCH_DIR).join(patch.as_ref());
+    // Get absolute path to patch file since we'll change working directory
+    let abs_patch = std::env::current_dir().unwrap().join(&full_patch);
 
     println!("cargo:rerun-if-changed={}", full_patch.display());
 
-    let patch_buffer = File::open(full_patch).unwrap();
-    let status = Command::new("patch")
-        .arg("-d")
-        .arg(wolfssl_path)
-        .arg("-p1")
-        .stdin(patch_buffer)
-        .status()
-        .unwrap();
-    assert!(
-        status.success(),
-        "Failed to apply {}",
-        patch.as_ref().display()
-    );
+    let patch_file = File::open(&abs_patch)
+        .map_err(|e| format!("Failed to open patch file {}: {}", abs_patch.display(), e))?;
+
+    // Use git apply instead of patch command - git is available on all platforms
+    let command = Command::new("git")
+        .args(["apply", "--verbose"])
+        .current_dir(wolfssl_path)
+        .stdin(Stdio::from(patch_file))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to execute git apply: {}", e))?;
+
+    let output = command
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait for git apply: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        return Err(format!(
+            "Failed to apply patch {}: {}\nStdout: {}\nStderr: {}",
+            patch.as_ref().display(),
+            output.status,
+            stdout,
+            stderr
+        ));
+    }
+
+    println!("Successfully applied patch: {}", patch.as_ref().display());
+    Ok(())
 }
 
 /**
@@ -331,7 +375,10 @@ fn main() -> std::io::Result<()> {
     let wolfssl_src = copy_wolfssl(&out_dir)?;
 
     // Apply patches
-    PATCHES.iter().for_each(|&f| apply_patch(&wolfssl_src, f));
+    for &patch_file in PATCHES.iter() {
+        apply_patch(&wolfssl_src, patch_file)
+            .unwrap_or_else(|e| panic!("Failed to apply patch {}: {}", patch_file, e));
+    }
     println!("cargo:rerun-if-changed={PATCH_DIR}");
 
     // Configure and build WolfSSL
