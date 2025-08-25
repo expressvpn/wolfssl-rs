@@ -5,6 +5,7 @@
 extern crate bindgen;
 
 use autotools::Config;
+use msbuild::MsBuild;
 use std::collections::HashSet;
 use std::env;
 use std::fs::{self, File};
@@ -140,16 +141,18 @@ fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) -> Result<(), Strin
 }
 
 fn build_win(wolfssl_src: &Path) -> PathBuf {
-    let status = Command::new(r"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\MSBuild\\Current\\Bin\\\MsBuild.exe")
-        .current_dir(wolfssl_src)
-        .arg(".\\wolfssl.vcxproj")
-        .arg("-t:Build")
-        .arg("-p:Configuration=Release")
-        .arg("-p:Platform=x64")
-        .arg("-p:PlatformToolset=v143")
-        .status()
-        .unwrap();
-    assert!(status.success(), "Failed to compile wolfssl");
+    let mut msb = MsBuild::find_msbuild(Some("2022")).expect("Failed to find MsBuild 2022");
+
+    msb.run(
+        wolfssl_src.to_path_buf(),
+        &[
+            ".\\wolfssl.vcxproj",
+            "-t:Build",
+            "-p:Configuration=Release",
+            "-p:Platform=x64",
+            "-p:PlatformToolset=v143",
+        ],
+    );
     wolfssl_src.to_path_buf()
 }
 
