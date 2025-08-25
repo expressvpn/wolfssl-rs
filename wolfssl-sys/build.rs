@@ -54,7 +54,19 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
         let arch_content = fs::read_to_string(arch_settings)
             .unwrap_or_else(|_| panic!("Failed to read {}", arch_settings));
 
-        let combined_content = format!("{}\n{}", common_content, arch_content);
+        let mut combined_content = format!("{}\n{}", common_content, arch_content);
+
+        // Enable CFLAGS based on features
+        if cfg!(feature = "debug") {
+            combined_content.push_str("#define HAVE_SECRET_CALLBACK\n");
+            combined_content.push_str("#define DEBUG_WOLFSSL\n");
+        };
+
+        if cfg!(feature = "system_ca_certs") {
+            combined_content.push_str("#define ENABLED_SYS_CA_CERTS yes\n");
+        };
+
+        // Write the combined content to user_settings.h file
 
         let settings_path = dest_dir.join("wolfssl").join("user_settings.h");
         fs::write(&settings_path, &combined_content).unwrap();
