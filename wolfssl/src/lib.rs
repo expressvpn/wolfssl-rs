@@ -273,8 +273,13 @@ pub enum CurveGroup {
     P521MLKEM1024,
 }
 
+#[cfg(unix)]
+type CurveGroupType = std::os::raw::c_uint;
+#[cfg(windows)]
+type CurveGroupType = std::os::raw::c_int;
+
 impl CurveGroup {
-    fn as_ffi(&self) -> std::os::raw::c_uint {
+    fn as_ffi(&self) -> CurveGroupType {
         use CurveGroup::*;
         match self {
             EccSecp256R1 => wolfssl_sys::WOLFSSL_ECC_SECP256R1,

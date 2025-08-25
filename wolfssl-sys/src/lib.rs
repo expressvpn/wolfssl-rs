@@ -7,7 +7,12 @@ pub use bindings::*;
 #[cfg(test)]
 mod tests {
     use std::os::raw::c_int;
+
     use test_case::test_case;
+    #[cfg(unix)]
+    type CurveGroupType = std::os::raw::c_uint;
+    #[cfg(windows)]
+    type CurveGroupType = std::os::raw::c_int;
 
     use super::*;
     #[test]
@@ -21,7 +26,7 @@ mod tests {
     #[cfg(feature = "postquantum")]
     #[test_case(WOLFSSL_P521_KYBER_LEVEL5)]
     #[cfg_attr(not(feature = "kyber_only"), test_case(WOLFSSL_P521_ML_KEM_1024))]
-    fn test_post_quantum_available(group: std::os::raw::c_uint) {
+    fn test_post_quantum_available(group: CurveGroupType) {
         unsafe {
             // Init WolfSSL
             let res = wolfSSL_Init();

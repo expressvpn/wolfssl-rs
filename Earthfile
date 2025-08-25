@@ -102,7 +102,10 @@ build-android-release:
 # lint runs cargo clippy on the source code
 lint:
     FROM +copy-src
-    DO lib-rust+CARGO --args="clippy --all-features --all-targets -- -D warnings"
+    DO lib-rust+CARGO --args="clippy --all-features --lib --bins --tests --benches -- -D warnings"
+    # examples/connect_pq requires postquantum. But kyber_only features disables post quantum.
+    # So test examples separately
+    DO lib-rust+CARGO --args="clippy --features postquantum --lib --bins --tests --benches --examples -- -D warnings"
     DO lib-rust+CARGO --args="clippy --no-default-features --all-targets -- -D warnings"
     ENV RUSTDOCFLAGS="-D warnings"
     DO lib-rust+CARGO --args="doc --all-features --document-private-items"

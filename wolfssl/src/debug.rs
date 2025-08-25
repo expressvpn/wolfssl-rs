@@ -1,6 +1,7 @@
 #![cfg(feature = "debug")]
 
 use std::fmt::{self, Display};
+#[allow(unused_imports)] // Needed for windows
 use std::os::raw::{c_int, c_uint};
 use std::sync::Arc;
 
@@ -46,6 +47,14 @@ pub type Tls13SecretCallbacksArg = Arc<dyn Tls13SecretCallbacks + Send + Sync>;
 
 pub(crate) const RANDOM_SIZE: usize = 32;
 
+#[cfg(not(windows))]
+/// Tls13 Secret type from ffi
+pub type Tls13SecretType = c_uint;
+
+#[cfg(windows)]
+/// Tls13 Secret type from ffi
+pub type Tls13SecretType = c_int;
+
 /// Tls13 Secret types
 /// To be used in Wireshark
 pub enum Tls13Secret {
@@ -64,7 +73,7 @@ pub enum Tls13Secret {
     /// "EXPORTER_SECRET"
     ExporterSecret,
     /// "UNKNOWN_SECRET"
-    UnknownSecret(c_uint),
+    UnknownSecret(Tls13SecretType),
 }
 
 impl Display for Tls13Secret {
@@ -86,7 +95,7 @@ impl Display for Tls13Secret {
 
 impl From<c_int> for Tls13Secret {
     fn from(value: c_int) -> Self {
-        match value as c_uint {
+        match value as Tls13SecretType {
             wolfssl_sys::Tls13Secret_CLIENT_EARLY_TRAFFIC_SECRET => {
                 Tls13Secret::ClientEarlyTrafficSecret
             }
