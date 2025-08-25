@@ -40,13 +40,29 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
     copy_dir_recursive(src, &dest_dir)?;
 
     if build_target::target_os() == build_target::Os::Windows {
+        // Determine architecture-specific user_settings file
+        let arch_settings = match build_target::target_arch() {
+            build_target::Arch::X86_64 => "windows/user_settings-x86_64.h",
+            build_target::Arch::X86 => "windows/user_settings-x86.h",
+            build_target::Arch::AArch64 => "windows/user_settings-arm64.h",
+            _ => panic!("Unsupported architecture for Windows"),
+        };
+
+        // Create combined user_settings.h by concatenating common + arch-specific
+        let common_content = fs::read_to_string("windows/user_settings-common.h")
+            .expect("Failed to read user_settings-common.h");
+        let arch_content = fs::read_to_string(arch_settings)
+            .unwrap_or_else(|_| panic!("Failed to read {}", arch_settings));
+
+        let combined_content = format!("{}\n{}", common_content, arch_content);
+
         let settings_path = dest_dir.join("wolfssl").join("user_settings.h");
-        println!("Copying user settings to {}", settings_path.display());
-        fs::copy("windows/user_settings.h", settings_path).unwrap();
+        fs::write(&settings_path, &combined_content).unwrap();
+        println!("Created user settings at {}", settings_path.display());
 
         let settings_path = dest_dir.join("IDE").join("WIN").join("user_settings.h");
-        println!("Copying user settings to {}", settings_path.display());
-        fs::copy("windows/user_settings.h", settings_path).unwrap();
+        fs::write(&settings_path, &combined_content).unwrap();
+        println!("Created user settings at {}", settings_path.display());
     }
 
     Ok(dest_dir)
@@ -150,16 +166,41 @@ fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) -> Result<(), Strin
     Ok(())
 }
 
+/**
+ * Get Windows build configuration and platform based on build profile and target architecture
+ */
+fn get_windows_build_params() -> (&'static str, &'static str) {
+    let configuration = if cfg!(debug_assertions) {
+        "Debug"
+    } else {
+        "Release"
+    };
+
+    let platform = match build_target::target_arch() {
+        build_target::Arch::X86_64 => "x64",
+        build_target::Arch::X86 => "Win32",
+        build_target::Arch::AArch64 => "ARM64",
+        _ => panic!("Unsupported architecture for Windows"),
+    };
+
+    (configuration, platform)
+}
+
+/**
+Builds WolfSSL in windows
+*/
 fn build_win(wolfssl_src: &Path) -> PathBuf {
     let mut msb = MsBuild::find_msbuild(Some("2022")).expect("Failed to find MsBuild 2022");
+
+    let (configuration, platform) = get_windows_build_params();
 
     msb.run(
         wolfssl_src.to_path_buf(),
         &[
             ".\\wolfssl.vcxproj",
             "-t:Build",
-            "-p:Configuration=Release",
-            "-p:Platform=x64",
+            &format!("-p:Configuration={}", configuration),
+            &format!("-p:Platform={}", platform),
             "-p:PlatformToolset=v143",
         ],
     );
@@ -471,11 +512,13 @@ fn main() -> std::io::Result<()> {
 
     // Tell cargo to tell rustc to link in WolfSSL
     if build_target::target_os() == build_target::Os::Windows {
+        let (configuration, platform) = get_windows_build_params();
+
         println!(
             "cargo:rustc-link-search=native={}",
             wolfssl_install_dir
-                .join("Release")
-                .join("x64")
+                .join(configuration)
+                .join(platform)
                 .to_str()
                 .unwrap()
         );
