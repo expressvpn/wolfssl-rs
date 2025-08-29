@@ -238,7 +238,10 @@ mod tests {
 
     #[test]
     fn test_aes_size() {
+        #[cfg(not(windows))]
         assert_eq!(std::mem::size_of::<Aes>(), 123728);
+        #[cfg(windows)]
+        assert_eq!(std::mem::size_of::<Aes>(), 336);
         assert_eq!(std::mem::size_of::<Aes256Gcm>(), 16);
     }
 

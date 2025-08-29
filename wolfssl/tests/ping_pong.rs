@@ -11,6 +11,9 @@ use wolfssl::{
 use async_trait::async_trait;
 use bytes::BytesMut;
 use test_case::test_case;
+#[cfg(not(unix))]
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
+#[cfg(unix)]
 use tokio::net::{UnixDatagram, UnixStream};
 
 const CA_CERT_2048: &[u8] = &include!("data/ca_cert_der_2048");
@@ -80,6 +83,7 @@ impl<IOCB: SockIO> IOCallbacks for SockIOCallbacks<IOCB> {
 }
 
 #[async_trait]
+#[cfg(unix)]
 impl SockIO for tokio::net::UnixDatagram {
     async fn ready(&self, interest: tokio::io::Interest) -> std::io::Result<tokio::io::Ready> {
         Self::ready(self, interest).await
@@ -95,6 +99,7 @@ impl SockIO for tokio::net::UnixDatagram {
 }
 
 #[async_trait]
+#[cfg(unix)]
 impl SockIO for tokio::net::UnixStream {
     async fn ready(&self, interest: tokio::io::Interest) -> std::io::Result<tokio::io::Ready> {
         Self::ready(self, interest).await
@@ -280,7 +285,10 @@ async fn dtls(
     wolfssl::enable_debugging(true);
 
     // Communicate over a local datagram socket for simplicity
+    #[cfg(unix)]
     let (client_sock, server_sock) = UnixDatagram::pair().expect("UnixDatagram");
+    #[cfg(not(unix))]
+    let (client_sock, server_sock) = LocalStream::pair_udp().await.expect("UdpSocket");
 
     let client = client(
         client_sock,
@@ -328,7 +336,10 @@ async fn tls(
     wolfssl::enable_debugging(true);
 
     // Communicate over a local stream socket for simplicity
+    #[cfg(unix)]
     let (client_sock, server_sock) = UnixStream::pair().expect("UnixStream");
+    #[cfg(not(unix))]
+    let (client_sock, server_sock) = LocalStream::pair().await.expect("TcpStream");
 
     let client = client(
         client_sock,
@@ -345,4 +356,71 @@ async fn tls(
 
     // Note that this runs concurrently but not in parallel
     tokio::join!(client, server);
+}
+
+#[cfg(not(unix))]
+struct LocalStream;
+
+#[cfg(not(unix))]
+impl LocalStream {
+    async fn pair() -> std::io::Result<(TcpStream, TcpStream)> {
+        // Bind to any available port on localhost
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?;
+
+        // Connect to the listener
+        let client_task = TcpStream::connect(addr);
+        let server_task = listener.accept();
+
+        let (client, (server, _)) = tokio::try_join!(client_task, server_task)?;
+
+        Ok((server, client))
+    }
+
+    async fn pair_udp() -> std::io::Result<(UdpSocket, UdpSocket)> {
+        // Create two UDP sockets bound to localhost
+        let server = UdpSocket::bind("127.0.0.1:0").await?;
+        let server_addr = server.local_addr()?;
+
+        let client = UdpSocket::bind("127.0.0.1:0").await?;
+        let client_addr = client.local_addr()?;
+
+        // Connect the sockets to each other
+        client.connect(server_addr).await?;
+        server.connect(client_addr).await?;
+
+        Ok((server, client))
+    }
+}
+
+#[async_trait]
+#[cfg(not(unix))]
+impl SockIO for TcpStream {
+    async fn ready(&self, interest: tokio::io::Interest) -> std::io::Result<tokio::io::Ready> {
+        Self::ready(self, interest).await
+    }
+
+    fn try_recv(&self, buf: &mut [u8]) -> std::io::Result<usize> {
+        Self::try_read(self, buf)
+    }
+
+    fn try_send(&self, buf: &[u8]) -> std::io::Result<usize> {
+        Self::try_write(self, buf)
+    }
+}
+
+#[async_trait]
+#[cfg(not(unix))]
+impl SockIO for UdpSocket {
+    async fn ready(&self, interest: tokio::io::Interest) -> std::io::Result<tokio::io::Ready> {
+        Self::ready(self, interest).await
+    }
+
+    fn try_recv(&self, buf: &mut [u8]) -> std::io::Result<usize> {
+        Self::try_recv(self, buf)
+    }
+
+    fn try_send(&self, buf: &[u8]) -> std::io::Result<usize> {
+        Self::try_send(self, buf)
+    }
 }

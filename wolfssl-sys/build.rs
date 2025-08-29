@@ -5,11 +5,12 @@
 extern crate bindgen;
 
 use autotools::Config;
+use msbuild::MsBuild;
 use std::collections::HashSet;
 use std::env;
-use std::fs::File;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /**
  * Work around for bindgen creating duplicate values.
@@ -32,14 +33,97 @@ impl bindgen::callbacks::ParseCallbacks for IgnoreMacros {
  */
 fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
     println!("cargo:rerun-if-changed=wolfssl-src");
-    Command::new("cp")
-        .arg("-rf")
-        .arg("wolfssl-src")
-        .arg(dest)
-        .status()
-        .unwrap();
 
-    Ok(dest.join("wolfssl-src"))
+    let src = Path::new("wolfssl-src");
+    let dest_dir = dest.join("wolfssl-src");
+
+    copy_dir_recursive(src, &dest_dir)?;
+
+    if build_target::target_os() == build_target::Os::Windows {
+        // Determine architecture-specific user_settings file
+        let arch_settings = match build_target::target_arch() {
+            build_target::Arch::X86_64 => "windows/user_settings-x86_64.h",
+            build_target::Arch::X86 => "windows/user_settings-x86.h",
+            build_target::Arch::AArch64 => "windows/user_settings-arm64.h",
+            _ => panic!("Unsupported architecture for Windows"),
+        };
+
+        // Create combined user_settings.h by concatenating common + arch-specific
+        let common_content = fs::read_to_string("windows/user_settings-common.h")
+            .expect("Failed to read user_settings-common.h");
+        let arch_content = fs::read_to_string(arch_settings)
+            .unwrap_or_else(|_| panic!("Failed to read {}", arch_settings));
+
+        let mut combined_content = format!("{}\n{}", common_content, arch_content);
+
+        // Enable CFLAGS based on features
+        if cfg!(feature = "debug") {
+            combined_content.push_str("#define HAVE_SECRET_CALLBACK\n");
+            combined_content.push_str("#define DEBUG_WOLFSSL\n");
+        };
+
+        if cfg!(feature = "system_ca_certs") {
+            combined_content.push_str("#define ENABLED_SYS_CA_CERTS yes\n");
+        };
+
+        // Write the combined content to user_settings.h file
+
+        let settings_path = dest_dir.join("wolfssl").join("user_settings.h");
+        fs::write(&settings_path, &combined_content).unwrap();
+        println!("Created user settings at {}", settings_path.display());
+
+        let settings_path = dest_dir.join("IDE").join("WIN").join("user_settings.h");
+        fs::write(&settings_path, &combined_content).unwrap();
+        println!("Created user settings at {}", settings_path.display());
+
+        let command = Command::new("git")
+            .args(["init", "."])
+            .current_dir(&dest_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Failed to execute git init");
+
+        let output = command
+            .wait_with_output()
+            .expect("Failed to wait for git init");
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+
+            panic!(
+                "Failed to git init: {}\nStdout: {}\nStderr: {}",
+                output.status, stdout, stderr
+            );
+        }
+    }
+
+    Ok(dest_dir)
+}
+
+/**
+ * Recursively copy a directory and its contents
+ */
+fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
+    if !dest.exists() {
+        fs::create_dir_all(dest)?;
+    }
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?
+        } else if entry.file_name() == ".git" {
+            // Skip copying .git
+        } else {
+            fs::copy(&src_path, &dest_path)?;
+        }
+    }
+
+    Ok(())
 }
 
 const PATCH_DIR: &str = "patches";
@@ -51,9 +135,54 @@ const PATCHES: &[&str] = &[
 ];
 
 /**
- * Apply patch to wolfssl-src
+ * Apply patch using git apply (Windows)
  */
-fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) {
+#[cfg(windows)]
+fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) -> Result<(), String> {
+    let full_patch = Path::new(PATCH_DIR).join(patch.as_ref());
+    // Get absolute path to patch file since we'll change working directory
+    let abs_patch = std::env::current_dir().unwrap().join(&full_patch);
+
+    println!("cargo:rerun-if-changed={}", full_patch.display());
+
+    let patch_file = File::open(&abs_patch)
+        .map_err(|e| format!("Failed to open patch file {}: {}", abs_patch.display(), e))?;
+
+    let command = Command::new("git")
+        .args(["apply", "--verbose"])
+        .current_dir(wolfssl_path)
+        .stdin(Stdio::from(patch_file))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to execute git apply: {}", e))?;
+
+    let output = command
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait for git apply: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        return Err(format!(
+            "Failed to apply patch {}: {}\nStdout: {}\nStderr: {}",
+            patch.as_ref().display(),
+            output.status,
+            stdout,
+            stderr
+        ));
+    }
+
+    println!("Successfully applied patch: {}", patch.as_ref().display());
+    Ok(())
+}
+
+/**
+ * Apply patch using `patch` (Unix)
+ */
+#[cfg(unix)]
+fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) -> Result<(), String> {
     let full_patch = Path::new(PATCH_DIR).join(patch.as_ref());
 
     println!("cargo:rerun-if-changed={}", full_patch.display());
@@ -71,12 +200,57 @@ fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) {
         "Failed to apply {}",
         patch.as_ref().display()
     );
+    Ok(())
+}
+
+/**
+ * Get Windows build configuration and platform based on build profile and target architecture
+ */
+fn get_windows_build_params() -> (&'static str, &'static str) {
+    let configuration = if cfg!(debug_assertions) {
+        "Debug"
+    } else {
+        "Release"
+    };
+
+    let platform = match build_target::target_arch() {
+        build_target::Arch::X86_64 => "x64",
+        build_target::Arch::X86 => "Win32",
+        build_target::Arch::AArch64 => "ARM64",
+        _ => panic!("Unsupported architecture for Windows"),
+    };
+
+    (configuration, platform)
+}
+
+/**
+Builds WolfSSL in windows
+*/
+fn build_win(wolfssl_src: &Path) -> PathBuf {
+    let mut msb = MsBuild::find_msbuild(Some("2022")).expect("Failed to find MsBuild 2022");
+
+    let (configuration, platform) = get_windows_build_params();
+
+    msb.run(
+        wolfssl_src.to_path_buf(),
+        &[
+            ".\\wolfssl.vcxproj",
+            "-t:Build",
+            &format!("-p:Configuration={}", configuration),
+            &format!("-p:Platform={}", platform),
+            "-p:PlatformToolset=v143",
+        ],
+    );
+    wolfssl_src.to_path_buf()
 }
 
 /**
 Builds WolfSSL
 */
 fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
+    if build_target::target_os() == build_target::Os::Windows {
+        return build_win(wolfssl_src);
+    }
     // Create the config
     let mut conf = Config::new(wolfssl_src);
     // Configure it
@@ -309,7 +483,10 @@ fn main() -> std::io::Result<()> {
     let wolfssl_src = copy_wolfssl(&out_dir)?;
 
     // Apply patches
-    PATCHES.iter().for_each(|&f| apply_patch(&wolfssl_src, f));
+    for &patch_file in PATCHES.iter() {
+        apply_patch(&wolfssl_src, patch_file)
+            .unwrap_or_else(|e| panic!("Failed to apply patch {}: {}", patch_file, e));
+    }
     println!("cargo:rerun-if-changed={PATCH_DIR}");
 
     // Configure and build WolfSSL
@@ -344,15 +521,22 @@ fn main() -> std::io::Result<()> {
         .parse_callbacks(Box::new(ignored_macros))
         .formatter(bindgen::Formatter::Rustfmt);
 
-    let builder = [
-        "wolfssl/.*.h",
-        "wolfssl/wolfcrypt/.*.h",
-        "wolfssl/openssl/compat_types.h",
-    ]
-    .iter()
-    .fold(builder, |b, p| {
-        b.allowlist_file(wolfssl_include_dir.join(p).to_str().unwrap())
-    });
+    let builder = if build_target::target_os() == build_target::Os::Windows {
+        let user_settings_path = wolfssl_install_dir.join("wolfssl").join("user_settings.h");
+        builder
+            .clang_arg(format!("-include{}", user_settings_path.to_str().unwrap()))
+            .clang_arg(format!("-I{}/", wolfssl_install_dir.to_str().unwrap()))
+    } else {
+        [
+            "wolfssl/.*.h",
+            "wolfssl/wolfcrypt/.*.h",
+            "wolfssl/openssl/compat_types.h",
+        ]
+        .iter()
+        .fold(builder, |b, p| {
+            b.allowlist_file(wolfssl_include_dir.join(p).to_str().unwrap())
+        })
+    };
 
     let builder = builder.blocklist_function("wolfSSL_BIO_vprintf");
 
@@ -364,12 +548,31 @@ fn main() -> std::io::Result<()> {
         .expect("Couldn't write bindings!");
 
     // Tell cargo to tell rustc to link in WolfSSL
-    println!("cargo:rustc-link-lib=static=wolfssl");
+    if build_target::target_os() == build_target::Os::Windows {
+        let (configuration, platform) = get_windows_build_params();
 
-    println!(
-        "cargo:rustc-link-search=native={}",
-        wolfssl_install_dir.join("lib").to_str().unwrap()
-    );
+        println!(
+            "cargo:rustc-link-search=native={}",
+            wolfssl_install_dir
+                .join(configuration)
+                .join(platform)
+                .to_str()
+                .unwrap()
+        );
+        // On Windows, we link the static library with whole-archive to avoid issues with
+        // missing symbols when using the wolfSSL library.
+        // Ref: https://doc.rust-lang.org/rustc/command-line-arguments.html#linking-modifiers-whole-archive
+        println!("cargo:rustc-link-lib=static:+whole-archive=wolfssl");
+
+        // Windows system libraries needed by wolfSSL random object
+        println!("cargo:rustc-link-lib=dylib=Advapi32");
+    } else {
+        println!(
+            "cargo:rustc-link-search=native={}",
+            wolfssl_install_dir.join("lib").to_str().unwrap()
+        );
+        println!("cargo:rustc-link-lib=static=wolfssl");
+    }
 
     // Invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=wrapper.h");
