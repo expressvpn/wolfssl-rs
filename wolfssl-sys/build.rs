@@ -475,6 +475,53 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     conf.build()
 }
 
+/**
+ * Export WolfSSL configuration to JSON for CI consumption
+ */
+fn export_wolfssl_config(config_contents: &str, out_dir: &Path) -> std::io::Result<()> {
+    use std::io::Write;
+    
+    // Create a simple JSON structure with just the wolfssl configuration
+    let config_file_path = out_dir.join("wolfssl_config.json");
+    let mut config_file = File::create(&config_file_path)?;
+    
+    // Write the configuration as a simple JSON object
+    writeln!(config_file, "{{")?;
+    writeln!(config_file, "  \"wolfssl_configure_command\": {:?}", config_contents.trim())?;
+    writeln!(config_file, "}}")?;
+    
+    println!("cargo::warning=WolfSSL config exported to: {}", config_file_path.display());
+    
+    // Also copy to target directory for Earthly/CI to pick up
+    let target_dir = env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| {
+        // If no CARGO_TARGET_DIR is set, we need to go up one level from wolfssl-sys to the workspace root
+        "../target".to_string()
+    });
+    
+    // Determine the build profile (debug or release)
+    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    
+    // For native builds, cargo puts artifacts directly in target/{profile}
+    // For cross-compilation, it uses target/{target-triple}/{profile}
+    // But we want to always put our config in target/{profile} for simplicity
+    let target_config_path = PathBuf::from(&target_dir).join(&profile).join("wolfssl_config.json");
+    
+    // Create target directory if it doesn't exist
+    if let Some(parent) = target_config_path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            println!("cargo::warning=Failed to create directory {}: {}", parent.display(), e);
+            return Ok(());
+        }
+    }
+    
+    match fs::copy(&config_file_path, &target_config_path) {
+        Ok(_) => println!("cargo::warning=WolfSSL config also copied to: {}", target_config_path.display()),
+        Err(e) => println!("cargo::warning=Failed to copy config to {}: {}", target_config_path.display(), e),
+    }
+    
+    Ok(())
+}
+
 fn main() -> std::io::Result<()> {
     // Get the build directory
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
@@ -491,6 +538,23 @@ fn main() -> std::io::Result<()> {
 
     // Configure and build WolfSSL
     let wolfssl_install_dir = build_wolfssl(&wolfssl_src);
+
+    // Export config for CI consumption (Unix builds only, Windows uses MSBuild)
+    if build_target::target_os() != build_target::Os::Windows {
+        let mut config_path = PathBuf::from(&wolfssl_install_dir);
+        config_path.push("build/configure.prev");
+        if let Ok(contents) = fs::read_to_string(config_path) {
+            println!("cargo::warning=WolfSSL config:{}", contents);
+            export_wolfssl_config(&contents, &out_dir)?;
+        }
+    } else {
+        // For Windows builds, export the user_settings.h content as config
+        let settings_path = wolfssl_install_dir.join("wolfssl").join("user_settings.h");
+        if let Ok(contents) = fs::read_to_string(settings_path) {
+            println!("cargo::warning=WolfSSL Windows config (user_settings.h):{}", contents);
+            export_wolfssl_config(&contents, &out_dir)?;
+        }
+    }
 
     // We want to block some macros as they are incorrectly creating duplicate values
     // https://github.com/rust-lang/rust-bindgen/issues/687
