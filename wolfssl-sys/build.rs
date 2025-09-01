@@ -1,10 +1,11 @@
-/*!
+/*!build
  * Contains the build process for WolfSSL
  */
 
 extern crate bindgen;
 
 use autotools::Config;
+#[cfg(windows)]
 use msbuild::MsBuild;
 use std::collections::HashSet;
 use std::env;
@@ -226,13 +227,14 @@ fn get_windows_build_params() -> (&'static str, &'static str) {
 /**
 Builds WolfSSL in windows
 */
+#[cfg(windows)]
 fn build_win(wolfssl_src: &Path) -> PathBuf {
     let mut msb = MsBuild::find_msbuild(Some("2022")).expect("Failed to find MsBuild 2022");
 
     let (configuration, platform) = get_windows_build_params();
 
     msb.run(
-        wolfssl_src.to_path_buf(),
+        wolfssl_src,
         &[
             ".\\wolfssl.vcxproj",
             "-t:Build",
@@ -248,6 +250,7 @@ fn build_win(wolfssl_src: &Path) -> PathBuf {
 Builds WolfSSL
 */
 fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
+    #[cfg(windows)]
     if build_target::target_os() == build_target::Os::Windows {
         return build_win(wolfssl_src);
     }

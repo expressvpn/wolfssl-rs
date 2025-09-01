@@ -288,6 +288,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "lenient_semver"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de8de3f4f3754c280ce1c8c42ed8dd26a9c8385c2e5ad4ec5a77e774cea9c1ec"
+dependencies = [
+ "lenient_semver_parser",
+ "lenient_version",
+ "semver",
+]
+
+[[package]]
+name = "lenient_semver_parser"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f650c1d024ddc26b4bb79c3076b30030f2cf2b18292af698c81f7337a64d7d6"
+dependencies = [
+ "lenient_semver_version_builder",
+ "semver",
+]
+
+[[package]]
+name = "lenient_semver_version_builder"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9049f8ff49f75b946f95557148e70230499c8a642bf2d6528246afc7d0282d17"
+dependencies = [
+ "semver",
+]
+
+[[package]]
+name = "lenient_version"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bad7b41cc0ad9b8a9f8d8fcb7c2ab6703a6da4b369cbb7e3a63ee0840769b4eb"
+dependencies = [
+ "lenient_semver_parser",
+ "lenient_semver_version_builder",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.175"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -343,11 +383,13 @@ dependencies = [
 
 [[package]]
 name = "msbuild"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75f10d2a26dd8489c4b0dce152371d6f1aabbc9cf52855089bca00a3ce5fdca3"
+checksum = "393df38a84c08ad136f183889923314c1cf7988347fe8b7ab6531d44837bb076"
 dependencies = [
+ "lenient_semver",
  "serde_json",
+ "winreg",
 ]
 
 [[package]]
@@ -470,6 +512,12 @@ name = "ryu"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
+
+[[package]]
+name = "semver"
+version = "1.0.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56e6fa9c48d24d85fb3de5ad847117517440f6beceb7798af16b4a87d616b8d0"
 
 [[package]]
 name = "serde"
@@ -787,6 +835,16 @@ name = "windows_x86_64_msvc"
 version = "0.53.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "271414315aff87387382ec3d271b52d7ae78726f5d44ac98b4f4030c91880486"
+
+[[package]]
+name = "winreg"
+version = "0.55.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb5a765337c50e9ec252c2069be9bf91c7df47afb103b642ba3a53bf8101be97"
+dependencies = [
+ "cfg-if",
+ "windows-sys 0.59.0",
+]
 
 [[package]]
 name = "wolfssl"
