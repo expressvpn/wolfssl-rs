@@ -18,8 +18,8 @@ allow = [
 ]
 confidence-threshold = 0.8
 exceptions = [
-    { name = "wolfssl", allow = ["GPL-2.0", "GPL-3.0"], version = "*" },
-    { name = "wolfssl-sys", allow = ["GPL-2.0", "GPL-3.0"], version = "*" },
+    { name = "wolfssl", allow = ["GPL-2.0-or-later"], version = "*" },
+    { name = "wolfssl-sys", allow = ["GPL-2.0-or-later"], version = "*" },
 ]
 
 [licenses.private]
@@ -31,6 +31,17 @@ wildcards = "allow"
 highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
+skip = [
+    { name = "windows-targets", version = "0.52.6" },
+    { name = "windows_aarch64_gnullvm", version = "0.52.6" },
+    { name = "windows_aarch64_msvc", version = "0.52.6" },
+    { name = "windows_i686_gnu", version = "0.52.6" },
+    { name = "windows_i686_gnullvm", version = "0.52.6" },
+    { name = "windows_i686_msvc", version = "0.52.6" },
+    { name = "windows_x86_64_gnu", version = "0.52.6" },
+    { name = "windows_x86_64_gnullvm", version = "0.52.6" },
+    { name = "windows_x86_64_msvc", version = "0.52.6" },
+]
 
 [sources]
 unknown-registry = "deny"

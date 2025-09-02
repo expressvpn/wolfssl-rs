@@ -1,5 +1,5 @@
 /// This is an example application that attempts to connect to the OQS test site
-/// using the hybrid P521 and Kyber Level 5 key exchange. The test site port that
+/// using the hybrid P521 and ML-KEM 1024 key exchange. The test site port that
 /// we use only offers this specific combination, making it an effective test.
 ///
 /// Note: This tool is built with unsafe primitives with limited error handling or
@@ -13,7 +13,10 @@ use wolfssl_sys as ffi;
 
 use std::net::TcpStream;
 use std::os::raw::c_int;
+#[cfg(unix)]
 use std::os::unix::io::AsRawFd;
+#[cfg(windows)]
+use std::os::windows::io::AsRawSocket;
 
 use std::ffi::CStr;
 use std::ffi::CString;
@@ -27,8 +30,8 @@ fn main() {
         .expect("Couldn't convert URL to a c string")
         .as_c_str()
         .as_ptr() as *mut ::std::os::raw::c_void;
-    // The port that runs P521 Kyber Level 5 hybrid
-    let port = 6043;
+    // The port that runs P521 ML-KEM 1024 hybrid (RSA3072 signature)
+    let port = 6067;
 
     // Compile in the OQS CA at build time
     let pq_osa_ca = include_bytes!("test_certs/pq-osa-ca.crt");
@@ -62,18 +65,21 @@ fn main() {
         // Create new SSL stream
         let ssl = ffi::wolfSSL_new(context);
 
-        // Enable Kyber
-        let res = ffi::wolfSSL_UseKeyShare(ssl, ffi::WOLFSSL_P521_KYBER_LEVEL5 as u16);
+        // Enable P521 ML-KEM 1024
+        let res = ffi::wolfSSL_UseKeyShare(ssl, ffi::WOLFSSL_P521_ML_KEM_1024 as u16);
 
-        // Check that Kyber was enabled
+        // Check that ML-KEM was enabled
         assert_eq!(res, ffi::WOLFSSL_SUCCESS as c_int);
 
-        // Try to open a TCP stream to OQS test site - 6007
-        let stream = TcpStream::connect(format!("{}:{}", site, port))
-            .expect("Couldn't connect to test site");
+        // Try to open a TCP stream to OQS test site
+        let stream =
+            TcpStream::connect(format!("{site}:{port}")).expect("Couldn't connect to test site");
 
         // Tell WolfSSL what the file descriptor is for the stream
+        #[cfg(unix)]
         ffi::wolfSSL_set_fd(ssl, stream.as_raw_fd());
+        #[cfg(windows)]
+        ffi::wolfSSL_set_fd(ssl, stream.as_raw_socket() as i32);
 
         // Try to connect
         let res = ffi::wolfSSL_connect(ssl);
@@ -87,7 +93,7 @@ fn main() {
             std::process::exit(-1);
         }
 
-        println!("Connected to {}", site);
+        println!("Connected to {site}");
         println!(
             "Key Exchange: {:?}",
             CStr::from_ptr(ffi::wolfSSL_get_curve_name(ssl))

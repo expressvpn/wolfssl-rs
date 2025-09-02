@@ -1,6 +1,7 @@
 //! The `wolfssl` crate is designed to be a Rust layer built on top of
 //! the `wolfssl-sys` crate (a C passthrough crate).
 
+mod aes256;
 mod callback;
 mod chacha20_poly1305;
 mod context;
@@ -9,6 +10,7 @@ mod error;
 mod rng;
 mod ssl;
 
+pub use aes256::*;
 pub use callback::*;
 pub use chacha20_poly1305::*;
 pub use context::*;
@@ -92,6 +94,29 @@ pub fn enable_debugging(on: bool) {
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Debug.html#function-wolfssl_debugging_off
         // [1]: https://www.wolfssl.com/doxygen/group__Debug.html#gafa8dab742182b891d80300fb195399ce
         unsafe { wolfssl_sys::wolfSSL_Debugging_OFF() }
+    }
+}
+
+#[cfg(feature = "debug")]
+pub use wolfssl_sys::wolfSSL_Logging_cb as WolfsslLoggingCallback;
+
+/// Wraps [`wolfSSL_SetLoggingCb`][0]. You must call [`enable_debugging`] first to enable logging at runtime before setting the callback.
+///
+/// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Logging.html#function-wolfssl_setloggingcb
+#[cfg(feature = "debug")]
+pub fn set_logging_callback(cb: WolfsslLoggingCallback) {
+    wolf_init().expect("Unable to initialize wolfSSL");
+
+    // SAFETY: [`wolfSSL_SetLoggingCb`][0] would return an error if a function pointer is not provided, or we failed to set logging callback.
+    // This function will be compiled only on enabling feature `debug`
+    //
+    // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Logging.html#function-wolfssl_setloggingcb
+    match unsafe { wolfssl_sys::wolfSSL_SetLoggingCb(cb) } {
+        0 => {}
+        wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => {
+            panic!("Function pointer is not provided")
+        }
+        e => unreachable!("wolfSSL_SetLoggingCb: {e:?}"),
     }
 }
 
@@ -266,8 +291,13 @@ pub enum CurveGroup {
     P521MLKEM1024,
 }
 
+#[cfg(unix)]
+type CurveGroupType = std::os::raw::c_uint;
+#[cfg(windows)]
+type CurveGroupType = std::os::raw::c_int;
+
 impl CurveGroup {
-    fn as_ffi(&self) -> std::os::raw::c_uint {
+    fn as_ffi(&self) -> CurveGroupType {
         use CurveGroup::*;
         match self {
             EccSecp256R1 => wolfssl_sys::WOLFSSL_ECC_SECP256R1,
@@ -289,6 +319,7 @@ impl CurveGroup {
 }
 
 /// Defines a CA certificate
+#[derive(Debug, Copy, Clone)]
 pub enum RootCertificate<'a> {
     /// In-memory PEM buffer
     PemBuffer(&'a [u8]),
@@ -299,6 +330,7 @@ pub enum RootCertificate<'a> {
 }
 
 /// Defines either a public or private key
+#[derive(Debug, Copy, Clone)]
 pub enum Secret<'a> {
     /// In-memory ASN1 buffer
     Asn1Buffer(&'a [u8]),
@@ -312,7 +344,7 @@ pub enum Secret<'a> {
 
 /// SSL Verification method
 /// Ref: `https://www.wolfssl.com/doxygen/group__Setup.html#gaf9198658e31dd291088be18262ef2354`
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum SslVerifyMode {
     /// No verification done
     SslVerifyNone,

@@ -27,11 +27,19 @@ jobs:
           state: all
       - id: pr_labels
         uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.find_pr.outputs.pr }}
+          EVENT_NUMBER: ${{ github.event.number }}
         with:
           script: |
-            const issue_number = ${{ steps.find_pr.outputs.pr }}
             const owner = context.repo.owner
             const repo = context.repo.repo
+            const issue_number = context.eventName === 'pull_request' ? process.env.EVENT_NUMBER : process.env.PR_NUMBER
+
+            if (!owner || !repo || !issue_number) {
+              core.setFailed(`Missing required parameters: owner=${owner}, repo=${repo}, issue_number=${issue_number}`)
+              return
+            }
 
             const attached_labels = (await github.rest.issues.listLabelsOnIssue({ owner, repo, issue_number })).data
 
@@ -44,7 +52,6 @@ jobs:
     needs: check_label
     if: needs.check_label.outputs.is_release_label_attached == 'true'
     env:
-      EARTHLY_TOKEN: "${{ secrets.EARTHLY_TOKEN }}"
       CARGO_REGISTRY_TOKEN: "${{ secrets.CARGO_REGISTRY_TOKEN }}"
       FORCE_COLOR: 1
     steps:
@@ -157,7 +164,7 @@ jobs:
 
                 crates_to_publish.push({ name, version_on_file, version_on_crate_io, release_status: ":white_check_mark: Release", comment: "" })
 
-                run_command_stream(["earthly", "--push", "--ci", "--org", "expressvpn", "--satellite", "wolfssl-rs", "--secret", "CARGO_REGISTRY_TOKEN", "+publish", `--PACKAGE=${name}`, `--DRY_RUN=${is_dry_run}`])
+                run_command_stream(["earthly", "--push", "--ci", "--secret", "CARGO_REGISTRY_TOKEN", "+publish", `--PACKAGE=${name}`, `--DRY_RUN=${is_dry_run}`])
                 if (!is_dry_run) {
                   await create_github_release(name, version_on_file)
                 }

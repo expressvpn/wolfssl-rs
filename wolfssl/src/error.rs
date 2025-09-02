@@ -2,6 +2,7 @@ use std::ffi::c_int;
 
 use bytes::Bytes;
 use thiserror::Error;
+use wolfssl_sys::wolfCrypt_ErrorCodes_ASN_NO_SIGNER_E as WOLFSSL_ERROR_ASN_NO_SIGNER;
 use wolfssl_sys::wolfSSL_ErrorCodes_DOMAIN_NAME_MISMATCH as WOLFSSL_ERROR_DOMAIN_NAME_MISMATCH;
 use wolfssl_sys::wolfSSL_ErrorCodes_DUPLICATE_MSG_E as WOLFSSL_ERROR_DUPLICATE_MSG_E;
 use wolfssl_sys::wolfSSL_ErrorCodes_ZERO_RETURN as WOLFSSL_ERROR_ZERO_RETURN_ALT;
@@ -57,6 +58,9 @@ impl Error {
 /// Abstraction over WolfSSL errors
 #[derive(Clone, Debug, Error)]
 pub enum ErrorKind {
+    /// CA cert not available to verify certificate
+    #[error("CA cert not available to verify certificate")]
+    CaCertNotAvailable,
     /// Domain name mismatch error)
     #[error("Domain name mismatch")]
     DomainNameMismatch,
@@ -82,6 +86,7 @@ impl std::convert::From<c_int> for ErrorKind {
     // constructed.
     fn from(code: c_int) -> Self {
         let this = match code {
+            WOLFSSL_ERROR_ASN_NO_SIGNER => Self::CaCertNotAvailable,
             WOLFSSL_ERROR_DOMAIN_NAME_MISMATCH => Self::DomainNameMismatch,
             WOLFSSL_ERROR_DUPLICATE_MSG_E => Self::DuplicateMessage,
             WOLFSSL_ERROR_ZERO_RETURN => Self::PeerClosed,
@@ -103,7 +108,6 @@ impl std::convert::From<c_int> for ErrorKind {
                 }
             ),
             "Attempting to construct a `ErrorKind` from a non-error code {code}",
-            code = code,
         );
 
         this

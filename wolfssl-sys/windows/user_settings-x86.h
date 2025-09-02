@@ -1,0 +1,12 @@
+#ifndef _WIN_USER_SETTINGS_H_
+#define _WIN_USER_SETTINGS_H_
+
+#undef WOLFSSL_AESNI
+
+#undef HAVE_INTEL_RDSEED
+
+#undef USE_INTEL_SPEEDUP
+
+#undef WOLFSSL_X86_64_BUILD
+
+#endif /* _WIN_USER_SETTINGS_H_ */

@@ -12,9 +12,12 @@ exclude = ["wolfssl-src/**/*.pdf"] # crates.io has a size limit for publishing. 
 edition.workspace = true
 
 [build-dependencies]
-bindgen = "0.71"
+bindgen = "0.72"
 autotools = "0.2"
-build-target = "0.4.0"
+build-target = "0.8.0"
+
+[target.'cfg(windows)'.build-dependencies]
+msbuild = "0.2.0"
 
 [dev-dependencies]
 test-case = "3.0"
@@ -24,6 +27,7 @@ default = ["postquantum"]
 debug = []
 postquantum = []
 kyber_only = ["postquantum"]
+system_ca_certs = []
 
 [[example]]
 name = "connect_pq"
