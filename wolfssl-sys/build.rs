@@ -121,10 +121,10 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
         let src_path = entry.path();
         let dest_path = dest.join(entry.file_name());
 
-        if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dest_path)?
-        } else if entry.file_name() == ".git" {
+        if entry.file_name() == ".git" {
             // Skip copying .git
+        } else if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?
         } else {
             fs::copy(&src_path, &dest_path).inspect_err(|e| {
                 println!(
