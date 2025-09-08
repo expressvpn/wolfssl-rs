@@ -107,10 +107,16 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
  */
 fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
     if !dest.exists() {
-        fs::create_dir_all(dest)?;
+        fs::create_dir_all(dest).inspect_err(|e| {
+            println!("Error while creating dir: {:?}", e);
+        })?;
     }
 
-    for entry in fs::read_dir(src)? {
+    let dir_contents = fs::read_dir(src).inspect_err(|e| {
+        println!("Error while reading dir {:?}: {:?}", src, e);
+    })?;
+
+    for entry in dir_contents {
         let entry = entry?;
         let src_path = entry.path();
         let dest_path = dest.join(entry.file_name());
@@ -120,7 +126,12 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
         } else if entry.file_name() == ".git" {
             // Skip copying .git
         } else {
-            fs::copy(&src_path, &dest_path)?;
+            fs::copy(&src_path, &dest_path).inspect_err(|e| {
+                println!(
+                    "Error while copying dir {:?}->{:?}: {:?}",
+                    src_path, dest_path, e
+                );
+            })?;
         }
     }
 
