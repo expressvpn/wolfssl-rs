@@ -17,7 +17,7 @@ env:
 
 jobs:
   ci:
-    needs: [earthly, coverage, build-ios, build-tvos, build-windows]
+    needs: [earthly, coverage, build-ios, build-tvos, build-catalyst, build-windows]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -179,6 +179,25 @@ jobs:
         run: cargo +$RUST_NIGHTLY_VERSION build -Zbuild-std --release --target aarch64-apple-tvos --features system_ca_certs -v -v
       - name: Build on tvOS Sim
         run: cargo +$RUST_NIGHTLY_VERSION build -Zbuild-std --release --target aarch64-apple-tvos-sim --target x86_64-apple-tvos --features system_ca_certs -v -v
+  build-catalyst:
+    env:
+      IPHONEOS_DEPLOYMENT_TARGET: '13.1'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+            submodules: true
+      - name: Install automake
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install autoconf automake libtool
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          target: aarch64-apple-ios-macabi, x86_64-apple-ios-macabi
+      - name: Build on Mac Catalyst (ARM64)
+        run: cargo build --release --target aarch64-apple-ios-macabi --features system_ca_certs -v -v
+      - name: Build on Mac Catalyst (x86_64)
+        run: cargo build --release --target x86_64-apple-ios-macabi --features system_ca_certs -v -v
   build-windows:
     strategy:
       fail-fast: false
