@@ -435,9 +435,16 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
             panic!("IPHONEOS_DEPLOYMENT_TARGET is empty")
         }
 
-        // Build options for iOS
+        // Check if we are building for Mac Catalyst or iOS device
+        let arm64_arch = if env::var("CARGO_CFG_TARGET_ABI").unwrap_or_default() == "macabi" {
+            "arm64-apple-darwin"
+        } else {
+            "arm64-apple-ios"
+        };
+
+        // Build options for iOS/Mac Catalyst
         let (chost, arch_flags, arch) = match build_target::target_arch() {
-            build_target::Arch::AArch64 => ("arm64-apple-ios", "-O3", "arm64"),
+            build_target::Arch::AArch64 => (arm64_arch, "-O3", "arm64"),
             build_target::Arch::X86_64 => ("x86_64-apple-darwin", "-O3", "x86_64"),
             _ => panic!("Unsupported build_target for iOS"),
         };
