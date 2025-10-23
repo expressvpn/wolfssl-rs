@@ -427,6 +427,25 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         conf.env("LIBS", "-llog -landroid");
     }
 
+    if build_target::target_os() == build_target::Os::MacOS {
+        // Check whether we have set MACOSX_DEPLOYMENT_TARGET to ensure we support older MacOS
+        let deployment_target = env::var("MACOSX_DEPLOYMENT_TARGET")
+            .expect("Must have set minimum supported MacOS version");
+        if deployment_target.is_empty() {
+            panic!("MACOSX_DEPLOYMENT_TARGET is empty")
+        }
+
+        // Build options for MacOS
+        let chost = match build_target::target_arch() {
+            build_target::Arch::AArch64 => "arm64-apple-darwin",
+            build_target::Arch::X86_64 => "x86_64-apple-darwin",
+            _ => panic!("Unsupported build_target for MacOS"),
+        };
+
+        // Per arch configurations
+        conf.config_option("host", Some(chost));
+    }
+
     if build_target::target_os() == build_target::Os::iOS {
         // Check whether we have set IPHONEOS_DEPLOYMENT_TARGET to ensure we support older iOS
         let ios_target = env::var("IPHONEOS_DEPLOYMENT_TARGET")
