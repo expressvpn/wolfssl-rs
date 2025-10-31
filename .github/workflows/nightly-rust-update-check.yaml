@@ -31,7 +31,7 @@ jobs:
         echo rust="$stable" >> "$GITHUB_OUTPUT"
 
     - name: Update Rust version in Earthfile
-      run: sed -i -E 's/^(\s*FROM rust):(:?[0-9\.]+)$/\1:${{ steps.check-version.outputs.rust }}/g' Earthfile
+      run: sed -i -E 's/^(FROM rust:)[0-9.]+(-[a-z]+)?$/\1${{ steps.check-version.outputs.rust }}\2/g' Earthfile
 
     - name: Update Rust version in Github action
       run: sed -i -E 's/^(\s*RUST_VERSION:\s*)([0-9\.]+)$/\1${{ steps.check-version.outputs.rust }}/g' .github/workflows/ci.yaml

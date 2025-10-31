@@ -326,22 +326,17 @@ pub enum Secret<'a> {
 
 /// SSL Verification method
 /// Ref: `https://www.wolfssl.com/doxygen/group__Setup.html#gaf9198658e31dd291088be18262ef2354`
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone)]
 pub enum SslVerifyMode {
     /// No verification done
     SslVerifyNone,
     /// Verify peers certificate
+    #[default]
     SslVerifyPeer,
     /// Verify client's certificate (applicable only for server)
     SslVerifyFailIfNoPeerCert,
     /// Verify client's certificate except PSK connection (applicable only for server)
     SslVerifyFailExceptPsk,
-}
-
-impl Default for SslVerifyMode {
-    fn default() -> Self {
-        Self::SslVerifyPeer
-    }
 }
 
 impl From<SslVerifyMode> for c_int {
