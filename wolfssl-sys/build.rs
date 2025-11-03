@@ -335,10 +335,10 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
             "yes,kyber"
         } else {
             conf.cflag("-DWOLFSSL_ML_KEM_USE_OLD_IDS");
-            "all"
+            "yes,all"
         };
         // Enable Kyber/ML-KEM
-        conf.enable("kyber", Some(flags))
+        conf.enable("mlkem", Some(flags))
             // SHA3 is needed for using WolfSSL's implementation of Kyber/ML-KEM
             .enable("sha3", None);
     }
