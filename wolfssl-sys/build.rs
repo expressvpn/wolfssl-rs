@@ -141,9 +141,6 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
 const PATCH_DIR: &str = "patches";
 const PATCHES: &[&str] = &[
     "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
-    "mlkem-code-point-backward-compatible.patch",
-    "fix-apple-native-cert-validation.patch",
-    "fix-dn-check-apple-native-cert-validation.patch",
     "reset-dtls-13-timeout.patch",
 ];
 
