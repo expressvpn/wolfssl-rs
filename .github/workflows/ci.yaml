@@ -239,7 +239,7 @@ jobs:
             os: windows-2022
             arch: x86
           - target: aarch64-pc-windows-msvc
-            os: windows-2022
+            os: windows-11-arm
             arch: arm64
     runs-on: ${{ matrix.os }}
     steps:
@@ -258,6 +258,6 @@ jobs:
       - name: Build on Windows (${{ matrix.arch }})
         run: cargo build --release --target ${{ matrix.target }} -v -v
       - name: Test on Windows (${{ matrix.arch }})
-        # Only run tests on native architecture (x64) since cross-compilation tests won't run
-        if: matrix.target == 'x86_64-pc-windows-msvc'
+        # Only run tests on native architecture (x64/ARM64) since cross-compilation tests won't run
+        if: matrix.target == 'x86_64-pc-windows-msvc' || matrix.target == 'aarch64-pc-windows-msvc'
         run: cargo test --release --target ${{ matrix.target }} -v -v
