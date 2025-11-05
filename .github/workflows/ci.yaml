@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [run-tests, build-release, fmt, lint, check-dependencies, build-android-release, build-riscv64, test-riscv64]
+        target: [run-tests, build-release, fmt, lint, check-dependencies, build-android-release, build-arm64, build-riscv64, test-riscv64]
     runs-on: ubuntu-latest
     env:
       FORCE_COLOR: 1

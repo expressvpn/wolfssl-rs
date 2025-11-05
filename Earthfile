@@ -40,6 +40,20 @@ build-deps-riscv64:
         apt-get install -y gcc-riscv64-linux-gnu build-essential autoconf autotools-dev libtool-bin clang cmake qemu-system-riscv64 qemu-user-static
     COPY --keep-ts --dir Cargo.toml Cargo.lock deny.toml wolfssl wolfssl-sys ./.cargo ./
 
+build-deps-arm64:
+    DO lib-rust+INIT --keep_fingerprints=true
+    RUN apt-get update -qq && apt-get install --no-install-recommends -qq \
+        gcc-aarch64-linux-gnu \
+        g++-aarch64-linux-gnu \
+        autoconf \
+        autotools-dev \
+        libtool-bin \
+        clang \
+        cmake
+
+    RUN rustup target add aarch64-unknown-linux-gnu
+    COPY --keep-ts --dir Cargo.toml Cargo.lock deny.toml wolfssl wolfssl-sys ./.cargo ./
+
 copy-src:
     FROM +build-deps
     COPY --keep-ts --dir Cargo.toml Cargo.lock deny.toml wolfssl wolfssl-sys ./
@@ -80,6 +94,10 @@ run-coverage:
 build:
     BUILD +run-tests
     BUILD +build-release
+
+build-arm64:
+  FROM +build-deps-arm64
+  DO lib-rust+CARGO --args="build --release --target=aarch64-unknown-linux-gnu"
 
 build-riscv64:
     FROM +build-deps-riscv64
