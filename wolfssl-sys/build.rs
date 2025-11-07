@@ -611,6 +611,10 @@ fn main() -> std::io::Result<()> {
             wolfssl_install_dir.join("lib").to_str().unwrap()
         );
         println!("cargo:rustc-link-lib=static=wolfssl");
+        if cfg!(all(feature = "system_ca_certs", target_vendor = "apple")) {
+            println!("cargo:rustc-link-lib=framework=CoreFoundation");
+            println!("cargo:rustc-link-lib=framework=Security");
+        }
     }
 
     // Invalidate the built crate whenever the wrapper changes
