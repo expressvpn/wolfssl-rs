@@ -144,6 +144,7 @@ const PATCHES: &[&str] = &[
     "mlkem-code-point-backward-compatible.patch",
     "fix-apple-native-cert-validation.patch",
     "fix-dn-check-apple-native-cert-validation.patch",
+    "reset-dtls-13-timeout.patch",
 ];
 
 /**
