@@ -1,0 +1,30 @@
+From cd0d98601676da4e7d3b81646c8e96cf882eac63 Mon Sep 17 00:00:00 2001
+From: Juliusz Sosinowicz <juliusz@wolfssl.com>
+Date: Wed, 1 Oct 2025 13:21:28 +0200
+Subject: [PATCH] Reset DTLS 1.3 timeout
+
+---
+ src/internal.c        |  7 ++++-
+ tests/api.c           |  1 +
+ tests/api/test_dtls.c | 59 +++++++++++++++++++++++++++++++++++++++++++
+ tests/api/test_dtls.h |  1 +
+ 4 files changed, 67 insertions(+), 1 deletion(-)
+
+diff --git a/src/internal.c b/src/internal.c
+index 153a746fbc..2397e5b002 100644
+--- a/src/internal.c
++++ b/src/internal.c
+@@ -22799,7 +22799,12 @@ static int DoProcessReplyEx(WOLFSSL* ssl, int allowSocketErr)
+                                 return ZERO_RETURN;
+                             }
+ #endif /* WOLFSSL_EARLY_DATA */
+-
++                            if (ret == 0 ||
++                                ret == WC_NO_ERR_TRACE(WC_PENDING_E)) {
++                                /* Reset timeout as we have received a valid
++                                 * DTLS handshake message */
++                                ssl->dtls_timeout = ssl->dtls_timeout_init;
++                            }
+                         }
+ #endif /* WOLFSSL_DTLS13 */
+                     }
