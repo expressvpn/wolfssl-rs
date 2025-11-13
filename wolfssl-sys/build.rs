@@ -141,9 +141,7 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
 const PATCH_DIR: &str = "patches";
 const PATCHES: &[&str] = &[
     "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
-    "mlkem-code-point-backward-compatible.patch",
-    "fix-apple-native-cert-validation.patch",
-    "fix-dn-check-apple-native-cert-validation.patch",
+    "linux-aarch64-noinline.patch",
     "reset-dtls-13-timeout.patch",
 ];
 
@@ -326,7 +324,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .cflag("-DUSE_CERT_BUFFERS_4096")
         .cflag("-DUSE_CERT_BUFFERS_256")
         .cflag("-DWOLFSSL_NO_SPHINCS")
-        .cflag("-DWOLFSSL_TLS13_MIDDLEBOX_COMPAT");
+        .cflag("-DWOLFSSL_TLS13_MIDDLEBOX_COMPAT")
+        .cflag("-DWOLFSSL_DTLS_RECORDS_CAN_SPAN_DATAGRAMS");
 
     if cfg!(feature = "debug") {
         conf.enable("debug", None);
@@ -338,10 +337,10 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
             "yes,kyber"
         } else {
             conf.cflag("-DWOLFSSL_ML_KEM_USE_OLD_IDS");
-            "all"
+            "yes,all"
         };
         // Enable Kyber/ML-KEM
-        conf.enable("kyber", Some(flags))
+        conf.enable("mlkem", Some(flags))
             // SHA3 is needed for using WolfSSL's implementation of Kyber/ML-KEM
             .enable("sha3", None);
     }
@@ -613,6 +612,10 @@ fn main() -> std::io::Result<()> {
             wolfssl_install_dir.join("lib").to_str().unwrap()
         );
         println!("cargo:rustc-link-lib=static=wolfssl");
+        if cfg!(all(feature = "system_ca_certs", target_vendor = "apple")) {
+            println!("cargo:rustc-link-lib=framework=CoreFoundation");
+            println!("cargo:rustc-link-lib=framework=Security");
+        }
     }
 
     // Invalidate the built crate whenever the wrapper changes
