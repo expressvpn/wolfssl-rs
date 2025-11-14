@@ -324,8 +324,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .cflag("-DUSE_CERT_BUFFERS_4096")
         .cflag("-DUSE_CERT_BUFFERS_256")
         .cflag("-DWOLFSSL_NO_SPHINCS")
-        .cflag("-DWOLFSSL_TLS13_MIDDLEBOX_COMPAT")
-        .cflag("-DWOLFSSL_DTLS_RECORDS_CAN_SPAN_DATAGRAMS");
+        .cflag("-DWOLFSSL_TLS13_MIDDLEBOX_COMPAT");
 
     if cfg!(feature = "debug") {
         conf.enable("debug", None);
