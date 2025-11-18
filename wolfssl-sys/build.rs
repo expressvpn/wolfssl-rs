@@ -366,7 +366,10 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         }
         build_target::Arch::X86_64 => {
             // We don't need these build flag for iOS simulator
-            if build_target::target_os() != build_target::Os::iOS {
+            if !(build_target::target_os() == build_target::Os::iOS
+                && build_target::target_env()
+                    == build_target::Env::Other(String::from("sim")).into())
+            {
                 // Enable Intel ASM optmisations
                 conf.enable("intelasm", None);
                 // Enable AES hardware acceleration
