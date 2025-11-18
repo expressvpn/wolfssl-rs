@@ -458,7 +458,9 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         }
 
         // Check if we are building for Mac Catalyst or iOS device
-        let arm64_arch = if env::var("CARGO_CFG_TARGET_ABI").unwrap_or_default() == "macabi" {
+        let arm64_arch = if build_target::target_env()
+            == build_target::Env::Other(String::from("macabi")).into()
+        {
             "arm64-apple-darwin"
         } else {
             "arm64-apple-ios"
