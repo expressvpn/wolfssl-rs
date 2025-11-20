@@ -68,6 +68,16 @@ build-dev:
 build-release:
     FROM +copy-src
     DO lib-rust+CARGO --args="build --release" --output="release/[^/]+"
+
+    # Display wolfssl configuration if available
+    RUN if [ -f target/release/wolfssl_config.json ]; then \
+        echo "=== WolfSSL Configuration ===" && \
+        cat target/release/wolfssl_config.json && \
+        echo "=== End Configuration ==="; \
+    else \
+        echo "No wolfssl config found"; \
+    fi
+
     SAVE ARTIFACT target/release /release AS LOCAL artifacts/release
 
 # run-tests executes all unit and integration tests via Cargo
@@ -137,6 +147,7 @@ fmt:
 check-dependencies:
     FROM +copy-src
     DO lib-rust+CARGO --args="deny --all-features check --deny warnings bans license sources"
+
 
 # publish publishes the target crate to cargo.io. Must specify package by --PACKAGE=<package-name>
 publish:

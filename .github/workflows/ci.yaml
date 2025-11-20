@@ -43,6 +43,18 @@ jobs:
           submodules: true
       - name: Run +${{ matrix.target }} on Earthly
         run: earthly --ci +${{ matrix.target }}
+      - name: Extract and display WolfSSL configuration (Linux)
+        if: matrix.target == 'build-release'
+        run: |
+          if [ -f target/release/wolfssl_config.json ]; then
+            echo "## WolfSSL Build Configuration (Linux)" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+            cat target/release/wolfssl_config.json >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## WolfSSL Build Configuration (Linux)" >> $GITHUB_STEP_SUMMARY
+            echo "No configuration file found" >> $GITHUB_STEP_SUMMARY
+          fi
   coverage:
     runs-on: ubuntu-latest
     env:
@@ -284,3 +296,22 @@ jobs:
         # Only run tests on native architecture (x64/ARM64) since cross-compilation tests won't run
         if: matrix.target == 'x86_64-pc-windows-msvc' || matrix.target == 'aarch64-pc-windows-msvc'
         run: cargo test --release --target ${{ matrix.target }} -v -v
+      - name: Extract and display WolfSSL configuration (Windows)
+        run: |
+          # Find the wolfssl config JSON file in the target directory
+          $configFile = Get-ChildItem -Path target -Name "wolfssl_config.json" -Recurse -File | Select-Object -First 1
+          if ($configFile) {
+            $configPath = Join-Path "target" $configFile
+            Write-Host "Found wolfssl config at: $configPath"
+            $configContent = Get-Content $configPath -Raw
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## WolfSSL Build Configuration (Windows - ${{ matrix.arch }})"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```json'
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $configContent
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```'
+          } else {
+            Write-Host "No wolfssl config file found"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## WolfSSL Build Configuration (Windows - ${{ matrix.arch }})"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "No configuration file found"
+          }
+        shell: pwsh
+
