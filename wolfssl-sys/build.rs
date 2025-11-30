@@ -296,6 +296,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .enable("dtls-frag-ch", None)
         // Enable setting the D/TLS MTU size
         .enable("dtls-mtu", None)
+        // Enable pre-shared keys
+        .enable("psk", None)
         // Enable Secure Renegotiation
         .enable("secure-renegotiation", None)
         // Enable single threaded mode

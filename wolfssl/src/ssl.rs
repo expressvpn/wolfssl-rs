@@ -1,6 +1,6 @@
 use crate::{
     callback::{IOCallbackResult, IOCallbacks},
-    context::WolfsslPointer,
+    context::{PreSharedKeyCallbacks, WolfsslPointer},
     error::{Error, Poll, PollResult, Result},
     CurveGroup, ProtocolVersion, SslVerifyMode, TLS_MAX_RECORD_SIZE,
 };
@@ -10,6 +10,7 @@ use thiserror::Error;
 
 use std::{
     ffi::{c_int, c_uchar, c_ushort, c_void},
+    sync::Arc,
     time::Duration,
 };
 
@@ -170,6 +171,13 @@ pub struct Session<IOCB: IOCallbacks> {
 
     /// Box so we have a stable address to pass to FFI.
     io: Box<IOCB>,
+    /// The Arc is to ensure that the PreSharedKeyCallbacks live as long as any [Context] or
+    /// [Session] that is using them. We need to store a pointer to the PreSharedKeyCallbacks in the
+    /// WOLFSSL object in order to be able to actually call the callbacks, but we can't store an
+    /// `&dyn PreSharedKeyCallbacks` in the WOLFSSL context because that's a fat pointer and cannot
+    /// be cast to a C pointer. Instead, we use an extra `Box`, and store a pointer to that `Box` in
+    /// the WOLFSSL object.
+    pre_shared_key_callbacks: Option<Arc<Box<dyn PreSharedKeyCallbacks>>>,
 
     #[cfg(feature = "debug")]
     secret_cb: Option<Box<Tls13SecretCallbacksArg>>,
@@ -194,10 +202,12 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     pub(crate) fn new_from_wolfssl_pointer(
         ssl: WolfsslPointer,
         config: SessionConfig<IOCB>,
+        pre_shared_key_callbacks: Option<Arc<Box<dyn PreSharedKeyCallbacks>>>,
     ) -> std::result::Result<Self, NewSessionError> {
         let mut session = Self {
             ssl,
             io: Box::new(config.io),
+            pre_shared_key_callbacks: pre_shared_key_callbacks.clone(),
             #[cfg(feature = "debug")]
             secret_cb: Default::default(),
         };
@@ -239,6 +249,11 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         if let Some(mode) = config.ssl_verify_mode {
             session.set_verify(mode);
         }
+
+        // set_psk_callback_ctx uses the pre_shared_key_callbacks stored in the session object
+        session
+            .set_psk_callback_ctx()
+            .map_err(|e| NewSessionError::SetupFailed("set_psk_callback_ctx", e))?;
 
         #[cfg(feature = "debug")]
         if let Some(keylogger) = config.keylogger {
@@ -363,6 +378,34 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             0 => false,
             1 => true,
             e => unreachable!("wolfSSL_is_init_finished: {e:?}"),
+        }
+    }
+
+    /// Set the context pointer that will be available to PSK calbacks.
+    pub(crate) fn set_psk_callback_ctx(&mut self) -> Result<()> {
+        if let Some(psk_cbs) = self.pre_shared_key_callbacks.as_ref() {
+            let psk_cbs_ptr: *const Box<dyn PreSharedKeyCallbacks> = &**psk_cbs;
+            // SAFETY: No online docs. The implementation of `wolfSSL_set_psk_callback_ctx` simply
+            // assigns to `ssl->options.psk_ctx`. Per the [Library design][0] access is synchronized
+            // via the requirement for `&mut self` in `WelfsslPointer::as_ptr()`. Casting const to
+            // mut is safe since wolfSSL never mutates the callback ctx, and we don't either.
+            //
+            // The pre-shared key callbacks are guaranteed to last the lifetime of the SSL object
+            // because they're stored in the Session object.
+            //
+            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
+            match unsafe {
+                wolfssl_sys::wolfSSL_set_psk_callback_ctx(
+                    self.ssl.as_ptr(),
+                    psk_cbs_ptr as *mut c_void,
+                )
+            } {
+                wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
+                e => Err(Error::fatal(e)),
+            }
+        } else {
+            // no psk -- do nothing
+            Ok(())
         }
     }
 
@@ -1319,6 +1362,7 @@ impl<IOCB: IOCallbacks> Drop for Session<IOCB> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PreSharedKeyClientCallbackResult;
     use crate::{
         context::ContextBuilder, Context, Method, RootCertificate, Secret, Session,
         TLS_MAX_RECORD_SIZE,
@@ -1343,6 +1387,9 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/data/server_key_der_2048"
     ));
+
+    const PSK: [u8; 8] = [0, 99, 8, 34, 2, 42, 3, 5];
+    const PSK_IDENTITY: &std::ffi::CStr = c"test_identity";
 
     static INIT_ENV_LOGGER: OnceLock<()> = OnceLock::new();
 
@@ -1403,6 +1450,31 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone)]
+    struct PskTrivialIdentityCallbacks {}
+
+    impl PreSharedKeyCallbacks for PskTrivialIdentityCallbacks {
+        fn psk_client_callback(
+            &self,
+            _max_identity_length: usize,
+            _max_key_length: usize,
+        ) -> Option<PreSharedKeyClientCallbackResult> {
+            Some(PreSharedKeyClientCallbackResult {
+                identity: PSK_IDENTITY.into(),
+                key: PSK.into(),
+            })
+        }
+
+        fn psk_server_callback(
+            &self,
+            identity: &std::ffi::CStr,
+            _max_key_length: usize,
+        ) -> Option<Vec<u8>> {
+            assert!(identity == PSK_IDENTITY);
+            Some(PSK.into())
+        }
+    }
+
     struct TestClient {
         _ctx: Context,
         ssl: Session<TestIOCallbacks>,
@@ -1436,6 +1508,60 @@ mod tests {
             .unwrap()
             .build();
 
+        make_connected_clients_from_contexts(client_ctx, server_ctx)
+    }
+
+    /// Use a fixed pre-shared-key on both client and server.
+    fn make_connected_clients_with_method_psk(
+        client_method: Method,
+        server_method: Method,
+    ) -> (TestClient, TestClient) {
+        let client_ctx = ContextBuilder::new(client_method)
+            .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
+            .with_pre_shared_key(&PSK)
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        let server_ctx = ContextBuilder::new(server_method)
+            .unwrap_or_else(|e| panic!("new({server_method:?}): {e}"))
+            .with_pre_shared_key(&PSK)
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        make_connected_clients_from_contexts(client_ctx, server_ctx)
+    }
+
+    /// Unlike [make_connected_clients_with_method_psk], will use custom PSK callbacks to transmit
+    /// an "identity" from the client to the server, and verify it's the same on the server.
+    fn make_connected_clients_with_method_psk_custom_callbacks(
+        client_method: Method,
+        server_method: Method,
+    ) -> (TestClient, TestClient) {
+        let callbacks = Box::new(PskTrivialIdentityCallbacks {});
+
+        let client_ctx = ContextBuilder::new(client_method)
+            .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
+            .with_pre_shared_key_callbacks(callbacks.clone())
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        let server_ctx = ContextBuilder::new(server_method)
+            .unwrap_or_else(|e| panic!("new({server_method:?}): {e}"))
+            .with_pre_shared_key_callbacks(callbacks)
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        make_connected_clients_from_contexts(client_ctx, server_ctx)
+    }
+
+    fn make_connected_clients_from_contexts(
+        client_ctx: Context,
+        server_ctx: Context,
+    ) -> (TestClient, TestClient) {
         let (client_io, server_io) = TestIOCallbacks::pair();
 
         let client_read_buffer = client_io.r.clone();
@@ -1483,6 +1609,23 @@ mod tests {
 
         // Internally this calls `try_negotiate`
         let _ = make_connected_clients();
+    }
+
+    #[test_case(Method::TlsClientV1_2, Method::TlsServerV1_2; "tls1.2")]
+    #[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3; "tls1.3")]
+    fn try_negotiate_psk(client_method: Method, server_method: Method) {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let _ = make_connected_clients_with_method_psk(client_method, server_method);
+    }
+
+    #[test_case(Method::TlsClientV1_2, Method::TlsServerV1_2; "tls1.2")]
+    #[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3; "tls1.3")]
+    fn try_negotiate_psk_custom_callbacks(client_method: Method, server_method: Method) {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let _ =
+            make_connected_clients_with_method_psk_custom_callbacks(client_method, server_method);
     }
 
     #[test]
@@ -1878,5 +2021,37 @@ mod tests {
 
         assert!(client_ssl.is_init_finished());
         assert!(server_ssl.is_init_finished());
+    }
+
+    #[test_case(Method::TlsClientV1_2, Method::TlsServerV1_2 => panics "verify mac problem")]
+    #[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3 => panics "binder does not verify")]
+    fn test_wrong_psk(client_method: Method, server_method: Method) {
+        let client_ctx = ContextBuilder::new(client_method)
+            .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
+            .with_pre_shared_key(&[1, 2, 3, 4])
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        let server_ctx = ContextBuilder::new(server_method)
+            .unwrap_or_else(|e| panic!("new({server_method:?}): {e}"))
+            .with_pre_shared_key(&[4, 3, 2, 1])
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        let (client_io, server_io) = TestIOCallbacks::pair();
+
+        let mut client_ssl = client_ctx
+            .new_session(SessionConfig::new(client_io))
+            .unwrap();
+        let mut server_ssl = server_ctx
+            .new_session(SessionConfig::new(server_io))
+            .unwrap();
+
+        for _ in 0..7 {
+            let _ = client_ssl.try_negotiate().unwrap();
+            let _ = server_ssl.try_negotiate().unwrap();
+        }
     }
 }
