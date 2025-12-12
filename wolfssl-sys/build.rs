@@ -617,7 +617,11 @@ fn main() -> std::io::Result<()> {
             wolfssl_install_dir.join("lib").to_str().unwrap()
         );
         println!("cargo:rustc-link-lib=static=wolfssl");
-        if cfg!(all(feature = "system_ca_certs", target_vendor = "apple")) {
+        if cfg!(feature = "system_ca_certs")
+            && (build_target::target_os() == build_target::Os::iOS
+                || build_target::target_os() == build_target::Os::MacOS
+                || build_target::target_os() == build_target::Os::TvOS)
+        {
             println!("cargo:rustc-link-lib=framework=CoreFoundation");
             println!("cargo:rustc-link-lib=framework=Security");
         }
