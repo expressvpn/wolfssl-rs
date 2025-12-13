@@ -1477,10 +1477,12 @@ mod tests {
         make_connected_tls_clients_with_method(Method::TlsClientV1_3, Method::TlsServerV1_3)
     }
 
-    fn make_connected_tls_clients_with_method(
+    // Generic helper to create connected clients with any IO callback type
+    fn make_connected_clients_with_method<IOCB: IOCallbacks>(
         client_method: Method,
         server_method: Method,
-    ) -> (TestClient<TcpIOCallbacks>, TestClient<TcpIOCallbacks>) {
+        io_pair: (IOCB, IOCB),
+    ) -> (TestClient<IOCB>, TestClient<IOCB>) {
         let client_ctx = ContextBuilder::new(client_method)
             .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
             .with_root_certificate(RootCertificate::Asn1Buffer(CA_CERT))
@@ -1499,7 +1501,7 @@ mod tests {
             .unwrap()
             .build();
 
-        let (client_io, server_io) = TcpIOCallbacks::pair();
+        let (client_io, server_io) = io_pair;
 
         let client_ssl = client_ctx
             .new_session(SessionConfig::new(client_io))
@@ -1531,58 +1533,18 @@ mod tests {
         (client, server)
     }
 
+    fn make_connected_tls_clients_with_method(
+        client_method: Method,
+        server_method: Method,
+    ) -> (TestClient<TcpIOCallbacks>, TestClient<TcpIOCallbacks>) {
+        make_connected_clients_with_method(client_method, server_method, TcpIOCallbacks::pair())
+    }
+
     fn make_connected_dtls_clients_with_method(
         client_method: Method,
         server_method: Method,
     ) -> (TestClient<UdpIOCallbacks>, TestClient<UdpIOCallbacks>) {
-        let client_ctx = ContextBuilder::new(client_method)
-            .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
-            .with_root_certificate(RootCertificate::Asn1Buffer(CA_CERT))
-            .unwrap()
-            .with_secure_renegotiation()
-            .unwrap()
-            .build();
-
-        let server_ctx = ContextBuilder::new(server_method)
-            .unwrap_or_else(|e| panic!("new({server_method:?}): {e}"))
-            .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
-            .unwrap()
-            .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
-            .unwrap()
-            .with_secure_renegotiation()
-            .unwrap()
-            .build();
-
-        let (client_io, server_io) = UdpIOCallbacks::pair();
-
-        let client_ssl = client_ctx
-            .new_session(SessionConfig::new(client_io))
-            .unwrap();
-        let server_ssl = server_ctx
-            .new_session(SessionConfig::new(server_io))
-            .unwrap();
-
-        let mut client = TestClient {
-            _ctx: client_ctx,
-            ssl: client_ssl,
-        };
-
-        let mut server = TestClient {
-            _ctx: server_ctx,
-            ssl: server_ssl,
-        };
-
-        for _ in 0..7 {
-            let _ = client.ssl.try_negotiate().unwrap();
-            let _ = server.ssl.try_negotiate().unwrap();
-            // Progress is made because one of the above will have
-            // written and the other will have PendingRead...
-        }
-
-        assert!(client.ssl.is_init_finished());
-        assert!(server.ssl.is_init_finished());
-
-        (client, server)
+        make_connected_clients_with_method(client_method, server_method, UdpIOCallbacks::pair())
     }
 
     #[test]
