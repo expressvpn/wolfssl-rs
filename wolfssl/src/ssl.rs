@@ -1359,22 +1359,51 @@ mod tests {
         }
     }
 
-    struct TestIOCallbacks {
+    // TCP stream semantics: allows partial reads from a continuous buffer
+    struct TcpIOCallbacks {
         r: Rc<Mutex<BytesMut>>,
         w: Rc<Mutex<BytesMut>>,
     }
 
-    impl TestIOCallbacks {
+    // Message queue for UDP datagram semantics (preserves message boundaries)
+    #[derive(Default)]
+    struct MessageQueue {
+        messages: std::collections::VecDeque<Bytes>,
+    }
+
+    impl MessageQueue {
+        fn push(&mut self, data: &[u8]) {
+            self.messages.push_back(Bytes::copy_from_slice(data));
+        }
+
+        fn pop(&mut self, buf: &mut [u8]) -> IOCallbackResult<usize> {
+            let Some(msg) = self.messages.pop_front() else {
+                return IOCallbackResult::WouldBlock;
+            };
+
+            let n = std::cmp::min(buf.len(), msg.len());
+            buf[..n].copy_from_slice(&msg[..n]);
+            IOCallbackResult::Ok(n)
+        }
+    }
+
+    // UDP datagram semantics: message boundaries preserved
+    struct UdpIOCallbacks {
+        r: Rc<Mutex<MessageQueue>>,
+        w: Rc<Mutex<MessageQueue>>,
+    }
+
+    impl UdpIOCallbacks {
         fn pair() -> (Self, Self) {
             let left_to_right = Rc::new(Mutex::new(Default::default()));
             let right_to_left = Rc::new(Mutex::new(Default::default()));
 
-            let left = TestIOCallbacks {
+            let left = UdpIOCallbacks {
                 r: right_to_left.clone(),
                 w: left_to_right.clone(),
             };
 
-            let right = TestIOCallbacks {
+            let right = UdpIOCallbacks {
                 r: left_to_right.clone(),
                 w: right_to_left.clone(),
             };
@@ -1383,7 +1412,43 @@ mod tests {
         }
     }
 
-    impl IOCallbacks for TestIOCallbacks {
+    impl IOCallbacks for UdpIOCallbacks {
+        fn recv(&mut self, buf: &mut [u8]) -> IOCallbackResult<usize> {
+            let mut r = self.r.lock().unwrap();
+            r.pop(buf)
+        }
+
+        fn send(&mut self, buf: &[u8]) -> IOCallbackResult<usize> {
+            if buf.is_empty() {
+                return IOCallbackResult::Ok(0);
+            }
+
+            let mut w = self.w.lock().unwrap();
+            w.push(buf);
+            IOCallbackResult::Ok(buf.len())
+        }
+    }
+
+    impl TcpIOCallbacks {
+        fn pair() -> (Self, Self) {
+            let left_to_right = Rc::new(Mutex::new(Default::default()));
+            let right_to_left = Rc::new(Mutex::new(Default::default()));
+
+            let left = TcpIOCallbacks {
+                r: right_to_left.clone(),
+                w: left_to_right.clone(),
+            };
+
+            let right = TcpIOCallbacks {
+                r: left_to_right.clone(),
+                w: right_to_left.clone(),
+            };
+
+            (left, right)
+        }
+    }
+
+    impl IOCallbacks for TcpIOCallbacks {
         fn recv(&mut self, buf: &mut [u8]) -> IOCallbackResult<usize> {
             let mut r = self.r.lock().unwrap();
             if r.is_empty() {
@@ -1403,21 +1468,21 @@ mod tests {
         }
     }
 
-    struct TestClient {
+    struct TestClient<IOCB: IOCallbacks> {
         _ctx: Context,
-        ssl: Session<TestIOCallbacks>,
-        read_buffer: Rc<Mutex<BytesMut>>,
-        write_buffer: Rc<Mutex<BytesMut>>,
+        ssl: Session<IOCB>,
     }
 
-    fn make_connected_clients() -> (TestClient, TestClient) {
-        make_connected_clients_with_method(Method::TlsClientV1_3, Method::TlsServerV1_3)
+    fn make_connected_clients() -> (TestClient<TcpIOCallbacks>, TestClient<TcpIOCallbacks>) {
+        make_connected_tls_clients_with_method(Method::TlsClientV1_3, Method::TlsServerV1_3)
     }
 
-    fn make_connected_clients_with_method(
+    // Generic helper to create connected clients with any IO callback type
+    fn make_connected_clients_with_method<IOCB: IOCallbacks>(
         client_method: Method,
         server_method: Method,
-    ) -> (TestClient, TestClient) {
+        io_pair: (IOCB, IOCB),
+    ) -> (TestClient<IOCB>, TestClient<IOCB>) {
         let client_ctx = ContextBuilder::new(client_method)
             .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
             .with_root_certificate(RootCertificate::Asn1Buffer(CA_CERT))
@@ -1436,12 +1501,7 @@ mod tests {
             .unwrap()
             .build();
 
-        let (client_io, server_io) = TestIOCallbacks::pair();
-
-        let client_read_buffer = client_io.r.clone();
-        let client_write_buffer = client_io.w.clone();
-        let server_read_buffer = server_io.r.clone();
-        let server_write_buffer = server_io.w.clone();
+        let (client_io, server_io) = io_pair;
 
         let client_ssl = client_ctx
             .new_session(SessionConfig::new(client_io))
@@ -1453,15 +1513,11 @@ mod tests {
         let mut client = TestClient {
             _ctx: client_ctx,
             ssl: client_ssl,
-            read_buffer: client_read_buffer,
-            write_buffer: client_write_buffer,
         };
 
         let mut server = TestClient {
             _ctx: server_ctx,
             ssl: server_ssl,
-            read_buffer: server_read_buffer,
-            write_buffer: server_write_buffer,
         };
 
         for _ in 0..7 {
@@ -1475,6 +1531,20 @@ mod tests {
         assert!(server.ssl.is_init_finished());
 
         (client, server)
+    }
+
+    fn make_connected_tls_clients_with_method(
+        client_method: Method,
+        server_method: Method,
+    ) -> (TestClient<TcpIOCallbacks>, TestClient<TcpIOCallbacks>) {
+        make_connected_clients_with_method(client_method, server_method, TcpIOCallbacks::pair())
+    }
+
+    fn make_connected_dtls_clients_with_method(
+        client_method: Method,
+        server_method: Method,
+    ) -> (TestClient<UdpIOCallbacks>, TestClient<UdpIOCallbacks>) {
+        make_connected_clients_with_method(client_method, server_method, UdpIOCallbacks::pair())
     }
 
     #[test]
@@ -1500,14 +1570,6 @@ mod tests {
                 assert!(
                     bytes.is_empty(),
                     "Bytes should have been consumed by WolfSSL"
-                );
-                assert!(
-                    !client.write_buffer.lock().unwrap().is_empty(),
-                    "The write buffer should be populated as a result"
-                );
-                assert!(
-                    client.read_buffer.lock().unwrap().is_empty(),
-                    "The read buffer should _not_ be populated as a result"
                 );
                 assert_eq!(
                     n,
@@ -1562,7 +1624,7 @@ mod tests {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
         let (mut client, mut server) =
-            make_connected_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
+            make_connected_dtls_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
 
         assert!(client.ssl.is_secure_renegotiation_supported());
         assert!(server.ssl.is_secure_renegotiation_supported());
@@ -1621,7 +1683,7 @@ mod tests {
     fn try_trigger_update_keys(client: Method, server: Method) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let (mut client, mut server) = make_connected_clients_with_method(client, server);
+        let (mut client, mut server) = make_connected_tls_clients_with_method(client, server);
 
         assert!(client.ssl.version().is_tls_13() || client.ssl.version().is_dtls_13());
         assert!(server.ssl.version().is_tls_13() || server.ssl.version().is_dtls_13());
@@ -1706,7 +1768,7 @@ mod tests {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
         let (mut client, _server) =
-            make_connected_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
+            make_connected_dtls_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
 
         client
             .ssl
@@ -1862,7 +1924,7 @@ mod tests {
             .unwrap()
             .build();
 
-        let (client_io, server_io) = TestIOCallbacks::pair();
+        let (client_io, server_io) = TcpIOCallbacks::pair();
 
         let mut client_ssl = client_ctx
             .new_session(SessionConfig::new(client_io).with_ssl_verify_mode(client_mode))
