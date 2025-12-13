@@ -1365,6 +1365,70 @@ mod tests {
         w: Rc<Mutex<BytesMut>>,
     }
 
+    // Message queue for UDP datagram semantics (preserves message boundaries)
+    #[derive(Default)]
+    struct MessageQueue {
+        messages: std::collections::VecDeque<Bytes>,
+    }
+
+    impl MessageQueue {
+        fn push(&mut self, data: &[u8]) {
+            self.messages.push_back(Bytes::copy_from_slice(data));
+        }
+
+        fn pop(&mut self, buf: &mut [u8]) -> IOCallbackResult<usize> {
+            let Some(msg) = self.messages.pop_front() else {
+                return IOCallbackResult::WouldBlock;
+            };
+
+            let n = std::cmp::min(buf.len(), msg.len());
+            buf[..n].copy_from_slice(&msg[..n]);
+            IOCallbackResult::Ok(n)
+        }
+    }
+
+    // UDP datagram semantics: message boundaries preserved
+    struct UdpIOCallbacks {
+        r: Rc<Mutex<MessageQueue>>,
+        w: Rc<Mutex<MessageQueue>>,
+    }
+
+    impl UdpIOCallbacks {
+        fn pair() -> (Self, Self) {
+            let left_to_right = Rc::new(Mutex::new(Default::default()));
+            let right_to_left = Rc::new(Mutex::new(Default::default()));
+
+            let left = UdpIOCallbacks {
+                r: right_to_left.clone(),
+                w: left_to_right.clone(),
+            };
+
+            let right = UdpIOCallbacks {
+                r: left_to_right.clone(),
+                w: right_to_left.clone(),
+            };
+
+            (left, right)
+        }
+    }
+
+    impl IOCallbacks for UdpIOCallbacks {
+        fn recv(&mut self, buf: &mut [u8]) -> IOCallbackResult<usize> {
+            let mut r = self.r.lock().unwrap();
+            r.pop(buf)
+        }
+
+        fn send(&mut self, buf: &[u8]) -> IOCallbackResult<usize> {
+            if buf.is_empty() {
+                return IOCallbackResult::Ok(0);
+            }
+
+            let mut w = self.w.lock().unwrap();
+            w.push(buf);
+            IOCallbackResult::Ok(buf.len())
+        }
+    }
+
     impl TcpIOCallbacks {
         fn pair() -> (Self, Self) {
             let left_to_right = Rc::new(Mutex::new(Default::default()));
@@ -1436,6 +1500,60 @@ mod tests {
             .build();
 
         let (client_io, server_io) = TcpIOCallbacks::pair();
+
+        let client_ssl = client_ctx
+            .new_session(SessionConfig::new(client_io))
+            .unwrap();
+        let server_ssl = server_ctx
+            .new_session(SessionConfig::new(server_io))
+            .unwrap();
+
+        let mut client = TestClient {
+            _ctx: client_ctx,
+            ssl: client_ssl,
+        };
+
+        let mut server = TestClient {
+            _ctx: server_ctx,
+            ssl: server_ssl,
+        };
+
+        for _ in 0..7 {
+            let _ = client.ssl.try_negotiate().unwrap();
+            let _ = server.ssl.try_negotiate().unwrap();
+            // Progress is made because one of the above will have
+            // written and the other will have PendingRead...
+        }
+
+        assert!(client.ssl.is_init_finished());
+        assert!(server.ssl.is_init_finished());
+
+        (client, server)
+    }
+
+    fn make_connected_dtls_clients_with_method(
+        client_method: Method,
+        server_method: Method,
+    ) -> (TestClient<UdpIOCallbacks>, TestClient<UdpIOCallbacks>) {
+        let client_ctx = ContextBuilder::new(client_method)
+            .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
+            .with_root_certificate(RootCertificate::Asn1Buffer(CA_CERT))
+            .unwrap()
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        let server_ctx = ContextBuilder::new(server_method)
+            .unwrap_or_else(|e| panic!("new({server_method:?}): {e}"))
+            .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
+            .unwrap()
+            .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
+            .unwrap()
+            .with_secure_renegotiation()
+            .unwrap()
+            .build();
+
+        let (client_io, server_io) = UdpIOCallbacks::pair();
 
         let client_ssl = client_ctx
             .new_session(SessionConfig::new(client_io))
@@ -1544,7 +1662,7 @@ mod tests {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
         let (mut client, mut server) =
-            make_connected_tls_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
+            make_connected_dtls_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
 
         assert!(client.ssl.is_secure_renegotiation_supported());
         assert!(server.ssl.is_secure_renegotiation_supported());
@@ -1688,7 +1806,7 @@ mod tests {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
         let (mut client, _server) =
-            make_connected_tls_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
+            make_connected_dtls_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
 
         client
             .ssl
