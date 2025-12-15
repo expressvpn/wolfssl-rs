@@ -1324,8 +1324,9 @@ mod tests {
         TLS_MAX_RECORD_SIZE,
     };
 
+    use std::cell::RefCell;
     use std::rc::Rc;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::OnceLock;
 
     use test_case::test_case;
 
@@ -1361,8 +1362,8 @@ mod tests {
 
     // TCP stream semantics: allows partial reads from a continuous buffer
     struct TcpIOCallbacks {
-        r: Rc<Mutex<BytesMut>>,
-        w: Rc<Mutex<BytesMut>>,
+        r: Rc<RefCell<BytesMut>>,
+        w: Rc<RefCell<BytesMut>>,
     }
 
     // Message queue for UDP datagram semantics (preserves message boundaries)
@@ -1389,14 +1390,14 @@ mod tests {
 
     // UDP datagram semantics: message boundaries preserved
     struct UdpIOCallbacks {
-        r: Rc<Mutex<MessageQueue>>,
-        w: Rc<Mutex<MessageQueue>>,
+        r: Rc<RefCell<MessageQueue>>,
+        w: Rc<RefCell<MessageQueue>>,
     }
 
     impl UdpIOCallbacks {
         fn pair() -> (Self, Self) {
-            let left_to_right = Rc::new(Mutex::new(Default::default()));
-            let right_to_left = Rc::new(Mutex::new(Default::default()));
+            let left_to_right = Rc::new(RefCell::new(Default::default()));
+            let right_to_left = Rc::new(RefCell::new(Default::default()));
 
             let left = UdpIOCallbacks {
                 r: right_to_left.clone(),
@@ -1414,7 +1415,7 @@ mod tests {
 
     impl IOCallbacks for UdpIOCallbacks {
         fn recv(&mut self, buf: &mut [u8]) -> IOCallbackResult<usize> {
-            let mut r = self.r.lock().unwrap();
+            let mut r = self.r.borrow_mut();
             r.pop(buf)
         }
 
@@ -1423,7 +1424,7 @@ mod tests {
                 return IOCallbackResult::Ok(0);
             }
 
-            let mut w = self.w.lock().unwrap();
+            let mut w = self.w.borrow_mut();
             w.push(buf);
             IOCallbackResult::Ok(buf.len())
         }
@@ -1431,8 +1432,8 @@ mod tests {
 
     impl TcpIOCallbacks {
         fn pair() -> (Self, Self) {
-            let left_to_right = Rc::new(Mutex::new(Default::default()));
-            let right_to_left = Rc::new(Mutex::new(Default::default()));
+            let left_to_right = Rc::new(RefCell::new(Default::default()));
+            let right_to_left = Rc::new(RefCell::new(Default::default()));
 
             let left = TcpIOCallbacks {
                 r: right_to_left.clone(),
@@ -1450,7 +1451,7 @@ mod tests {
 
     impl IOCallbacks for TcpIOCallbacks {
         fn recv(&mut self, buf: &mut [u8]) -> IOCallbackResult<usize> {
-            let mut r = self.r.lock().unwrap();
+            let mut r = self.r.borrow_mut();
             if r.is_empty() {
                 return IOCallbackResult::WouldBlock;
             }
@@ -1462,7 +1463,7 @@ mod tests {
         }
 
         fn send(&mut self, buf: &[u8]) -> IOCallbackResult<usize> {
-            let mut w = self.w.lock().unwrap();
+            let mut w = self.w.borrow_mut();
             w.extend_from_slice(buf);
             IOCallbackResult::Ok(buf.len()) // extend_from_slice expands w if needed
         }
