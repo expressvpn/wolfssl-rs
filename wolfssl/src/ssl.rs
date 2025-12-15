@@ -574,7 +574,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
 
     /// Checks if this session supports secure renegotiation
     ///
-    /// Only some D/TLS connections support secure renegotiation, so this method
+    /// Only some D/TLS1.2 connections support secure renegotiation, so this method
     /// checks if it's something we can do here.
     pub fn is_secure_renegotiation_supported(&mut self) -> bool {
         // SAFETY: No documentation available for `wolfSSL_SSL_get_secure_renegotiation_support`
@@ -1618,6 +1618,18 @@ mod tests {
             }
             e => panic!("Expected bytes to be read! Got {e:?}"),
         }
+    }
+
+    #[test_case(Method::DtlsClientV1_2, Method::DtlsServerV1_2, true; "DTLS1.2")]
+    #[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_3, false; "DTLS1.3")]
+    fn verify_secure_nego_support(server_method: Method, client_method: Method, expected: bool) {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let (mut client, mut server) =
+            make_connected_dtls_clients_with_method(server_method, client_method);
+
+        assert_eq!(client.ssl.is_secure_renegotiation_supported(), expected);
+        assert_eq!(server.ssl.is_secure_renegotiation_supported(), expected);
     }
 
     #[test]
