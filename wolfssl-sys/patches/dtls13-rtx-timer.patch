@@ -1,0 +1,276 @@
+From 48067f1fa7c465cea5d8963e25246e74bb43ac41 Mon Sep 17 00:00:00 2001
+From: Juliusz Sosinowicz <juliusz@wolfssl.com>
+Date: Wed, 7 Jan 2026 12:52:42 +0100
+Subject: [PATCH 1/3] dtls 1.3: allow rtx interval to be less than a second
+
+---
+ src/dtls13.c          | 11 +++++--
+ src/tls13.c           |  4 +--
+ tests/api/test_dtls.c | 75 +++++++++++++++++++++++++++++++++++++++++++
+ tests/api/test_dtls.h |  4 ++-
+ wolfssl/internal.h    |  7 +++-
+ 5 files changed, 94 insertions(+), 7 deletions(-)
+
+diff --git a/src/dtls13.c b/src/dtls13.c
+index 68b6195853d..bd4d72247d6 100644
+--- a/src/dtls13.c
++++ b/src/dtls13.c
+@@ -110,7 +110,9 @@ typedef struct Dtls13RecordPlaintextHeader {
+    supported. */
+ #define DTLS13_UNIFIED_HEADER_SIZE 5
+ #define DTLS13_MIN_CIPHERTEXT 16
+-#define DTLS13_MIN_RTX_INTERVAL 1
++#ifndef DTLS13_MIN_RTX_INTERVAL
++#define DTLS13_MIN_RTX_INTERVAL 1000
++#endif
+ 
+ #ifndef NO_WOLFSSL_CLIENT
+ WOLFSSL_METHOD* wolfDTLSv1_3_client_method_ex(void* heap)
+@@ -1570,21 +1572,24 @@ static int Dtls13RtxSendBuffered(WOLFSSL* ssl)
+     int isLast;
+     int sendSz;
+ #ifndef NO_ASN_TIME
++#ifdef WOLFSSL_32BIT_MILLI_TIME
+     word32 now;
++#else
++    sword64 now;
++#endif
+ #endif
+     int ret;
+ 
+     WOLFSSL_ENTER("Dtls13RtxSendBuffered");
+ 
+ #ifndef NO_ASN_TIME
+-    now = LowResTimer();
++    now = TimeNowInMilliseconds();
+     if (now - ssl->dtls13Rtx.lastRtx < DTLS13_MIN_RTX_INTERVAL) {
+ #ifdef WOLFSSL_DEBUG_TLS
+         WOLFSSL_MSG("Avoid too fast retransmission");
+ #endif /* WOLFSSL_DEBUG_TLS */
+         return 0;
+     }
+-
+     ssl->dtls13Rtx.lastRtx = now;
+ #endif
+ 
+diff --git a/src/tls13.c b/src/tls13.c
+index 9b4d829b17d..2f194027431 100644
+--- a/src/tls13.c
++++ b/src/tls13.c
+@@ -1665,7 +1665,7 @@ int DeriveTls13Keys(WOLFSSL* ssl, int secret, int side, int store)
+     return ret;
+ }
+ 
+-#if (defined(HAVE_SESSION_TICKET) || !defined(NO_PSK))
++#if defined(HAVE_SESSION_TICKET) || !defined(NO_PSK) || defined(WOLFSSL_DTLS13)
+ #ifdef WOLFSSL_32BIT_MILLI_TIME
+ #ifndef NO_ASN_TIME
+ #if defined(USER_TICKS)
+@@ -2264,7 +2264,7 @@ int DeriveTls13Keys(WOLFSSL* ssl, int secret, int side, int store)
+      */
+ #endif /* !NO_ASN_TIME */
+ #endif /* WOLFSSL_32BIT_MILLI_TIME */
+-#endif /* HAVE_SESSION_TICKET || !NO_PSK */
++#endif /* HAVE_SESSION_TICKET || !NO_PSK || WOLFSSL_DTLS13 */
+ 
+ /* Add record layer header to message.
+  *
+diff --git a/tests/api/test_dtls.c b/tests/api/test_dtls.c
+index 78e83d02c4d..e93816dcf6f 100644
+--- a/tests/api/test_dtls.c
++++ b/tests/api/test_dtls.c
+@@ -2489,3 +2489,78 @@ int test_dtls_mtu_split_messages(void)
+     return TEST_SKIPPED;
+ #endif
+ }
++
++/* Test DTLS 1.3 minimum retransmission interval. This test calls
++ * wolfSSL_dtls_got_timeout() to simulate timeouts and verify that
++ * retransmissions are spaced at least DTLS13_MIN_RTX_INTERVAL apart.
++ */
++int test_dtls13_min_rtx_interval(void)
++{
++    EXPECT_DECLS;
++#if defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && \
++    defined(WOLFSSL_DTLS13) && !defined(DTLS13_MIN_RTX_INTERVAL) && \
++    !defined(NO_ASN_TIME)
++    /* We don't want to test when DTLS13_MIN_RTX_INTERVAL is defined because
++     * it may be too low to trigger reliably in a test. The default value is
++     * 1 second which is sufficient for testing here. */
++    WOLFSSL_CTX *ctx_c = NULL, *ctx_s = NULL;
++    WOLFSSL *ssl_c = NULL, *ssl_s = NULL;
++    struct test_memio_ctx test_ctx;
++    int c_msg_count = 0;
++
++    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
++
++    /* Setup DTLS 1.3 contexts */
++    ExpectIntEQ(test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
++                    wolfDTLSv1_3_client_method, wolfDTLSv1_3_server_method), 0);
++
++    /* CH0 */
++    ExpectIntEQ(wolfSSL_connect(ssl_c), -1);
++    ExpectIntEQ(wolfSSL_get_error(ssl_c, -1), SSL_ERROR_WANT_READ);
++
++    /* HRR */
++    ExpectIntEQ(wolfSSL_accept(ssl_s), -1);
++    ExpectIntEQ(wolfSSL_get_error(ssl_s, -1), SSL_ERROR_WANT_READ);
++
++    /* CH1 */
++    ExpectIntEQ(wolfSSL_connect(ssl_c), -1);
++    ExpectIntEQ(wolfSSL_get_error(ssl_c, -1), SSL_ERROR_WANT_READ);
++
++    /* SH ... FINISHED */
++    ExpectIntEQ(wolfSSL_accept(ssl_s), -1);
++    ExpectIntEQ(wolfSSL_get_error(ssl_s, -1), SSL_ERROR_WANT_READ);
++
++    /* We should have SH ... FINISHED messages in the buffer */
++    ExpectIntGE(test_ctx.c_msg_count, 2);
++
++    /* Drop everything */
++    test_memio_clear_buffer(&test_ctx, 1);
++
++    /* First timeout. This one should trigger a retransmission */
++    if (wolfSSL_dtls13_use_quick_timeout(ssl_s))
++        ExpectIntEQ(wolfSSL_dtls_got_timeout(ssl_s), WOLFSSL_SUCCESS);
++    ExpectIntEQ(wolfSSL_dtls_got_timeout(ssl_s), WOLFSSL_SUCCESS);
++    /* Save the message count to make sure no new messages are sent */
++    ExpectIntGE(c_msg_count = test_ctx.c_msg_count, 2);
++
++    /* Second timeout. This one should not trigger a retransmission */
++    if (wolfSSL_dtls13_use_quick_timeout(ssl_s))
++        ExpectIntEQ(wolfSSL_dtls_got_timeout(ssl_s), WOLFSSL_SUCCESS);
++    ExpectIntEQ(wolfSSL_dtls_got_timeout(ssl_s), WOLFSSL_SUCCESS);
++    /* This is the critical check. The message count should not increase
++     * after the second timeout. DTLS13_MIN_RTX_INTERVAL should have blocked
++     * retransmission here. */
++    ExpectIntEQ(c_msg_count, test_ctx.c_msg_count);
++
++    /* Now complete the handshake. We didn't clear the first retransmission
++     * so the handshake should proceed without issues. */
++    ExpectIntEQ(test_memio_do_handshake(ssl_c, ssl_s, 10, NULL), 0);
++
++    /* Cleanup */
++    wolfSSL_free(ssl_c);
++    wolfSSL_CTX_free(ctx_c);
++    wolfSSL_free(ssl_s);
++    wolfSSL_CTX_free(ctx_s);
++#endif
++    return EXPECT_RESULT();
++}
+diff --git a/tests/api/test_dtls.h b/tests/api/test_dtls.h
+index 429536bd590..c9c5600eff9 100644
+--- a/tests/api/test_dtls.h
++++ b/tests/api/test_dtls.h
+@@ -49,6 +49,7 @@ int test_dtls_memio_wolfio(void);
+ int test_dtls_memio_wolfio_stateless(void);
+ int test_dtls_mtu_fragment_headroom(void);
+ int test_dtls_mtu_split_messages(void);
++int test_dtls13_min_rtx_interval(void);
+ 
+ #define TEST_DTLS_DECLS                                                        \
+         TEST_DECL_GROUP("dtls", test_dtls12_basic_connection_id),              \
+@@ -77,5 +78,6 @@ int test_dtls_mtu_split_messages(void);
+         TEST_DECL_GROUP("dtls", test_dtls_memio_wolfio),                       \
+         TEST_DECL_GROUP("dtls", test_dtls_mtu_fragment_headroom),              \
+         TEST_DECL_GROUP("dtls", test_dtls_mtu_split_messages),                 \
+-        TEST_DECL_GROUP("dtls", test_dtls_memio_wolfio_stateless)
++        TEST_DECL_GROUP("dtls", test_dtls_memio_wolfio_stateless),             \
++        TEST_DECL_GROUP("dtls", test_dtls13_min_rtx_interval)
+ #endif /* TESTS_API_DTLS_H */
+diff --git a/wolfssl/internal.h b/wolfssl/internal.h
+index ac11ce99200..037811e3261 100644
+--- a/wolfssl/internal.h
++++ b/wolfssl/internal.h
+@@ -5774,7 +5774,11 @@ typedef struct Dtls13Rtx {
+     Dtls13RtxRecord *rtxRecords;
+     Dtls13RtxRecord **rtxRecordTailPtr;
+     Dtls13RecordNumber *seenRecords;
++#ifdef WOLFSSL_32BIT_MILLI_TIME
+     word32 lastRtx;
++#else
++    sword64 lastRtx;
++#endif
+     byte triggeredRtxs; /* Unused? */
+     byte sendAcks;
+     byte retransmit;
+@@ -6826,7 +6830,8 @@ WOLFSSL_LOCAL word32 MacSize(const WOLFSSL* ssl);
+ 
+     WOLFSSL_LOCAL void WriteSEQ(WOLFSSL* ssl, int verifyOrder, byte* out);
+ 
+-#if defined(WOLFSSL_TLS13) && (defined(HAVE_SESSION_TICKET) || !defined(NO_PSK))
++#if defined(WOLFSSL_TLS13) && (defined(HAVE_SESSION_TICKET) || \
++        !defined(NO_PSK) || defined(WOLFSSL_DTLS13))
+ #ifdef WOLFSSL_32BIT_MILLI_TIME
+     WOLFSSL_LOCAL word32 TimeNowInMilliseconds(void);
+ #else
+
+From 429b690370f577ce720e535d6bc8fcc3e60970ba Mon Sep 17 00:00:00 2001
+From: Juliusz Sosinowicz <juliusz@wolfssl.com>
+Date: Mon, 19 Jan 2026 09:38:17 +0100
+Subject: [PATCH 2/3] Address code review
+
+---
+ src/dtls13.c          | 2 +-
+ tests/api/test_dtls.c | 5 ++++-
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/dtls13.c b/src/dtls13.c
+index bd4d72247d6..d3d5ee624c4 100644
+--- a/src/dtls13.c
++++ b/src/dtls13.c
+@@ -111,7 +111,7 @@ typedef struct Dtls13RecordPlaintextHeader {
+ #define DTLS13_UNIFIED_HEADER_SIZE 5
+ #define DTLS13_MIN_CIPHERTEXT 16
+ #ifndef DTLS13_MIN_RTX_INTERVAL
+-#define DTLS13_MIN_RTX_INTERVAL 1000
++#define DTLS13_MIN_RTX_INTERVAL (DTLS_TIMEOUT_INIT * 1000)
+ #endif
+ 
+ #ifndef NO_WOLFSSL_CLIENT
+diff --git a/tests/api/test_dtls.c b/tests/api/test_dtls.c
+index e93816dcf6f..a1f592c7063 100644
+--- a/tests/api/test_dtls.c
++++ b/tests/api/test_dtls.c
+@@ -2493,6 +2493,8 @@ int test_dtls_mtu_split_messages(void)
+ /* Test DTLS 1.3 minimum retransmission interval. This test calls
+  * wolfSSL_dtls_got_timeout() to simulate timeouts and verify that
+  * retransmissions are spaced at least DTLS13_MIN_RTX_INTERVAL apart.
++ * This tests relies on timing of the retransmission logic so it may be
++ * flaky on very slow systems.
+  */
+ int test_dtls13_min_rtx_interval(void)
+ {
+@@ -2541,7 +2543,8 @@ int test_dtls13_min_rtx_interval(void)
+         ExpectIntEQ(wolfSSL_dtls_got_timeout(ssl_s), WOLFSSL_SUCCESS);
+     ExpectIntEQ(wolfSSL_dtls_got_timeout(ssl_s), WOLFSSL_SUCCESS);
+     /* Save the message count to make sure no new messages are sent */
+-    ExpectIntGE(c_msg_count = test_ctx.c_msg_count, 2);
++    ExpectIntGE(test_ctx.c_msg_count, 2);
++    c_msg_count = test_ctx.c_msg_count;
+ 
+     /* Second timeout. This one should not trigger a retransmission */
+     if (wolfSSL_dtls13_use_quick_timeout(ssl_s))
+
+From bba4671042940e58aa3b758508d2822f519138c5 Mon Sep 17 00:00:00 2001
+From: Juliusz Sosinowicz <juliusz@wolfssl.com>
+Date: Mon, 19 Jan 2026 10:13:23 +0100
+Subject: [PATCH 3/3] wolfSSL_dtls13_use_quick_timeout: check for NULL input
+
+---
+ src/ssl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/ssl.c b/src/ssl.c
+index dfb408f104e..d3961330e6b 100644
+--- a/src/ssl.c
++++ b/src/ssl.c
+@@ -9984,7 +9984,7 @@ int wolfSSL_dtls_get_current_timeout(WOLFSSL* ssl)
+  */
+ int wolfSSL_dtls13_use_quick_timeout(WOLFSSL* ssl)
+ {
+-    return ssl->dtls13FastTimeout;
++    return ssl != NULL && ssl->dtls13FastTimeout;
+ }
+ 
+ /*
