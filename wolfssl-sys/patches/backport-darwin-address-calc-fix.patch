@@ -1,18 +1,51 @@
-From 9228741450f627da1dba800b44da03db8df44b32 Mon Sep 17 00:00:00 2001
-From: Samuel Tam <samuel.tam@expressvpn.com>
-Date: Fri, 9 Jan 2026 18:12:12 +0800
+From 2b8eed7b26785af4791b6e1f959650c5e00c057c Mon Sep 17 00:00:00 2001
+From: Wei Wen Goh <weiwen.goh@kape.com>
+Date: Wed, 14 Jan 2026 13:49:16 +0800
 Subject: [PATCH] ARM64 ASM: Darwin specific address calc fix
 
-Don't use ':lo12:' in Darwin specific address calculation code.
-@PAGEOFF is indicating this.
+Don't use ':lo12:' in Darwin specific address calculation code.@PAGEOFF
+is indicating this.
 ---
- wolfcrypt/src/port/arm/armv8-mlkem-asm.S  | 74 +++++++++++------------
- wolfcrypt/src/port/arm/armv8-sha3-asm.S   |  4 +-
- wolfcrypt/src/port/arm/armv8-sha512-asm.S |  8 +--
- 3 files changed, 43 insertions(+), 43 deletions(-)
+ wolfcrypt/src/port/arm/armv8-chacha-asm.S   |  6 +-
+ wolfcrypt/src/port/arm/armv8-mlkem-asm.S    | 74 ++++++++++-----------
+ wolfcrypt/src/port/arm/armv8-poly1305-asm.S |  2 +-
+ wolfcrypt/src/port/arm/armv8-sha256-asm.S   |  4 +-
+ wolfcrypt/src/port/arm/armv8-sha3-asm.S     |  4 +-
+ wolfcrypt/src/port/arm/armv8-sha512-asm.S   |  6 +-
+ 6 files changed, 48 insertions(+), 48 deletions(-)
 
+diff --git a/wolfcrypt/src/port/arm/armv8-chacha-asm.S b/wolfcrypt/src/port/arm/armv8-chacha-asm.S
+index 8a5481125..94acf2871 100644
+--- a/wolfcrypt/src/port/arm/armv8-chacha-asm.S
++++ b/wolfcrypt/src/port/arm/armv8-chacha-asm.S
+@@ -95,14 +95,14 @@ _wc_chacha_crypt_bytes:
+ 	add  x5, x5, :lo12:L_chacha20_arm64_rol8
+ #else
+ 	adrp x5, L_chacha20_arm64_rol8@PAGE
+-	add  x5, x5, :lo12:L_chacha20_arm64_rol8@PAGEOFF
++	add  x5, x5, L_chacha20_arm64_rol8@PAGEOFF
+ #endif /* __APPLE__ */
+ #ifndef __APPLE__
+ 	adrp x6, L_chacha20_arm64_ctr
+ 	add  x6, x6, :lo12:L_chacha20_arm64_ctr
+ #else
+ 	adrp x6, L_chacha20_arm64_ctr@PAGE
+-	add  x6, x6, :lo12:L_chacha20_arm64_ctr@PAGEOFF
++	add  x6, x6, L_chacha20_arm64_ctr@PAGEOFF
+ #endif /* __APPLE__ */
+ 	eor	v29.16b, v29.16b, v29.16b
+ 	mov	x26, #5
+@@ -1134,7 +1134,7 @@ _wc_chacha_setkey:
+ 	add  x3, x3, :lo12:L_chacha_setkey_arm64_constant
+ #else
+ 	adrp x3, L_chacha_setkey_arm64_constant@PAGE
+-	add  x3, x3, :lo12:L_chacha_setkey_arm64_constant@PAGEOFF
++	add  x3, x3, L_chacha_setkey_arm64_constant@PAGEOFF
+ #endif /* __APPLE__ */
+ 	subs	x2, x2, #16
+ 	add	x3, x3, x2
 diff --git a/wolfcrypt/src/port/arm/armv8-mlkem-asm.S b/wolfcrypt/src/port/arm/armv8-mlkem-asm.S
-index a45475c..1ded4af 100644
+index a45475c9f..1ded4afde 100644
 --- a/wolfcrypt/src/port/arm/armv8-mlkem-asm.S
 +++ b/wolfcrypt/src/port/arm/armv8-mlkem-asm.S
 @@ -168,21 +168,21 @@ _mlkem_ntt:
@@ -332,19 +365,54 @@ index a45475c..1ded4af 100644
  #endif /* __APPLE__ */
  	str	x0, [x29, #40]
  	add	x0, x0, #32
+diff --git a/wolfcrypt/src/port/arm/armv8-poly1305-asm.S b/wolfcrypt/src/port/arm/armv8-poly1305-asm.S
+index 880d041e3..dd50ac3e8 100644
+--- a/wolfcrypt/src/port/arm/armv8-poly1305-asm.S
++++ b/wolfcrypt/src/port/arm/armv8-poly1305-asm.S
+@@ -474,7 +474,7 @@ _poly1305_set_key:
+ 	add  x2, x2, :lo12:L_poly1305_set_key_arm64_clamp
+ #else
+ 	adrp x2, L_poly1305_set_key_arm64_clamp@PAGE
+-	add  x2, x2, :lo12:L_poly1305_set_key_arm64_clamp@PAGEOFF
++	add  x2, x2, L_poly1305_set_key_arm64_clamp@PAGEOFF
+ #endif /* __APPLE__ */
+ 	# Load key and pad.
+ 	ldp	x11, x12, [x1]
+diff --git a/wolfcrypt/src/port/arm/armv8-sha256-asm.S b/wolfcrypt/src/port/arm/armv8-sha256-asm.S
+index 7ed0fa286..fb0795365 100644
+--- a/wolfcrypt/src/port/arm/armv8-sha256-asm.S
++++ b/wolfcrypt/src/port/arm/armv8-sha256-asm.S
+@@ -133,7 +133,7 @@ _Transform_Sha256_Len_neon:
+ 	add  x3, x3, :lo12:L_SHA256_transform_neon_len_k
+ #else
+ 	adrp x3, L_SHA256_transform_neon_len_k@PAGE
+-	add  x3, x3, :lo12:L_SHA256_transform_neon_len_k@PAGEOFF
++	add  x3, x3, L_SHA256_transform_neon_len_k@PAGEOFF
+ #endif /* __APPLE__ */
+ 	# Load digest into working vars
+ 	ldr	w4, [x0]
+@@ -1200,7 +1200,7 @@ _Transform_Sha256_Len_crypto:
+ 	add  x3, x3, :lo12:L_SHA256_trans_crypto_len_k
+ #else
+ 	adrp x3, L_SHA256_trans_crypto_len_k@PAGE
+-	add  x3, x3, :lo12:L_SHA256_trans_crypto_len_k@PAGEOFF
++	add  x3, x3, L_SHA256_trans_crypto_len_k@PAGEOFF
+ #endif /* __APPLE__ */
+ 	# Load K into vector registers
+ 	ld1	{v8.4s, v9.4s, v10.4s, v11.4s}, [x3], #0x40
 diff --git a/wolfcrypt/src/port/arm/armv8-sha3-asm.S b/wolfcrypt/src/port/arm/armv8-sha3-asm.S
-index 411349f..6089f8c 100644
+index 5414ba713..e45626386 100644
 --- a/wolfcrypt/src/port/arm/armv8-sha3-asm.S
 +++ b/wolfcrypt/src/port/arm/armv8-sha3-asm.S
-@@ -95,7 +95,7 @@ _BlockSha3_crypto:
+@@ -92,7 +92,7 @@ _BlockSha3_crypto:
  	add  x1, x1, :lo12:L_SHA3_transform_crypto_r
  #else
  	adrp x1, L_SHA3_transform_crypto_r@PAGE
 -	add  x1, x1, :lo12:L_SHA3_transform_crypto_r@PAGEOFF
 +	add  x1, x1, L_SHA3_transform_crypto_r@PAGEOFF
  #endif /* __APPLE__ */
- 	ld4	{v0.d, v1.d, v2.d, v3.d}[0], [x0], #32
- 	ld4	{v4.d, v5.d, v6.d, v7.d}[0], [x0], #32
+ #ifdef __APPLE__
+ .arch_extension sha3
 @@ -268,7 +268,7 @@ _BlockSha3_base:
  	add  x27, x27, :lo12:L_SHA3_transform_base_r
  #else
@@ -355,7 +423,7 @@ index 411349f..6089f8c 100644
  	ldp	x1, x2, [x0]
  	ldp	x3, x4, [x0, #16]
 diff --git a/wolfcrypt/src/port/arm/armv8-sha512-asm.S b/wolfcrypt/src/port/arm/armv8-sha512-asm.S
-index 514e5de..ee64e6e 100644
+index fde25d54e..9da9a236a 100644
 --- a/wolfcrypt/src/port/arm/armv8-sha512-asm.S
 +++ b/wolfcrypt/src/port/arm/armv8-sha512-asm.S
 @@ -165,14 +165,14 @@ _Transform_Sha512_Len_neon:
@@ -375,24 +443,15 @@ index 514e5de..ee64e6e 100644
  #endif /* __APPLE__ */
  	ld1	{v11.16b}, [x27]
  	# Load digest into working vars
-@@ -1070,7 +1070,7 @@ L_sha512_len_neon_start:
- 	add  x3, x3, :lo12:L_SHA512_transform_neon_len_k
- #else
- 	adrp x3, L_SHA512_transform_neon_len_k@PAGE
--	add  x3, x3, :lo12:L_SHA512_transform_neon_len_k@PAGEOFF
-+	add  x3, x3, L_SHA512_transform_neon_len_k@PAGEOFF
- #endif /* __APPLE__ */
- 	subs	w2, w2, #0x80
- 	bne	L_sha512_len_neon_begin
-@@ -1211,7 +1211,7 @@ _Transform_Sha512_Len_crypto:
+@@ -1202,7 +1202,7 @@ _Transform_Sha512_Len_crypto:
  	add  x4, x4, :lo12:L_SHA512_trans_crypto_len_k
  #else
  	adrp x4, L_SHA512_trans_crypto_len_k@PAGE
 -	add  x4, x4, :lo12:L_SHA512_trans_crypto_len_k@PAGEOFF
 +	add  x4, x4, L_SHA512_trans_crypto_len_k@PAGEOFF
  #endif /* __APPLE__ */
- 	# Load first 16 64-bit words of K permanently
- 	ld1	{v8.2d, v9.2d, v10.2d, v11.2d}, [x4], #0x40
+ #ifdef __APPLE__
+ .arch_extension sha3
 -- 
 2.51.2
 
