@@ -66,7 +66,7 @@ fn main() {
         let ssl = ffi::wolfSSL_new(context);
 
         // Enable P521 ML-KEM 1024
-        let res = ffi::wolfSSL_UseKeyShare(ssl, ffi::WOLFSSL_P521_ML_KEM_1024 as u16);
+        let res = ffi::wolfSSL_UseKeyShare(ssl, ffi::WOLFSSL_SECP521R1MLKEM1024 as u16);
 
         // Check that ML-KEM was enabled
         assert_eq!(res, ffi::WOLFSSL_SUCCESS as c_int);
