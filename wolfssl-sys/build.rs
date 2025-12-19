@@ -346,8 +346,9 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
 
     match build_target::target_arch() {
         build_target::Arch::AArch64 => {
-            // Enable ARM ASM optimisations
-            conf.enable("armasm", None);
+            // Disable ARM ASM optimisations due to buggy ChaCha20 assembly
+            // in WolfSSL 5.8.4 (commit 9c1462a9e).
+            // conf.enable("armasm", None);
         }
         build_target::Arch::Arm => {
             // Enable ARM ASM optimisations, except for android armeabi-v7a
