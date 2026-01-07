@@ -1,0 +1,90 @@
+diff --git a/src/dtls13.c b/src/dtls13.c
+index 68b6195853..bd4d72247d 100644
+--- a/src/dtls13.c
++++ b/src/dtls13.c
+@@ -110,7 +110,9 @@ typedef struct Dtls13RecordPlaintextHeader {
+    supported. */
+ #define DTLS13_UNIFIED_HEADER_SIZE 5
+ #define DTLS13_MIN_CIPHERTEXT 16
+-#define DTLS13_MIN_RTX_INTERVAL 1
++#ifndef DTLS13_MIN_RTX_INTERVAL
++#define DTLS13_MIN_RTX_INTERVAL 1000
++#endif
+
+ #ifndef NO_WOLFSSL_CLIENT
+ WOLFSSL_METHOD* wolfDTLSv1_3_client_method_ex(void* heap)
+@@ -1570,21 +1572,24 @@ static int Dtls13RtxSendBuffered(WOLFSSL* ssl)
+     int isLast;
+     int sendSz;
+ #ifndef NO_ASN_TIME
++#ifdef WOLFSSL_32BIT_MILLI_TIME
+     word32 now;
++#else
++    sword64 now;
++#endif
+ #endif
+     int ret;
+
+     WOLFSSL_ENTER("Dtls13RtxSendBuffered");
+
+ #ifndef NO_ASN_TIME
+-    now = LowResTimer();
++    now = TimeNowInMilliseconds();
+     if (now - ssl->dtls13Rtx.lastRtx < DTLS13_MIN_RTX_INTERVAL) {
+ #ifdef WOLFSSL_DEBUG_TLS
+         WOLFSSL_MSG("Avoid too fast retransmission");
+ #endif /* WOLFSSL_DEBUG_TLS */
+         return 0;
+     }
+-
+     ssl->dtls13Rtx.lastRtx = now;
+ #endif
+
+diff --git a/src/tls13.c b/src/tls13.c
+index 9f25f47a0f..e90715d6e2 100644
+--- a/src/tls13.c
++++ b/src/tls13.c
+@@ -1665,7 +1665,7 @@ end:
+     return ret;
+ }
+
+-#if (defined(HAVE_SESSION_TICKET) || !defined(NO_PSK))
++#if defined(HAVE_SESSION_TICKET) || !defined(NO_PSK) || defined(WOLFSSL_DTLS13)
+ #ifdef WOLFSSL_32BIT_MILLI_TIME
+ #ifndef NO_ASN_TIME
+ #if defined(USER_TICKS)
+@@ -2264,7 +2264,7 @@ end:
+      */
+ #endif /* !NO_ASN_TIME */
+ #endif /* WOLFSSL_32BIT_MILLI_TIME */
+-#endif /* HAVE_SESSION_TICKET || !NO_PSK */
++#endif /* HAVE_SESSION_TICKET || !NO_PSK || WOLFSSL_DTLS13 */
+
+ /* Add record layer header to message.
+  *
+diff --git a/wolfssl/internal.h b/wolfssl/internal.h
+index 3187bea290..21a45f5b47 100644
+--- a/wolfssl/internal.h
++++ b/wolfssl/internal.h
+@@ -5773,7 +5773,11 @@ typedef struct Dtls13Rtx {
+     Dtls13RtxRecord *rtxRecords;
+     Dtls13RtxRecord **rtxRecordTailPtr;
+     Dtls13RecordNumber *seenRecords;
++#ifdef WOLFSSL_32BIT_MILLI_TIME
+     word32 lastRtx;
++#else
++    sword64 lastRtx;
++#endif
+     byte triggeredRtxs; /* Unused? */
+     byte sendAcks;
+     byte retransmit;
+@@ -6825,7 +6829,8 @@ WOLFSSL_LOCAL word32 MacSize(const WOLFSSL* ssl);
+
+     WOLFSSL_LOCAL void WriteSEQ(WOLFSSL* ssl, int verifyOrder, byte* out);
+
+-#if defined(WOLFSSL_TLS13) && (defined(HAVE_SESSION_TICKET) || !defined(NO_PSK))
++#if defined(WOLFSSL_TLS13) && (defined(HAVE_SESSION_TICKET) || \
++        !defined(NO_PSK) || defined(WOLFSSL_DTLS13))
+ #ifdef WOLFSSL_32BIT_MILLI_TIME
+     WOLFSSL_LOCAL word32 TimeNowInMilliseconds(void);
+ #else
