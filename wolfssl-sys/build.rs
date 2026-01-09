@@ -76,27 +76,6 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
         let settings_path = dest_dir.join("IDE").join("WIN").join("user_settings.h");
         fs::write(&settings_path, &combined_content).unwrap();
         println!("Created user settings at {}", settings_path.display());
-
-        let command = Command::new("git")
-            .args(["init", "."])
-            .current_dir(&dest_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("Failed to execute git init");
-
-        let output = command
-            .wait_with_output()
-            .expect("Failed to wait for git init");
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-
-            panic!(
-                "Failed to git init: {}\nStdout: {}\nStderr: {}",
-                output.status, stdout, stderr
-            );
-        }
     }
 
     Ok(dest_dir)
@@ -147,10 +126,30 @@ const PATCHES: &[&str] = &[
 ];
 
 /**
- * Apply patch using git apply (Windows)
+ * Apply patch using git apply (cross-platform, works on Windows)
  */
-#[cfg(windows)]
 fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) -> Result<(), String> {
+    let command = Command::new("git")
+        .args(["init", "."])
+        .current_dir(wolfssl_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to execute git init: {}", e))?;
+
+    let output = command
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait for git init: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        panic!(
+            "Failed to git init: {}\nStdout: {}\nStderr: {}",
+            output.status, stdout, stderr
+        );
+    }
+
     let full_patch = Path::new(PATCH_DIR).join(patch.as_ref());
     // Get absolute path to patch file since we'll change working directory
     let abs_patch = std::env::current_dir().unwrap().join(&full_patch);
@@ -160,6 +159,7 @@ fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) -> Result<(), Strin
     let patch_file = File::open(&abs_patch)
         .map_err(|e| format!("Failed to open patch file {}: {}", abs_patch.display(), e))?;
 
+    // Use git apply instead of patch command - git is available on all platforms
     let command = Command::new("git")
         .args(["apply", "--verbose"])
         .current_dir(wolfssl_path)
@@ -187,31 +187,6 @@ fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) -> Result<(), Strin
     }
 
     println!("Successfully applied patch: {}", patch.as_ref().display());
-    Ok(())
-}
-
-/**
- * Apply patch using `patch` (Unix)
- */
-#[cfg(unix)]
-fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) -> Result<(), String> {
-    let full_patch = Path::new(PATCH_DIR).join(patch.as_ref());
-
-    println!("cargo:rerun-if-changed={}", full_patch.display());
-
-    let patch_buffer = File::open(full_patch).unwrap();
-    let status = Command::new("patch")
-        .arg("-d")
-        .arg(wolfssl_path)
-        .arg("-p1")
-        .stdin(patch_buffer)
-        .status()
-        .unwrap();
-    assert!(
-        status.success(),
-        "Failed to apply {}",
-        patch.as_ref().display()
-    );
     Ok(())
 }
 
