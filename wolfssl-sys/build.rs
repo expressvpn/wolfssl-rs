@@ -142,6 +142,7 @@ const PATCH_DIR: &str = "patches";
 const PATCHES: &[&str] = &[
     "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
     "backport-darwin-address-calc-fix.patch",
+    "ChaCha20-Aarch64-ASM-fix-256-bit-case-fixed.patch",
 ];
 
 /**
