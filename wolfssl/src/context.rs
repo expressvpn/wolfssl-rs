@@ -305,6 +305,62 @@ impl ContextBuilder {
         }
     }
 
+    /// Wraps [`wolfSSL_CTX_use_certificate_file`][0] and [`wolfSSL_CTX_use_certificate_buffer`][1]
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_certificate_file
+    /// [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_certificate_buffer
+    pub fn with_certificate_chain(self, secret: Secret) -> Result<Self> {
+        use wolfssl_sys::{
+            wolfSSL_CTX_use_certificate_chain_buffer, wolfSSL_CTX_use_certificate_chain_file,
+            WOLFSSL_FILETYPE_ASN1, WOLFSSL_FILETYPE_PEM,
+        };
+
+        let result = match secret {
+            // SAFETY: [`wolfSSL_CTX_use_certificate_chain_buffer`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
+            // The pointer given as the `in` argument must point to a region of `sz` bytes.
+            // The values passed here are valid since they are derived from the same byte slice.
+            //
+            // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_certificate_chain_buffer
+            // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#gae424b3a63756ab805de5c43b67f4df4f
+            Secret::PemBuffer(buf) => unsafe {
+                wolfSSL_CTX_use_certificate_chain_buffer(
+                    self.ctx.as_ptr(),
+                    buf.as_ptr(),
+                    buf.len() as std::os::raw::c_long,
+                )
+            },
+            Secret::PemFile(path) => {
+                let path = path.to_str().ok_or_else(|| {
+                    Error::fatal(wolfssl_sys::wolfCrypt_ErrorCodes_BAD_PATH_ERROR)
+                })?;
+                let file = std::ffi::CString::new(path)
+                    .map_err(|_| Error::fatal(wolfssl_sys::wolfCrypt_ErrorCodes_BAD_PATH_ERROR))?;
+                // SAFETY: [`wolfSSL_CTX_use_certificate_chain_file`][0] ([also][1]) requires a valid `ctx` pointer from `wolfSSL_CTX_new()`.
+                // The pointer passed as the path argument must be a valid NULL-terminated C-style string,
+                // which is guaranteed by the use of `std::ffi::CString::as_c_str()` here.
+                //
+                // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_certificate_chain_file
+                // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#ga5a31292b75b4caa4462a3305d2615beb
+                unsafe {
+                    wolfSSL_CTX_use_certificate_chain_file(
+                        self.ctx.as_ptr(),
+                        file.as_c_str().as_ptr(),
+                    )
+                }
+            }
+            // Other variants are not supported for certificate chains
+            _ => {
+                return Err(Error::fatal(wolfssl_sys::WOLFSSL_FAILURE as c_int));
+            }
+        };
+
+        if result == wolfssl_sys::WOLFSSL_SUCCESS as c_int {
+            Ok(self)
+        } else {
+            Err(Error::fatal(result))
+        }
+    }
+
     /// Wraps [`wolfSSL_CTX_use_PrivateKey_file`][0] and [`wolfSSL_CTX_use_PrivateKey_buffer`][1]
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_use_privatekey_file
@@ -641,6 +697,28 @@ mod tests {
             // This string might need to change depending on the flags
             // we built wolfssl with.
             .with_cipher_list("TLS13-CHACHA20-POLY1305-SHA256")
+            .unwrap();
+    }
+
+    #[test]
+    fn set_certificate_chain_buffer() {
+        const CA_CERT: &[u8] = &include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/ca_cert_der_2048"
+        ));
+
+        const SERVER_CERT: &[u8] = &include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/server_cert_der_2048"
+        ));
+
+        const COMBINED_CERT: &[u8] = &[SERVER_CERT, CA_CERT].concat();
+
+        let cert = Secret::Asn1Buffer(COMBINED_CERT);
+
+        let _ = ContextBuilder::new(Method::TlsClient)
+            .unwrap()
+            .with_certificate_chain(cert)
             .unwrap();
     }
 
