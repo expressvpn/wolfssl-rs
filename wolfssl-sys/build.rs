@@ -433,7 +433,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     if build_target::target_os() == build_target::Os::MacOS {
         // Check whether we have set MACOSX_DEPLOYMENT_TARGET to ensure we support older MacOS
         let deployment_target = env::var("MACOSX_DEPLOYMENT_TARGET")
-            .expect("Must have set minimum supported MacOS version");
+            .expect("Must have set minimum supported MacOS version (MACOSX_DEPLOYMENT_TARGET)");
         if deployment_target.is_empty() {
             panic!("MACOSX_DEPLOYMENT_TARGET is empty")
         }
@@ -452,7 +452,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     if build_target::target_os() == build_target::Os::iOS {
         // Check whether we have set IPHONEOS_DEPLOYMENT_TARGET to ensure we support older iOS
         let ios_target = env::var("IPHONEOS_DEPLOYMENT_TARGET")
-            .expect("Must have set minimum supported iOS version");
+            .expect("Must have set minimum supported iOS version (IPHONEOS_DEPLOYMENT_TARGET)");
         if ios_target.is_empty() {
             panic!("IPHONEOS_DEPLOYMENT_TARGET is empty")
         }
