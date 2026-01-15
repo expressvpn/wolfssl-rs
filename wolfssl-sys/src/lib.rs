@@ -25,7 +25,7 @@ mod tests {
 
     #[cfg(feature = "postquantum")]
     #[test_case(WOLFSSL_P521_KYBER_LEVEL5)]
-    #[cfg_attr(not(feature = "kyber_only"), test_case(WOLFSSL_P521_ML_KEM_1024))]
+    #[cfg_attr(not(feature = "kyber_only"), test_case(WOLFSSL_SECP521R1MLKEM1024))]
     fn test_post_quantum_available(group: CurveGroupType) {
         unsafe {
             // Init WolfSSL
