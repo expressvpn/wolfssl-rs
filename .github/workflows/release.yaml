@@ -15,7 +15,7 @@ jobs:
   check_label:
     runs-on: ubuntu-latest
     outputs:
-      is_release_label_attached: ${{ steps.pr_labels.outputs.is_release_label_attached }}
+      is_ignore_release_labelled: ${{ steps.pr_labels.outputs.is_ignore_release_labelled }}
       issue_number: ${{ steps.pr_labels.outputs.issue_number }}
     steps:
       - uses: jwalton/gh-find-current-pr@v1
@@ -40,14 +40,14 @@ jobs:
 
             const attached_labels = (await github.rest.issues.listLabelsOnIssue({ owner, repo, issue_number })).data
 
-            const is_release_label_attached = attached_labels.find(label => label.name == 'release') !== undefined
-            core.setOutput('is_release_label_attached', is_release_label_attached)
+            const is_ignore_release_labelled = attached_labels.find(label => label.name == 'ignore-release') !== undefined
+            core.setOutput('is_ignore_release_labelled', is_ignore_release_labelled)
             core.setOutput('issue_number', issue_number)
 
   release:
     runs-on: ubuntu-latest
     needs: check_label
-    if: needs.check_label.outputs.is_release_label_attached == 'true'
+    if: needs.check_label.outputs.is_ignore_release_labelled == 'false'
     env:
       CARGO_REGISTRY_TOKEN: "${{ secrets.CARGO_REGISTRY_TOKEN }}"
       FORCE_COLOR: 1
