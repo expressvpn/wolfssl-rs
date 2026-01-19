@@ -81,6 +81,55 @@ jobs:
         with:
           node-version: '20.x'
       - run: npm install toml globby axios
+        
+      - name: Pre-check version bumps
+        id: pre_process_release
+        uses: actions/github-script@v7
+        with:
+            script: |
+                const toml = require('toml');
+                const fs = require('fs');
+                const axios = require('axios');
+                    
+                async function get_crate_details(name) {
+                    try {
+                        return (await axios(`https://crates.io/api/v1/crates/${name}`)).data
+                    } catch(error) {
+                        console.error("Error fetching crate details:", error)
+                        throw error
+                    }
+                }
+                
+                const crates_to_check = ['wolfssl/Cargo.toml', 'wolfssl-sys/Cargo.toml']
+                let has_version_bump = false
+                const bump_details = []
+                
+                for (const crate_path of crates_to_check) {
+                    const data = toml.parse(fs.readFileSync(crate_path, 'utf-8'))
+                    const name = data.package.name
+                    const version_on_file = data.package.version
+                    const crate_info = await get_crate_details(name)
+                    const version_on_crate_io = crate_info.crate.max_version
+                    
+                    if (version_on_file != version_on_crate_io) {
+                        console.log(`✓ ${name}: ${version_on_crate_io} → ${version_on_file}`)
+                        bump_details.push(`${name}: ${version_on_crate_io} → ${version_on_file}`)
+                        has_version_bump = true
+                    } else {
+                        console.log(`${name}: ${version_on_file} (unchanged)`)
+                    }
+                }
+                
+                if (!has_version_bump) {
+                    core.setFailed(                                                               
+                        'No version bumps detected in wolfssl or wolfssl-sys. ' +                   
+                        'Either bump a version or add the "ignore-release" label to the PR.'        
+                    )  
+                } else {
+                    console.log(`Version bumps detected:\n${bump_details.join('\n')}`)
+                }
+                
+        
       - uses: actions/github-script@v7
         id: process_release
         with:
