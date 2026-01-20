@@ -260,3 +260,4 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: core.setFailed('Unable to release all required crates')
+
