@@ -80,14 +80,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
-      - run: npm install toml globby axios
+      - run: npm install @iarna/toml globby axios
         
       - name: Pre-check version bumps
         id: pre_process_release
         uses: actions/github-script@v7
         with:
             script: |
-                const toml = require('toml');
+                const toml = require('@iarna/toml');
                 const fs = require('fs');
                 const axios = require('axios');
                     
@@ -137,7 +137,7 @@ jobs:
             const is_merge_event = ${{ github.event_name == 'push' }}
 
             const { globby } = await import("${{ github.workspace }}/node_modules/globby/index.js");
-            const toml = require('toml');
+            const toml = require('@iarna/toml');
             const fs = require('fs');
             const axios = require('axios');
             const { spawn } = require('child_process');
