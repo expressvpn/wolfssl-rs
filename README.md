@@ -136,7 +136,7 @@ flowchart TD
 
 ## Releasing a Single Crate
 
-A GitHub Workflow is set up to automate the release of crates in this repo.
+A GitHub Workflow is set up to automate the release of crates in this repo. Upon a release, it will create a release in GitHub and Crates.io
 
 To create a new release, follow the below steps:
 
@@ -145,4 +145,4 @@ To create a new release, follow the below steps:
 1. Observe that a comment is add to the PR, indicating the current version and the upcoming version
 1. Merge the PR, a new version should be released to both GitHub and Crates.io
 
-If no version bump is present and no `ignore-release` label is set, CI will block the workflow.
+Use the `ignore-release` label only on chore/CI-only PRs with no code changes. For any functional change, we expect a release unless there’s a strong reason not to. If no version bump is present and no `ignore-release` label is set, CI will block the release workflow.
