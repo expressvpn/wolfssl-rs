@@ -1,6 +1,6 @@
 [package]
 name = "wolfssl-sys"
-version = "2.0.1"
+version = "2.0.0"
 description = "System bindings for WolfSSL"
 readme = "README.md"
 authors.workspace = true
