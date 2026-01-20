@@ -2,10 +2,10 @@ name: Release
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-    branches: [main]
+    branches: [main, test-release-workflow]
     
   push:
-    branches: [main]
+    branches: [main, test-release-workflow]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
