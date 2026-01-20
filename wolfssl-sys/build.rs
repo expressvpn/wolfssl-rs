@@ -143,6 +143,7 @@ const PATCHES: &[&str] = &[
     "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
     "backport-darwin-address-calc-fix.patch",
     "ChaCha20-Aarch64-ASM-fix-256-bit-case-fixed.patch",
+    "dtls13-rtx-timer.patch",
 ];
 
 /**
@@ -320,6 +321,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .cflag("-g")
         .cflag("-fPIC")
         .cflag("-DWOLFSSL_DTLS_ALLOW_FUTURE")
+        .cflag("-DDTLS13_MIN_RTX_INTERVAL=100")
         .cflag("-DWOLFSSL_MIN_RSA_BITS=2048")
         .cflag("-DWOLFSSL_MIN_ECC_BITS=256")
         .cflag("-DUSE_CERT_BUFFERS_4096")
