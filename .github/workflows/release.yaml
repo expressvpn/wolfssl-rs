@@ -76,11 +76,12 @@ jobs:
 
       - uses: ./.github/actions/check-dependencies
         id: check_dependencies
-
-      - name: Check semver compliance
-        uses: obi1kenobi/cargo-semver-checks-action@v2
-        with:
-          package: wolfssl-sys, wolfssl
+        
+      #   To uncomment once the versions on crates.io catches up to the latest version
+      # - name: Check semver compliance
+      #   uses: obi1kenobi/cargo-semver-checks-action@v2
+      #   with:
+      #     package: wolfssl-sys, wolfssl
 
       - uses: actions/setup-node@v4
         with:
