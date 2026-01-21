@@ -134,6 +134,14 @@ flowchart TD
     RaiseWolfsslReleasePR --> Complete
 ```
 
+## Semantic Versioning Guidelines
+
+We follow [Semantic Versioning 2.0.0](https://semver.org/) for version management. Version numbers follow the format `MAJOR.MINOR.PATCH`:
+
+- **PATCH (x.y.Z)**: Dependency updates
+- **MINOR (x.Y.0)**: Backwards-compatible API changes
+- **MAJOR (X.0.0)**: Backwards-incompatible changes and/or WolfSSL library version upgrades
+
 ## Releasing a Single Crate
 
 A GitHub Workflow is set up to automate the release of crates in this repo. Upon a release, it will create a release in GitHub and Crates.io
