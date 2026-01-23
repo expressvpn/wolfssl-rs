@@ -12,6 +12,7 @@ use std::env;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use vergen_gix::{Emitter, GixBuilder};
 
 /**
  * Work around for bindgen creating duplicate values.
@@ -522,6 +523,21 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     conf.build()
 }
 
+fn emit_wolfssl_version_tag() {
+    let src_path = Path::new("wolfssl-src");
+    let gix = GixBuilder::default()
+        .repo_path(Some(PathBuf::from(src_path)))
+        .describe(false, true, None)
+        .build()
+        .unwrap();
+
+    Emitter::default()
+        .add_instructions(&gix)
+        .unwrap()
+        .emit()
+        .unwrap();
+}
+
 fn main() -> std::io::Result<()> {
     // Get the build directory
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
@@ -628,6 +644,8 @@ fn main() -> std::io::Result<()> {
             println!("cargo:rustc-link-lib=framework=Security");
         }
     }
+
+    emit_wolfssl_version_tag();
 
     // Invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=wrapper.h");
