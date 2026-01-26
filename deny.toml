@@ -15,6 +15,7 @@ allow = [
     "Unicode-3.0",
     "BSD-3-Clause",
     "ISC",
+    "Zlib",
 ]
 confidence-threshold = 0.8
 exceptions = [
@@ -32,6 +33,11 @@ highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
 skip = [
+    { name = "foldhash", version = "0.1.5" },
+    { name = "hashbrown", version = "0.14.5" },
+    { name = "hashbrown", version = "0.15.5" },
+    { name = "signal-hook", version = "0.3.18" },
+    { name = "windows-sys", version = "0.59.0" },
 ]
 
 [sources]
