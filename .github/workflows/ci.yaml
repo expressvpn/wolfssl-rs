@@ -13,7 +13,7 @@ env:
   # We pin to a specific nightly Rust version (the one that eventually became $RUST_VERSION)
   # to ensure consistent behavior and prevent unexpected changes.
   # Reference: https://releases.rs/ (Use the branched from master date on the specific release)
-  RUST_NIGHTLY_VERSION: nightly-2025-01-03
+  RUST_NIGHTLY_VERSION: nightly-2025-10-24
   XCODE_VERSION: 26.0.1
 
 jobs:
