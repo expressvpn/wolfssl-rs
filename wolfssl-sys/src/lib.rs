@@ -1,6 +1,11 @@
 mod bindings;
 pub use bindings::*;
 
+/// Get WolfSSL version tag via `git describe`.
+pub fn get_wolfssl_version_tag() -> &'static str {
+    env!("VERGEN_GIT_DESCRIBE")
+}
+
 /**
  * Add more tests to gain more confidence in the bindings
  */
@@ -46,5 +51,11 @@ mod tests {
             // Check that Kyber/ML-KEM was enabled
             assert_eq!(res, WOLFSSL_SUCCESS as c_int);
         }
+    }
+
+    #[test]
+    fn test_wolfssl_version_tag_clean() {
+        // Make sure the working tree is clean
+        assert!(!get_wolfssl_version_tag().contains("dirty"))
     }
 }
