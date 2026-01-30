@@ -3,12 +3,9 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     branches: [main]
-    paths:
-      - "*/Cargo.toml" # only run if Cargo.toml changes
+    
   push:
     branches: [main]
-    paths:
-      - "*/Cargo.toml" # only run if Cargo.toml changes
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,7 +15,7 @@ jobs:
   check_label:
     runs-on: ubuntu-latest
     outputs:
-      is_release_label_attached: ${{ steps.pr_labels.outputs.is_release_label_attached }}
+      is_ignore_release_labelled: ${{ steps.pr_labels.outputs.is_ignore_release_labelled }}
       issue_number: ${{ steps.pr_labels.outputs.issue_number }}
     steps:
       - uses: jwalton/gh-find-current-pr@v1
@@ -43,14 +40,14 @@ jobs:
 
             const attached_labels = (await github.rest.issues.listLabelsOnIssue({ owner, repo, issue_number })).data
 
-            const is_release_label_attached = attached_labels.find(label => label.name == 'release') !== undefined
-            core.setOutput('is_release_label_attached', is_release_label_attached)
+            const is_ignore_release_labelled = attached_labels.find(label => label.name == 'ignore-release') !== undefined
+            core.setOutput('is_ignore_release_labelled', is_ignore_release_labelled)
             core.setOutput('issue_number', issue_number)
 
   release:
     runs-on: ubuntu-latest
     needs: check_label
-    if: needs.check_label.outputs.is_release_label_attached == 'true'
+    if: needs.check_label.outputs.is_ignore_release_labelled == 'false'
     env:
       CARGO_REGISTRY_TOKEN: "${{ secrets.CARGO_REGISTRY_TOKEN }}"
       FORCE_COLOR: 1
@@ -79,11 +76,68 @@ jobs:
 
       - uses: ./.github/actions/check-dependencies
         id: check_dependencies
+        
+      #   To uncomment once the versions on crates.io catches up to the latest version
+      # - name: Check semver compliance
+      #   uses: obi1kenobi/cargo-semver-checks-action@v2
+      #   with:
+      #     package: wolfssl-sys, wolfssl
 
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
-      - run: npm install toml globby axios
+      - run: npm install @iarna/toml globby axios compare-versions
+        
+      - name: Pre-check version bumps
+        id: pre_process_release
+        uses: actions/github-script@v7
+        with:
+            script: |
+                const toml = require('@iarna/toml');
+                const fs = require('fs');
+                const axios = require('axios');
+                const compareVersions = require('compare-versions')
+                    
+                async function get_crate_details(name) {
+                    try {
+                        return (await axios(`https://crates.io/api/v1/crates/${name}`)).data
+                    } catch(error) {
+                        console.error("Error fetching crate details:", error)
+                        throw error
+                    }
+                }
+                
+                const crates_to_check = ['wolfssl/Cargo.toml', 'wolfssl-sys/Cargo.toml']
+                let has_version_bump = false
+                const bump_details = []
+                
+                for (const crate_path of crates_to_check) {
+                    const data = toml.parse(fs.readFileSync(crate_path, 'utf-8'))
+                    const name = data.package.name
+                    const version_on_file = data.package.version
+                    const crate_info = await get_crate_details(name)
+                    const version_on_crate_io = crate_info.crate.max_version
+                    
+                    if (compareVersions.compare(version_on_file, version_on_crate_io, '<')) {
+                        core.setFailed(`${name} version ${version_on_file} is lower than crates.io ${version_on_crate_io}`);
+                        return;
+                    }
+                    
+                    if (compareVersions.compare(version_on_file, version_on_crate_io, '>')) {
+                        console.log(`✓ ${name}: ${version_on_crate_io} → ${version_on_file}`);
+                        bump_details.push(`${name}: ${version_on_crate_io} → ${version_on_file}`);
+                        has_version_bump = true;
+                    } else {
+                        console.log(`${name}: ${version_on_file} (unchanged)`);
+                    }
+                }
+                
+                if (!has_version_bump) {
+                    core.setFailed('No version bumps detected in wolfssl or wolfssl-sys. Either bump a version or add the "ignore-release" label to the PR.');
+                } else {
+                    console.log(`Version bumps detected:\n${bump_details.join('\n')}`);
+                }                
+        
       - uses: actions/github-script@v7
         id: process_release
         with:
@@ -91,7 +145,7 @@ jobs:
             const is_merge_event = ${{ github.event_name == 'push' }}
 
             const { globby } = await import("${{ github.workspace }}/node_modules/globby/index.js");
-            const toml = require('toml');
+            const toml = require('@iarna/toml');
             const fs = require('fs');
             const axios = require('axios');
             const { spawn } = require('child_process');

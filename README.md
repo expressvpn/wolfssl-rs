@@ -134,6 +134,14 @@ flowchart TD
     RaiseWolfsslReleasePR --> Complete
 ```
 
+## Semantic Versioning Guidelines
+
+We follow [Semantic Versioning 2.0.0](https://semver.org/) for version management. Version numbers follow the format `MAJOR.MINOR.PATCH`:
+
+- **PATCH (x.y.Z)**: Dependency updates
+- **MINOR (x.Y.0)**: Backwards-compatible API changes
+- **MAJOR (X.0.0)**: Backwards-incompatible changes and/or WolfSSL library version upgrades
+
 ## Releasing a Single Crate
 
 A GitHub Workflow is set up to automate the release of crates in this repo. Upon a release, it will create a release in GitHub and Crates.io
@@ -141,6 +149,8 @@ A GitHub Workflow is set up to automate the release of crates in this repo. Upon
 To create a new release, follow the below steps:
 
 1. Bump the version in `<crate-name>/Cargo.toml`. We follow the semantic versioning pattern when deciding a new version number
-1. Open a PR, attach the `release` label to the PR
+1. Open a PR (all PRs will create a new release unless labeled `ignore-release`)
 1. Observe that a comment is add to the PR, indicating the current version and the upcoming version
 1. Merge the PR, a new version should be released to both GitHub and Crates.io
+
+Use the `ignore-release` label only on chore/CI-only PRs with no code changes. For any functional change, we expect a release unless there’s a strong reason not to. If no version bump is present and no `ignore-release` label is set, CI will block the release workflow.
