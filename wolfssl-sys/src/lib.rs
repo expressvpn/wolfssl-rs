@@ -1,9 +1,14 @@
 mod bindings;
-pub use bindings::*;
 
-/// Get WolfSSL version tag via `git describe`.
-pub fn get_wolfssl_version_tag() -> &'static str {
-    env!("VERGEN_GIT_DESCRIBE")
+pub use bindings::*;
+use std::ffi::CStr;
+
+/// Get WolfSSL version via `LIBWOLFSSL_VERSION_STRING` header defined in wolfssl/version.h
+pub fn get_wolfssl_version_string() -> &'static str {
+    CStr::from_bytes_until_nul(LIBWOLFSSL_VERSION_STRING)
+        .unwrap()
+        .to_str()
+        .unwrap()
 }
 
 /**
@@ -54,8 +59,7 @@ mod tests {
     }
 
     #[test]
-    fn test_wolfssl_version_tag_clean() {
-        // Make sure the working tree is clean
-        assert!(!get_wolfssl_version_tag().contains("dirty"))
+    fn test_wolfssl_version_is_not_empty() {
+        assert!(!get_wolfssl_version_string().is_empty())
     }
 }
