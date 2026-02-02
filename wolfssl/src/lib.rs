@@ -30,10 +30,7 @@ use wolfssl_sys::{
 
 use std::{os::raw::c_int, ptr::NonNull};
 
-/// Get WolfSSL version tag via `git describe`.
-pub fn get_wolfssl_version_tag() -> &'static str {
-    wolfssl_sys::get_wolfssl_version_tag()
-}
+pub use wolfssl_sys::get_wolfssl_version_string;
 
 /// Record size is defined as `2^14 + 1`.
 ///

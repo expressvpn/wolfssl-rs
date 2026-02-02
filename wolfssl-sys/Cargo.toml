@@ -15,7 +15,6 @@ edition.workspace = true
 bindgen = "0.72"
 autotools = "0.2"
 build-target = "0.8.0"
-vergen-gix = "9.1.0"
 
 [target.'cfg(windows)'.build-dependencies]
 msbuild = "0.2.0"
