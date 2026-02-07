@@ -396,9 +396,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             x @ wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR => match self.get_error(x) {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
                 wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
-                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
-                    if self.is_secure_renegotiation_supported() =>
-                {
+                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY => {
                     self.handle_app_data().map(Poll::AppData)
                 }
                 e => Err(Error::fatal(e)),
@@ -437,9 +435,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             x @ wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR => match self.get_error(x) {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
                 wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
-                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
-                    if self.is_secure_renegotiation_supported() =>
-                {
+                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY => {
                     self.handle_app_data().map(Poll::AppData)
                 }
                 x => Err(Error::fatal(x)),
@@ -496,9 +492,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                     wolfssl_sys::WOLFSSL_ERROR_NONE_c_int => Ok(Poll::Ready(0)),
                     wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
                     wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
-                    wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
-                        if self.is_secure_renegotiation_supported() =>
-                    {
+                    wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY => {
                         self.handle_app_data().map(Poll::AppData)
                     }
                     e => Err(Error::fatal(e)),
@@ -560,9 +554,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                     wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
                     wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
                     wolfssl_sys::WOLFSSL_ERROR_NONE_c_int => Ok(Poll::Ready(0)),
-                    wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
-                        if self.is_secure_renegotiation_supported() =>
-                    {
+                    wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY => {
                         self.handle_app_data().map(Poll::AppData)
                     }
                     e => Err(Error::fatal(e)),
@@ -574,7 +566,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
 
     /// Checks if this session supports secure renegotiation
     ///
-    /// Only some D/TLS connections support secure renegotiation, so this method
+    /// Only some D/TLS1.2 connections support secure renegotiation, so this method
     /// checks if it's something we can do here.
     pub fn is_secure_renegotiation_supported(&mut self) -> bool {
         // SAFETY: No documentation available for `wolfSSL_SSL_get_secure_renegotiation_support`
@@ -626,9 +618,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             x @ wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR => match self.get_error(x) {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
                 wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
-                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
-                    if self.is_secure_renegotiation_supported() =>
-                {
+                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY => {
                     self.handle_app_data().map(Poll::AppData)
                 }
                 e => Err(Error::fatal(e)),
@@ -1027,8 +1017,6 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     // not return a `WANT_READ` or similar error code, so if we see them we will
     // convert it to an error.
     fn handle_app_data(&mut self) -> Result<Bytes> {
-        debug_assert!(self.is_secure_renegotiation_supported());
-
         let mut buf = BytesMut::with_capacity(TLS_MAX_RECORD_SIZE);
         // Collect the appdata wolfssl kindly informed us about.
         match self.try_read(&mut buf) {
@@ -1618,6 +1606,18 @@ mod tests {
             }
             e => panic!("Expected bytes to be read! Got {e:?}"),
         }
+    }
+
+    #[test_case(Method::DtlsClientV1_2, Method::DtlsServerV1_2, true; "DTLS1.2")]
+    #[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_3, false; "DTLS1.3")]
+    fn verify_secure_nego_support(server_method: Method, client_method: Method, expected: bool) {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let (mut client, mut server) =
+            make_connected_dtls_clients_with_method(server_method, client_method);
+
+        assert_eq!(client.ssl.is_secure_renegotiation_supported(), expected);
+        assert_eq!(server.ssl.is_secure_renegotiation_supported(), expected);
     }
 
     #[test]
