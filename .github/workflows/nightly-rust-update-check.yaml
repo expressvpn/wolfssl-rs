@@ -39,6 +39,7 @@ jobs:
     - uses: peter-evans/create-pull-request@v6
       with:
         token: ${{ secrets.SERVICE_ACCOUNT_PAT }}
+        labels: ignore-release
         delete-branch: true
         committer: ExpressVPN Automation Bot <143369453+expressvpn-iat-bot@users.noreply.github.com>
         author: ExpressVPN Automation Bot <143369453+expressvpn-iat-bot@users.noreply.github.com>
