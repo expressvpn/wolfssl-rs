@@ -28,6 +28,15 @@ debug = []
 postquantum = []
 kyber_only = ["postquantum"]
 system_ca_certs = []
+# Configure feature flags
+aesccm = []
+dh = []
+opensslall = []
+opensslextra = []
+psk = []
+# Define feature flags
+ex_data = []
+alpn = []
 
 [[example]]
 name = "connect_pq"
