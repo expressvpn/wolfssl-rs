@@ -74,9 +74,6 @@ jobs:
             exit 1
           fi
 
-      - uses: ./.github/actions/check-dependencies
-        id: check_dependencies
-        
       #   To uncomment once the versions on crates.io catches up to the latest version
       # - name: Check semver compliance
       #   uses: obi1kenobi/cargo-semver-checks-action@v2
@@ -86,8 +83,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
-      - run: npm install @iarna/toml globby axios compare-versions
-        
+      - run: npm install @iarna/toml axios compare-versions
+
       - name: Pre-check version bumps
         id: pre_process_release
         uses: actions/github-script@v7
@@ -96,14 +93,15 @@ jobs:
                 const toml = require('@iarna/toml');
                 const fs = require('fs');
                 const axios = require('axios');
-                const compareVersions = require('compare-versions')
+                const compare_versions = require('compare-versions')
                     
-                async function get_crate_details(name) {
+                async function get_crate_max_version(name) {
                     try {
-                        return (await axios(`https://crates.io/api/v1/crates/${name}`)).data
+                        const resp = await axios(`https://crates.io/api/v1/crates/${name}`);
+                        return resp.data.crate.max_version;
                     } catch(error) {
-                        console.error("Error fetching crate details:", error)
-                        throw error
+                        console.error(`Error fetching crate details for ${name}:`, error.message);
+                        throw error;
                     }
                 }
                 
@@ -115,15 +113,14 @@ jobs:
                     const data = toml.parse(fs.readFileSync(crate_path, 'utf-8'))
                     const name = data.package.name
                     const version_on_file = data.package.version
-                    const crate_info = await get_crate_details(name)
-                    const version_on_crate_io = crate_info.crate.max_version
+                    const version_on_crate_io = await get_crate_max_version(name)
                     
-                    if (compareVersions.compare(version_on_file, version_on_crate_io, '<')) {
+                    if (compare_versions.compare(version_on_file, version_on_crate_io, '<')) {
                         core.setFailed(`${name} version ${version_on_file} is lower than crates.io ${version_on_crate_io}`);
                         return;
                     }
                     
-                    if (compareVersions.compare(version_on_file, version_on_crate_io, '>')) {
+                    if (compare_versions.compare(version_on_file, version_on_crate_io, '>')) {
                         console.log(`✓ ${name}: ${version_on_crate_io} → ${version_on_file}`);
                         bump_details.push(`${name}: ${version_on_crate_io} → ${version_on_file}`);
                         has_version_bump = true;
@@ -137,102 +134,215 @@ jobs:
                 } else {
                     console.log(`Version bumps detected:\n${bump_details.join('\n')}`);
                 }                
-        
-      - uses: actions/github-script@v7
+
+      - name: Publish crates sequentially
+        uses: actions/github-script@v7
         id: process_release
         with:
           script: |
             const is_merge_event = ${{ github.event_name == 'push' }}
-
-            const { globby } = await import("${{ github.workspace }}/node_modules/globby/index.js");
+            
+            const NO_RELEASE = ':negative_squared_cross_mark: No release';
+            const RELEASE = ':white_check_mark: Release';
+            
             const toml = require('@iarna/toml');
             const fs = require('fs');
             const axios = require('axios');
             const { spawn } = require('child_process');
+            const compare_versions = require('compare-versions');
 
-            async function get_crate_details(name) {
+            async function get_crate_max_version(name) {
               try {
-                return (await axios(`https://crates.io/api/v1/crates/${name}`)).data
+                const resp = await axios(`https://crates.io/api/v1/crates/${name}`);
+                return resp.data.crate.max_version;
               } catch(error) {
-                console.error("Error fetching crate details:", error)
+                console.error(`Error fetching crate details for ${name}:`, error.message);
+                throw error;
               }
             }
 
-            function run_command_stream(command_arr) {
-              const [command, ...args] = command_arr
+            function run_command(command_arr) {
+                return new Promise((resolve, reject) => {
+                    const [command, ...args] = command_arr;
+                    console.log(`Running: ${command_arr.join(' ')}`);
+                    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+                    child.stdout.on("data", data => process.stdout.write(data));
+                    child.stderr.on("data", data => process.stderr.write(data));
+                    child.on("close", code => {
+                        if (code !== 0) {
+                            reject(new Error(`Command '${command_arr.join(' ')}' exited with code ${code}`));
+                        } else {
+                            resolve();
+                        }
+                    });
+                    child.on("error", reject);
+                });
+            }
 
-              const child = spawn(command, args)
-              child.stdout.on("data", data => console.log(Buffer.from(data).toString()))
-              child.stderr.on("data", data => console.error(Buffer.from(data).toString()))
-              child.on("close", code => {
-                console.log(command, "exited with code", code)
-                if (code != 0) {
-                  core.setFailed(`Command ${command_str} exited with code ${code}`)
+            async function wait_for_crates_io(name, version, timeout_ms = 300000, interval_ms = 10000) {
+                const start = Date.now();
+                console.log(`Waiting for ${name}@${version} to appear on crates.io...`);
+                while (Date.now() - start < timeout_ms) {
+                    try {
+                        const current = await get_crate_max_version(name);
+                        if (current === version) {
+                            console.log(`${name}@${version} is now live on crates.io`);
+                            return;
+                        }
+                        console.log(`  crates.io has ${name}@${current}, waiting for ${version}...`);
+                    } catch (e) {
+                        console.log(`  Error checking crates.io: ${e.message}, retrying...`);
+                    }
+                    
+                    await new Promise(r => setTimeout(r, interval_ms));
                 }
-              })
+                throw new Error(`Timed out waiting for ${name}@${version} on crates.io after ${timeoutMs / 1000}s`);
             }
 
             async function create_github_release(crate_name, version) {
-              console.log("Creating a github release for", crate_name, version)
+                const { owner, repo } = context.repo;
+                const tag_name = `${crate_name}-${version}`;
+                const ref = `refs/tags/${tag_name}`;
+                const sha = context.sha;
 
-              const { owner, repo } = context.repo
-              const tag_name = `${crate_name}-${version}`
-              const name = tag_name
-              const ref = `refs/tags/${tag_name}`
-              const sha = context.sha
-              const body = ""
-
-              await github.rest.git.createRef({ owner, repo, ref, sha })
-              await github.rest.repos.createRelease({ owner, repo, tag_name, name, body })
-            }
-
-            const is_dry_run = !is_merge_event
-            console.log("Dry run status is:", is_dry_run)
-
-            console.log("wolfssl-sys release version: ${{ steps.check_dependencies.outputs.wolfssl_sys_release_version }}")
-            console.log("wolfssl-sys release status: ${{ steps.check_dependencies.outputs.wolfssl_sys_release_status }}")
-            console.log("wolfssl to sys dependency version: ${{ steps.check_dependencies.outputs.dependency_version }}")
-            console.log("wolfssl to sys dependency status: ${{ steps.check_dependencies.outputs.dependency_status }}")
-
-            const crate_definitions = await globby("*/Cargo.toml")
-
-            let blocked_crates = 0
-            const crates_to_publish = []
-            for (crate_definition of crate_definitions) {
-              console.log(`Processing ${crate_definition}`)
-
-              const data = toml.parse(fs.readFileSync(crate_definition, 'utf8'))
-              const name = data.package.name
-              const version_on_file = data.package.version
-              const version_on_crate_io = (await get_crate_details(name)).crate.max_version
-
-              if (version_on_file != version_on_crate_io) {
-                console.log("Crate", name, "needs publishing")
-
-                if (name == "wolfssl" && "${{ steps.check_dependencies.outputs.dependency_status }}" != "released") {
-                  console.log("Cannot release wolfssl with dependency on ${{ steps.check_dependencies.outputs.dependency_status }} wolfssl-sys")
-                  crates_to_publish.push({ name, version_on_file, version_on_crate_io, release_status: ":no_entry: Blocked", comment: "dependency on ${{ steps.check_dependencies.outputs.dependency_status }} wolfssl-sys" })
-                  blocked_crates++
-                  continue
+                // Check if tag exists before creating
+                // https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#create-a-reference
+                try {
+                    await github.rest.git.getRef({ owner, repo, ref: `tags/${tag_name}` });
+                    console.log(`Tag ${tag_name} already exists, skipping`);
+                } catch (e) {
+                    if (e.status === 404) {
+                        await github.rest.git.createRef({ owner, repo, ref, sha });
+                        console.log(`Created tag ${tag_name}`);
+                    } else {
+                        throw e;
+                    }
                 }
 
-                crates_to_publish.push({ name, version_on_file, version_on_crate_io, release_status: ":white_check_mark: Release", comment: "" })
+                // Check if release exists before creating
+                // https://docs.github.com/en/rest/releases/releases?apiVersion=2022-11-28#create-a-release
+                try {
+                    await github.rest.repos.getReleaseByTag({ owner, repo, tag: tag_name });
+                    console.log(`Release ${tag_name} already exists, skipping`);
+                } catch (e) {
+                    if (e.status === 404) {
+                        await github.rest.repos.createRelease({ owner, repo, tag_name, name: tag_name, body: "" });
+                        console.log(`Created release ${tag_name}`);
+                    } else {
+                        throw e;
+                    }
+                }
+            }
 
-                run_command_stream(["earthly", "--push", "--ci", "--secret", "CARGO_REGISTRY_TOKEN", "+publish", `--PACKAGE=${name}`, `--DRY_RUN=${is_dry_run}`])
+            const is_dry_run = !is_merge_event;
+            console.log("Dry run:", is_dry_run);
+
+            // Strict publish order: wolfssl-sys first, then wolfssl
+            // because wolfssl is dependent on wolfssl-sys
+            const publish_order = [
+                { toml_path: 'wolfssl-sys/Cargo.toml' },
+                { toml_path: 'wolfssl/Cargo.toml' },
+            ];
+
+            const results = [];
+            let sys_needs_publishing = false;
+
+            for (const entry of publish_order) {
+                const data = toml.parse(fs.readFileSync(entry.toml_path, 'utf8'));
+                const name = data.package.name;
+                const version_on_file = data.package.version;
+                const version_on_crate_io = await get_crate_max_version(name);
+                const is_wolfssl = name === 'wolfssl';
+                
+                // Check if version is lower than crates.io
+                if (compare_versions.compare(version_on_file, version_on_crate_io, '<')) {
+                    core.setFailed(`${name} version ${version_on_file} is lower than crates.io ${version_on_crate_io}`);
+                    return;
+                }
+
+                // Check version is equals crates.io
+                if (compare_versions.compare(version_on_file, version_on_crate_io, '=')) {
+                    console.log(`${name}@${version_on_file} already published, skipping`);
+                    results.push({ name, version_on_file, version_on_crate_io, release_status: NO_RELEASE, comment: "already published" });
+                    continue;
+                }
+
+                // Version is greater than crates.io, continue processing release
+                console.log(`${name}: ${version_on_crate_io} → ${version_on_file}`);
+
+                // For wolfssl: validate dependency on wolfssl-sys
+                if (is_wolfssl) {
+                    const sys_data = toml.parse(fs.readFileSync('wolfssl-sys/Cargo.toml', 'utf8'));
+                    const sys_version = sys_data.package.version;
+                    
+                    // To check wolfssl-sys dependency version inside wolfssl/Cargo.toml
+                    const dep_entry = data.dependencies?.['wolfssl-sys'];
+                    let dep_version;
+                    if (typeof dep_entry === 'string') {
+                        // wolfssl-sys = 3.0.0
+                        dep_version = dep_entry;
+                    } else {
+                        // wolfssl-sys = { path = "../wolfssl-sys", version = "x.y.z" } 
+                        dep_version = dep_entry?.version;
+                    }
+                    
+                    if (!dep_version) {
+                        core.setFailed('Could not read wolfssl-sys dependency version from wolfssl/Cargo.toml');
+                        return;
+                    }
+                    
+                    if (dep_version !== sys_version) {
+                        core.setFailed(`wolfssl depends on wolfssl-sys@${dep_version} but wolfssl-sys/Cargo.toml has version ${sys_version}. Update the dependency.`);
+                        return;
+                    }
+                    
+                    console.log(`Dependency check passed: wolfssl depends on wolfssl-sys@${dep_version}, matches wolfssl-sys/Cargo.toml`);
+    
+                    // Get wolfssl-sys latest version on crates.io
+                    const live_sys_version = await get_crate_max_version('wolfssl-sys');
+                    
+                    // On real publish, verify wolfssl-sys is available on crates.io else skip if dry run.
+                    if (!is_dry_run) {
+                        if (live_sys_version !== sys_version) {
+                            core.setFailed(`wolfssl-sys@${sys_version} is not yet live on crates.io (found ${live_sys_version}). This should not happen.`);
+                            return;   
+                        }    
+                    }
+                } else {
+                    // For wolfssl-sys, update flag
+                    sys_needs_publishing = true;
+                }
+
+                // Comment for PR table
+                let comment = "";
+                // If both wolfssl and wolfssl-sys being published 
+                if (is_wolfssl && sys_needs_publishing) {
+                    comment = "after wolfssl-sys";
+                }
+
+                results.push({ name, version_on_file, version_on_crate_io, release_status: RELEASE, comment });
+                
+                // In dry-run mode, skip wolfssl publish if wolfssl-sys is also being published,
+                // because cargo publish --dry-run verifies deps against crates.io and wolfssl-sys
+                // won't be there yet.
+                const sys_publishing_with_wolf_in_dry_run = is_wolfssl && is_dry_run && sys_needs_publishing;
+                if (sys_publishing_with_wolf_in_dry_run) {
+                  console.log(`Skipping dry-run publish for wolfssl (wolfssl-sys not yet on crates.io)`);
+                } else {
+                  await run_command(["earthly", "--push", "--ci", "--secret", "CARGO_REGISTRY_TOKEN", "+publish", `--PACKAGE=${name}`, `--DRY_RUN=${is_dry_run}`]);
+                }
+    
                 if (!is_dry_run) {
-                  await create_github_release(name, version_on_file)
+                    // Polling for the published version to appear on crates.io
+                    await wait_for_crates_io(name, version_on_file);
+                    // Create GitHub tag + release idempotently
+                    await create_github_release(name, version_on_file);
                 }
-              } else {
-                console.log("Crate", name, "does not need publishing")
-                crates_to_publish.push({ name, version_on_file, version_on_crate_io, release_status: ":negative_squared_cross_mark: No release", comment: "" })
-              }
             }
 
-            const crates_to_publish_table_rendered = crates_to_publish.map(item =>
-              `| \`${item.name}\` | ${item.version_on_crate_io} | **${item.version_on_file}** | ${item.release_status} | ${item.comment} | `
-            ).join("\n")
-            core.setOutput('crates_to_publish_table_rendered', crates_to_publish_table_rendered)
-            core.setOutput('nr_crates_blocked_from_releasing', blocked_crates)
+            const crates_to_publish_table_rendered = results.map(item =>
+            `| \`${item.name}\` | ${item.version_on_crate_io} | **${item.version_on_file}** | ${item.release_status} | ${item.comment} | `).join("\n");
+            core.setOutput('crates_to_publish_table_rendered', crates_to_publish_table_rendered);
 
       - uses: peter-evans/find-comment@v3
         id: fc
@@ -262,9 +372,3 @@ jobs:
             |--|--|--|--|--|
             ${{ steps.process_release.outputs.crates_to_publish_table_rendered }}
           edit-mode: replace
-
-      - if: ${{ steps.process_release.outputs.nr_crates_blocked_from_releasing > 0 }}
-        name: Fail release on blocked releases
-        uses: actions/github-script@v7
-        with:
-          script: core.setFailed('Unable to release all required crates')
