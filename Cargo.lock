@@ -788,7 +788,7 @@ dependencies = [
 
 [[package]]
 name = "wolfssl"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -803,7 +803,7 @@ dependencies = [
 
 [[package]]
 name = "wolfssl-sys"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "autotools",
  "bindgen",
