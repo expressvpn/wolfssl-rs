@@ -31,7 +31,28 @@ jobs:
           script: |
             const owner = context.repo.owner
             const repo = context.repo.repo
-            const issue_number = context.eventName === 'pull_request' ? process.env.EVENT_NUMBER : process.env.PR_NUMBER
+            let issue_number = context.eventName === 'pull_request' ? process.env.EVENT_NUMBER : process.env.PR_NUMBER
+
+            if (!issue_number && context.eventName === 'push') {
+              // Poll GitHub API — indexing the commit-to-PR association can be delayed
+              const sha = context.sha
+              const max_attempts = 5
+              const interval_ms = 5000 
+              for (let attempt = 1; attempt <= max_attempts; attempt++) {
+                console.log(`Polling for PR associated with ${sha} (attempt ${attempt}/${max_attempts})...`)
+                const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                  owner, repo, commit_sha: sha
+                })
+                if (prs.length > 0) {
+                  issue_number = String(prs[0].number)
+                  console.log(`Found PR #${issue_number} via API for commit ${sha}`)
+                  break
+                }
+                if (attempt < max_attempts) {
+                  await new Promise(r => setTimeout(r, interval_ms))
+                }
+              }
+            }
 
             if (!owner || !repo || !issue_number) {
               core.setFailed(`Missing required parameters: owner=${owner}, repo=${repo}, issue_number=${issue_number}`)
