@@ -315,7 +315,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .enable("supportedcurves", None)
         // Enable TLS/1.3
         .enable("tls13", None)
-        // Enable kyber, etc
+        // Enable experimental support
         .enable("experimental", None)
         // CFLAGS
         .cflag("-g")
@@ -366,15 +366,10 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     }
 
     if cfg!(feature = "postquantum") {
-        let flags = if cfg!(feature = "kyber_only") {
-            "yes,kyber"
-        } else {
-            conf.cflag("-DWOLFSSL_ML_KEM_USE_OLD_IDS");
-            "yes,all"
-        };
-        // Enable Kyber/ML-KEM
-        conf.enable("mlkem", Some(flags))
-            // SHA3 is needed for using WolfSSL's implementation of Kyber/ML-KEM
+        conf.cflag("-DWOLFSSL_ML_KEM_USE_OLD_IDS");
+        // Enable ML-KEM
+        conf.enable("mlkem", Some("yes,all"))
+            // SHA3 is needed for using WolfSSL's implementation of ML-KEM
             .enable("sha3", None);
     }
 
