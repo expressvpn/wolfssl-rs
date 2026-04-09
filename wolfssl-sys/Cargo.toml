@@ -1,6 +1,6 @@
 [package]
 name = "wolfssl-sys"
-version = "3.1.0"
+version = "3.2.0"
 description = "System bindings for WolfSSL"
 readme = "README.md"
 authors.workspace = true
@@ -26,7 +26,6 @@ test-case = "3.0"
 default = ["postquantum"]
 debug = []
 postquantum = []
-kyber_only = ["postquantum"]
 system_ca_certs = []
 # Configure feature flags
 aesccm = []

@@ -265,17 +265,17 @@ pub enum CurveGroup {
     P521KyberLevel5,
 
     /// `WOLFSSL_SECP256R1MLKEM512`
-    #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
+    #[cfg(feature = "postquantum")]
     P256MLKEM512,
     /// `WOLFSSL_SECP384R1MLKEM768`
-    #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
+    #[cfg(feature = "postquantum")]
     P384MLKEM768,
     /// `WOLFSSL_SECP521R1MLKEM1024`
-    #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
+    #[cfg(feature = "postquantum")]
     P521MLKEM1024,
 
     /// `WOLFSSL_X25519MLKEM768`
-    #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
+    #[cfg(feature = "postquantum")]
     X25519MLKEM768,
 }
 
@@ -296,13 +296,13 @@ impl CurveGroup {
             P384KyberLevel3 => wolfssl_sys::WOLFSSL_P384_KYBER_LEVEL3,
             #[cfg(feature = "postquantum")]
             P521KyberLevel5 => wolfssl_sys::WOLFSSL_P521_KYBER_LEVEL5,
-            #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
+            #[cfg(feature = "postquantum")]
             P256MLKEM512 => wolfssl_sys::WOLFSSL_SECP256R1MLKEM512,
-            #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
+            #[cfg(feature = "postquantum")]
             P384MLKEM768 => wolfssl_sys::WOLFSSL_SECP384R1MLKEM768,
-            #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
+            #[cfg(feature = "postquantum")]
             P521MLKEM1024 => wolfssl_sys::WOLFSSL_SECP521R1MLKEM1024,
-            #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
+            #[cfg(feature = "postquantum")]
             X25519MLKEM768 => wolfssl_sys::WOLFSSL_X25519MLKEM768,
         }
     }

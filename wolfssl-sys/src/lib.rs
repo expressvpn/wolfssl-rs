@@ -34,8 +34,7 @@ mod tests {
     }
 
     #[cfg(feature = "postquantum")]
-    #[test_case(WOLFSSL_P521_KYBER_LEVEL5)]
-    #[cfg_attr(not(feature = "kyber_only"), test_case(WOLFSSL_SECP521R1MLKEM1024))]
+    #[test_case(WOLFSSL_SECP521R1MLKEM1024)]
     fn test_post_quantum_available(group: CurveGroupType) {
         unsafe {
             // Init WolfSSL
@@ -53,7 +52,7 @@ mod tests {
 
             let res = wolfSSL_UseKeyShare(ssl, group.try_into().unwrap());
 
-            // Check that Kyber/ML-KEM was enabled
+            // Check that ML-KEM was enabled
             assert_eq!(res, WOLFSSL_SUCCESS as c_int);
         }
     }
