@@ -327,7 +327,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .cflag("-DUSE_CERT_BUFFERS_4096")
         .cflag("-DUSE_CERT_BUFFERS_256")
         .cflag("-DWOLFSSL_NO_SPHINCS")
-        .cflag("-DWOLFSSL_TLS13_MIDDLEBOX_COMPAT");
+        .cflag("-DWOLFSSL_TLS13_MIDDLEBOX_COMPAT")
+        .cflag("-DWOLFSSL_AESGCM_STREAM");
 
     for feature in OPTIONAL_FEATURES {
         // Determine if feature is enabled, enable or disable feature in configure

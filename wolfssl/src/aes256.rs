@@ -3,7 +3,9 @@ use std::mem::MaybeUninit;
 use bytes::BytesMut;
 use thiserror::Error;
 use wolfssl_sys::{
-    wc_AesFree, wc_AesGcmDecrypt, wc_AesGcmEncrypt, wc_AesGcmSetKey, wc_AesInit, Aes, INVALID_DEVID,
+    wc_AesFree, wc_AesGcmDecrypt, wc_AesGcmDecryptFinal, wc_AesGcmDecryptInit,
+    wc_AesGcmDecryptUpdate, wc_AesGcmEncrypt, wc_AesGcmEncryptFinal, wc_AesGcmEncryptInit,
+    wc_AesGcmEncryptUpdate, wc_AesGcmSetKey, wc_AesInit, Aes, INVALID_DEVID,
 };
 
 use crate::ErrorKind;
@@ -144,6 +146,230 @@ impl Aes256Gcm {
         }
     }
 
+    /// Initialize a streaming AES-GCM encryption operation with the given IV.
+    /// A key must have been set via `set_key` before calling this.
+    /// After calling this, use `encrypt_update` to feed AAD and/or plaintext,
+    /// then `encrypt_final` to get the authentication tag.
+    pub fn encrypt_init(
+        &mut self,
+        iv: [u8; Aes256Gcm::IV_SIZE],
+    ) -> Result<(), Aes256GcmError> {
+        if !self.valid_key {
+            return Err(Aes256GcmError::InvalidKey);
+        }
+
+        // SAFETY: aes is initialized, key has been set.
+        // wc_AesGcmEncryptInit sets up the IV for streaming encryption.
+        // Passing null key with 0 len means "use previously set key".
+        let ret = unsafe {
+            wc_AesGcmEncryptInit(
+                self.aes.as_mut(),
+                std::ptr::null(),
+                0,
+                iv.as_ptr(),
+                Aes256Gcm::IV_SIZE as u32,
+            )
+        };
+        if ret != 0 {
+            return Err(Aes256GcmError::Fatal(ErrorKind::from(ret)));
+        }
+        Ok(())
+    }
+
+    /// Feed AAD and/or plaintext into a streaming AES-GCM encryption.
+    /// Returns the ciphertext produced from the plaintext portion.
+    /// AAD must be fed before any plaintext. Once plaintext has been provided,
+    /// no more AAD can be added.
+    pub fn encrypt_update(
+        &mut self,
+        plain_text: Option<&[u8]>,
+        aad: Option<&[u8]>,
+    ) -> Result<BytesMut, Aes256GcmError> {
+        let (pt_ptr, pt_len) = match plain_text {
+            Some(pt) => (pt.as_ptr(), pt.len()),
+            None => (std::ptr::null(), 0),
+        };
+        let (aad_ptr, aad_len) = match aad {
+            Some(a) => (a.as_ptr(), a.len()),
+            None => (std::ptr::null(), 0),
+        };
+
+        let mut cipher_text = BytesMut::with_capacity(pt_len);
+
+        // SAFETY: aes is initialized and encrypt_init has been called.
+        let ret = unsafe {
+            wc_AesGcmEncryptUpdate(
+                self.aes.as_mut(),
+                cipher_text.as_mut_ptr(),
+                pt_ptr,
+                pt_len as u32,
+                aad_ptr,
+                aad_len as u32,
+            )
+        };
+        if ret != 0 {
+            return Err(Aes256GcmError::Fatal(ErrorKind::from(ret)));
+        }
+
+        // SAFETY: wc_AesGcmEncryptUpdate writes exactly pt_len bytes of ciphertext
+        unsafe {
+            cipher_text.set_len(pt_len);
+        }
+        Ok(cipher_text)
+    }
+
+    /// Encrypt plaintext in place during a streaming AES-GCM operation.
+    /// The contents of `buf` are overwritten with ciphertext.
+    /// AAD must already have been fed via `encrypt_update` before calling this.
+    pub fn encrypt_update_in_place(&mut self, buf: &mut [u8]) -> Result<(), Aes256GcmError> {
+        // SAFETY: aes is initialized and encrypt_init has been called.
+        // wc_AesGcmEncryptUpdate supports in-place operation (out == in).
+        let ret = unsafe {
+            wc_AesGcmEncryptUpdate(
+                self.aes.as_mut(),
+                buf.as_mut_ptr(),
+                buf.as_ptr(),
+                buf.len() as u32,
+                std::ptr::null(),
+                0,
+            )
+        };
+        if ret != 0 {
+            return Err(Aes256GcmError::Fatal(ErrorKind::from(ret)));
+        }
+        Ok(())
+    }
+
+    /// Finalize a streaming AES-GCM encryption and return the authentication tag.
+    pub fn encrypt_final(&mut self) -> Result<[u8; Aes256Gcm::AUTHTAG_SIZE], Aes256GcmError> {
+        let mut auth_tag = [0u8; Aes256Gcm::AUTHTAG_SIZE];
+
+        // SAFETY: aes is initialized and encrypt_init/update have been called.
+        let ret = unsafe {
+            wc_AesGcmEncryptFinal(
+                self.aes.as_mut(),
+                auth_tag.as_mut_ptr(),
+                Aes256Gcm::AUTHTAG_SIZE as u32,
+            )
+        };
+        if ret != 0 {
+            return Err(Aes256GcmError::Fatal(ErrorKind::from(ret)));
+        }
+        Ok(auth_tag)
+    }
+
+    /// Initialize a streaming AES-GCM decryption operation with the given IV.
+    /// A key must have been set via `set_key` before calling this.
+    /// After calling this, use `decrypt_update` to feed AAD and/or ciphertext,
+    /// then `decrypt_final` to verify the authentication tag.
+    pub fn decrypt_init(
+        &mut self,
+        iv: [u8; Aes256Gcm::IV_SIZE],
+    ) -> Result<(), Aes256GcmError> {
+        if !self.valid_key {
+            return Err(Aes256GcmError::InvalidKey);
+        }
+
+        // SAFETY: aes is initialized, key has been set.
+        // Passing null key with 0 len means "use previously set key".
+        let ret = unsafe {
+            wc_AesGcmDecryptInit(
+                self.aes.as_mut(),
+                std::ptr::null(),
+                0,
+                iv.as_ptr(),
+                Aes256Gcm::IV_SIZE as u32,
+            )
+        };
+        if ret != 0 {
+            return Err(Aes256GcmError::Fatal(ErrorKind::from(ret)));
+        }
+        Ok(())
+    }
+
+    /// Feed AAD and/or ciphertext into a streaming AES-GCM decryption.
+    /// Returns the plaintext produced from the ciphertext portion.
+    /// AAD must be fed before any ciphertext.
+    pub fn decrypt_update(
+        &mut self,
+        cipher_text: Option<&[u8]>,
+        aad: Option<&[u8]>,
+    ) -> Result<BytesMut, Aes256GcmError> {
+        let (ct_ptr, ct_len) = match cipher_text {
+            Some(ct) => (ct.as_ptr(), ct.len()),
+            None => (std::ptr::null(), 0),
+        };
+        let (aad_ptr, aad_len) = match aad {
+            Some(a) => (a.as_ptr(), a.len()),
+            None => (std::ptr::null(), 0),
+        };
+
+        let mut plain_text = BytesMut::with_capacity(ct_len);
+
+        // SAFETY: aes is initialized and decrypt_init has been called.
+        let ret = unsafe {
+            wc_AesGcmDecryptUpdate(
+                self.aes.as_mut(),
+                plain_text.as_mut_ptr(),
+                ct_ptr,
+                ct_len as u32,
+                aad_ptr,
+                aad_len as u32,
+            )
+        };
+        if ret != 0 {
+            return Err(Aes256GcmError::Fatal(ErrorKind::from(ret)));
+        }
+
+        // SAFETY: wc_AesGcmDecryptUpdate writes exactly ct_len bytes of plaintext
+        unsafe {
+            plain_text.set_len(ct_len);
+        }
+        Ok(plain_text)
+    }
+
+    /// Decrypt ciphertext in place during a streaming AES-GCM operation.
+    /// The contents of `buf` are overwritten with plaintext.
+    /// AAD must already have been fed via `decrypt_update` before calling this.
+    pub fn decrypt_update_in_place(&mut self, buf: &mut [u8]) -> Result<(), Aes256GcmError> {
+        // SAFETY: aes is initialized and decrypt_init has been called.
+        // wc_AesGcmDecryptUpdate supports in-place operation (out == in).
+        let ret = unsafe {
+            wc_AesGcmDecryptUpdate(
+                self.aes.as_mut(),
+                buf.as_mut_ptr(),
+                buf.as_ptr(),
+                buf.len() as u32,
+                std::ptr::null(),
+                0,
+            )
+        };
+        if ret != 0 {
+            return Err(Aes256GcmError::Fatal(ErrorKind::from(ret)));
+        }
+        Ok(())
+    }
+
+    /// Finalize a streaming AES-GCM decryption, verifying the authentication tag.
+    /// Returns an error if the tag does not match.
+    pub fn decrypt_final(
+        &mut self,
+        auth_tag: &[u8; Aes256Gcm::AUTHTAG_SIZE],
+    ) -> Result<(), Aes256GcmError> {
+        // SAFETY: aes is initialized and decrypt_init/update have been called.
+        let ret = unsafe {
+            wc_AesGcmDecryptFinal(
+                self.aes.as_mut(),
+                auth_tag.as_ptr(),
+                Aes256Gcm::AUTHTAG_SIZE as u32,
+            )
+        };
+        if ret != 0 {
+            return Err(Aes256GcmError::Fatal(ErrorKind::from(ret)));
+        }
+        Ok(())
+    }
+
     /// This function decrypts input `cipher_text`, using the Aes256Gcm block cipher.
     pub fn decrypt(
         &mut self,
@@ -240,7 +466,7 @@ mod tests {
     fn test_aes_size() {
         cfg_if::cfg_if! {
             if #[cfg(not(windows))] {
-                assert_eq!(std::mem::size_of::<Aes>(), 123728);
+                assert_eq!(std::mem::size_of::<Aes>(), 123824);
             } else if #[cfg(all(windows, target_arch = "aarch64"))] {
                 assert_eq!(std::mem::size_of::<Aes>(), 320);
             } else {
@@ -289,5 +515,80 @@ mod tests {
             .decrypt(IV, CIPHER_TEXT.as_ref(), AUTH_VEC, EXP_AUTH_TAG)
             .unwrap();
         assert_eq!(&plaint_text[..], &PLAIN_TEXT);
+    }
+
+    #[test]
+    fn test_aes256gcm_stream_encrypt() {
+        let mut cipher = Aes256Gcm::new().unwrap();
+        cipher.set_key(KEY).unwrap();
+
+        // Streaming encrypt
+        cipher.encrypt_init(IV).unwrap();
+        let _ = cipher.encrypt_update(None, Some(AUTH_VEC)).unwrap();
+        let ct = cipher.encrypt_update(Some(&PLAIN_TEXT), None).unwrap();
+        let auth_tag = cipher.encrypt_final().unwrap();
+
+        // Verify against one-shot results
+        assert_eq!(&ct[..], &CIPHER_TEXT);
+        assert_eq!(&auth_tag[..], &EXP_AUTH_TAG[..]);
+    }
+
+    #[test]
+    fn test_aes256gcm_stream_decrypt() {
+        let mut cipher = Aes256Gcm::new().unwrap();
+        cipher.set_key(KEY).unwrap();
+
+        // Streaming decrypt
+        cipher.decrypt_init(IV).unwrap();
+        let _ = cipher.decrypt_update(None, Some(AUTH_VEC)).unwrap();
+        let pt = cipher.decrypt_update(Some(&CIPHER_TEXT), None).unwrap();
+        cipher.decrypt_final(EXP_AUTH_TAG).unwrap();
+
+        assert_eq!(&pt[..], &PLAIN_TEXT);
+    }
+
+    #[test]
+    fn test_aes256gcm_stream_encrypt_in_place() {
+        let mut cipher = Aes256Gcm::new().unwrap();
+        cipher.set_key(KEY).unwrap();
+
+        let mut buf = PLAIN_TEXT;
+
+        cipher.encrypt_init(IV).unwrap();
+        let _ = cipher.encrypt_update(None, Some(AUTH_VEC)).unwrap();
+        cipher.encrypt_update_in_place(&mut buf).unwrap();
+        let auth_tag = cipher.encrypt_final().unwrap();
+
+        assert_eq!(&buf[..], &CIPHER_TEXT);
+        assert_eq!(&auth_tag[..], &EXP_AUTH_TAG[..]);
+    }
+
+    #[test]
+    fn test_aes256gcm_stream_decrypt_in_place() {
+        let mut cipher = Aes256Gcm::new().unwrap();
+        cipher.set_key(KEY).unwrap();
+
+        let mut buf = CIPHER_TEXT;
+
+        cipher.decrypt_init(IV).unwrap();
+        let _ = cipher.decrypt_update(None, Some(AUTH_VEC)).unwrap();
+        cipher.decrypt_update_in_place(&mut buf).unwrap();
+        cipher.decrypt_final(EXP_AUTH_TAG).unwrap();
+
+        assert_eq!(&buf[..], &PLAIN_TEXT);
+    }
+
+    #[test]
+    fn test_aes256gcm_stream_encrypt_init_wo_key() {
+        let mut cipher = Aes256Gcm::new().unwrap();
+        let res = cipher.encrypt_init(IV);
+        assert!(matches!(res, Err(Aes256GcmError::InvalidKey)));
+    }
+
+    #[test]
+    fn test_aes256gcm_stream_decrypt_init_wo_key() {
+        let mut cipher = Aes256Gcm::new().unwrap();
+        let res = cipher.decrypt_init(IV);
+        assert!(matches!(res, Err(Aes256GcmError::InvalidKey)));
     }
 }
