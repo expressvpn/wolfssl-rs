@@ -382,28 +382,26 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
             // Enable ARM ASM optimisations
             conf.enable("armasm", None);
         }
-        build_target::Arch::Arm => {
+        build_target::Arch::Arm
             // Enable ARM ASM optimisations, except for android armeabi-v7a
-            if build_target::target_os() != build_target::Os::Android {
+            if build_target::target_os() != build_target::Os::Android => {
                 conf.enable("armasm", None);
             }
-        }
         build_target::Arch::X86 => {
             // Disable sp asm optmisations which has been enabled earlier
             conf.disable("sp-asm", None);
         }
-        build_target::Arch::X86_64 => {
+        build_target::Arch::X86_64
             // We don't need these build flag for iOS simulator
             if !(build_target::target_os() == build_target::Os::iOS
                 && build_target::target_env()
                     == build_target::Env::Other(String::from("sim")).into())
-            {
+            => {
                 // Enable Intel ASM optmisations
                 conf.enable("intelasm", None);
                 // Enable AES hardware acceleration
                 conf.enable("aesni", None);
             }
-        }
         build_target::Arch::Riscv64 => {
             // Enable the RISCV acceleration
             conf.enable("riscv-asm", None);
