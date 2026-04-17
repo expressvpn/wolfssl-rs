@@ -546,6 +546,33 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     conf.build()
 }
 
+/**
+ * Export WolfSSL configuration to JSON for CI consumption
+ */
+fn export_wolfssl_config(config_contents: &str, out_dir: &Path) -> std::io::Result<()> {
+    use std::io::Write;
+
+    // Create a simple JSON structure with just the wolfssl configuration
+    let config_file_path = out_dir.join("wolfssl_config.json");
+    let mut config_file = File::create(&config_file_path)?;
+
+    // Write the configuration as a simple JSON object
+    writeln!(config_file, "{{")?;
+    writeln!(
+        config_file,
+        "  \"wolfssl_configure_command\": {:?}",
+        config_contents.trim()
+    )?;
+    writeln!(config_file, "}}")?;
+
+    println!(
+        "cargo::warning=WolfSSL config exported to: {}",
+        config_file_path.display()
+    );
+
+    Ok(())
+}
+
 fn main() -> std::io::Result<()> {
     // Get the build directory
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
@@ -562,6 +589,26 @@ fn main() -> std::io::Result<()> {
 
     // Configure and build WolfSSL
     let wolfssl_install_dir = build_wolfssl(&wolfssl_src);
+
+    // Export config for CI consumption (Unix builds only, Windows uses MSBuild)
+    if build_target::target_os() != build_target::Os::Windows {
+        let mut config_path = PathBuf::from(&wolfssl_install_dir);
+        config_path.push("build/configure.prev");
+        if let Ok(contents) = fs::read_to_string(config_path) {
+            println!("cargo::warning=WolfSSL config:{}", contents);
+            export_wolfssl_config(&contents, &out_dir)?;
+        }
+    } else {
+        // For Windows builds, export the user_settings.h content as config
+        let settings_path = wolfssl_install_dir.join("wolfssl").join("user_settings.h");
+        if let Ok(contents) = fs::read_to_string(settings_path) {
+            println!(
+                "cargo::warning=WolfSSL Windows config (user_settings.h):{}",
+                contents
+            );
+            export_wolfssl_config(&contents, &out_dir)?;
+        }
+    }
 
     // We want to block some macros as they are incorrectly creating duplicate values
     // https://github.com/rust-lang/rust-bindgen/issues/687
