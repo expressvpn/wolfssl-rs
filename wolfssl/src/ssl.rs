@@ -1680,7 +1680,6 @@ mod tests {
     }
 
     #[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3; "tls1.3")]
-    #[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_3; "dtls1.3")]
     fn try_trigger_update_keys(client: Method, server: Method) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
@@ -1725,6 +1724,62 @@ mod tests {
 
         // The client also reads no application data, but this will trigger the
         // same key update machinery to occur on the client side.
+        match client.ssl.try_read(&mut BytesMut::with_capacity(0)) {
+            Ok(Poll::PendingRead) => {}
+            Ok(Poll::PendingWrite) => panic!("Should be nothing to write"),
+            Ok(Poll::Ready(_)) => {
+                panic!("There should be no data to read")
+            }
+            Ok(Poll::AppData(_)) => {
+                panic!("Should not receive AppData from anywhere")
+            }
+            Err(e) => panic!("{e}"),
+        };
+
+        assert!(
+            !client.ssl.is_update_keys_pending(),
+            "Key update should be done within one round trip"
+        );
+    }
+
+    #[test]
+    fn try_trigger_update_keys_dtls13() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let (mut client, mut server) =
+            make_connected_dtls_clients_with_method(Method::DtlsClientV1_3, Method::DtlsServerV1_3);
+
+        assert!(client.ssl.version().is_dtls_13());
+        assert!(server.ssl.version().is_dtls_13());
+
+        match client.ssl.try_trigger_update_key() {
+            Ok(Poll::Ready(_)) => {}
+            Ok(Poll::PendingRead | Poll::PendingWrite) => {
+                panic!("Should not be pending any data")
+            }
+            Ok(Poll::AppData(_)) => {
+                panic!("Should not receive AppData from anywhere")
+            }
+            Err(e) => panic!("{e}"),
+        }
+
+        assert!(
+            client.ssl.is_update_keys_pending(),
+            "Client should be expecting a response containing decryption keys"
+        );
+
+        match server.ssl.try_read(&mut BytesMut::with_capacity(0)) {
+            Ok(Poll::PendingRead) => {}
+            Ok(Poll::PendingWrite) => panic!("Should be nothing to write"),
+            Ok(Poll::Ready(_)) => {
+                panic!("There should be no data to read")
+            }
+            Ok(Poll::AppData(_)) => {
+                panic!("Should not receive AppData from anywhere");
+            }
+            Err(e) => panic!("{e}"),
+        };
+
         match client.ssl.try_read(&mut BytesMut::with_capacity(0)) {
             Ok(Poll::PendingRead) => {}
             Ok(Poll::PendingWrite) => panic!("Should be nothing to write"),

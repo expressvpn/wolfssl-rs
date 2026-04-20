@@ -139,12 +139,7 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
 }
 
 const PATCH_DIR: &str = "patches";
-const PATCHES: &[&str] = &[
-    "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
-    "backport-darwin-address-calc-fix.patch",
-    "ChaCha20-Aarch64-ASM-fix-256-bit-case-fixed.patch",
-    "dtls13-rtx-timer.patch",
-];
+const PATCHES: &[&str] = &["CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch"];
 const OPTIONAL_FEATURES: &[&str] = &["aesccm", "dh", "opensslall", "opensslextra", "psk"];
 const MACRO_FEATURES: &[(&str, &str)] = &[("ex_data", "HAVE_EX_DATA"), ("alpn", "HAVE_ALPN")];
 
@@ -370,7 +365,9 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         // Enable ML-KEM
         conf.enable("mlkem", Some("yes,all"))
             // SHA3 is needed for using WolfSSL's implementation of ML-KEM
-            .enable("sha3", None);
+            .enable("sha3", None)
+            // Enable extra PQ/T hybrid combinations (e.g. SECP521R1MLKEM1024)
+            .enable("extra-pqc-hybrids", None);
     }
 
     if cfg!(feature = "system_ca_certs") {
