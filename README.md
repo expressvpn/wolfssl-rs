@@ -56,98 +56,29 @@ For more information about the different Earthly targets available, run:
 ```
 earthly doc
 ```
-## Speeding up development with Earthly Satellites
 
-Please refer to [official documentation for Earthly Satellites](https://docs.earthly.dev/earthly-cloud/satellites).
+## Semantic Versioning Guidelines
 
-If you are a member of ExpressVPN, you can get access to the same Earthly organization used in our CI. The organization is named `expressvpn`, inside which contains a satellite named `wolfssl-rs`.
+We follow [Semantic Versioning 2.0.0](https://semver.org/) for version management. Version numbers follow the format `MAJOR.MINOR.PATCH`:
 
-If you are not a member of ExpressVPN, you may set up your own Earthly satellite according the official instructions above.
+- **PATCH (x.y.Z)**: Dependency updates
+- **MINOR (x.Y.0)**: Backwards-compatible API changes
+- **MAJOR (X.0.0)**: Backwards-incompatible changes and/or WolfSSL library version upgrades
 
-# Releasing
+## Releasing crate(s)
 
-This repository is a monorepo for two crates: `wolfssl-sys` and `wolfssl`. It is required when releasing `wolfssl` that it depends on an version of `wolfssl-sys` which is up to date with `main`.
+This repository is a monorepo for two crates: `wolfssl-sys` and `wolfssl`. Both crates can be released from a single PR — the release workflow publishes them sequentially (`wolfssl-sys` first, then `wolfssl`), waiting for each to appear on crates.io before proceeding.
 
-There are four possible states for `wolfssl`'s dependency on `wolfssl-sys`:
+A GitHub Workflow automates publishing to crates.io and creating GitHub releases/tags.
 
-| State         | Description                                                               |
-|---------------|---------------------------------------------------------------------------|
-| `released`    | `wolfssl` depends on the latest, most up to date release of `wolfssl-sys` |
-| `pending`     | `wolfssl` depends on a pending release of `wolfssl-sys`                   |
-| `unreleased`  | `wolfssl-sys` has changes which must be released                          |
-| `out-of-date` | `wolfssl` depends on an old version of `wolfssl-sys`                      |
+To release, follow these steps:
 
-If state is `released` then `wolfssl` can be released without releasing a new version of `wolfssl-sys`.
+1. If `wolfssl-sys` has changes, bump the version in `wolfssl-sys/Cargo.toml`
+1. If you bumped `wolfssl-sys`, update the `wolfssl-sys = { ..., version = "..." }` dependency in `wolfssl/Cargo.toml` to match
+1. Bump the version in `wolfssl/Cargo.toml`
+1. Open a PR — the workflow runs in dry-run mode and posts a comment showing the release plan
+1. Merge the PR — the workflow publishes `wolfssl-sys` first (if needed), polls crates.io until it’s live, then publishes `wolfssl`
 
-If state is `out-of-date` or `unreleased` then:
+The workflow is idempotent: if a run fails partway through, re-running it will skip already-published crates and pick up where it left off.
 
-1. Bump the crate version in `wolfssl-sys/Cargo.toml`
-1. Update the version specified under `dependencies` in the `wolfssl` crate
-
-The state will now be `pending` (or it already was) so:
-
-1. Release `wolfssl-sys` (Follow the section [Releasing a Single Crate](#releasing-a-single-crate))
-
-Once the most recent `wolfssl-sys` is released and `wolfssl` depends on it then `wolfssl` can be released:
-
-1. Bump the crate version in `wolfssl/Cargo.toml`
-1. Release `wolfssl` (Follow the section [Releasing a Single Crate](#releasing-a-single-crate))
-
-```mermaid
-flowchart TD
-    Start((Start))
-    Determine{"Determine
-     current state
-      of wolfssl-sys"}
-
-    Released([Released])
-    Pending([Pending])
-    Unreleased([Unreleased])
-    OutOfDate([Out-of-date])
-
-    BumpWolfsslSysVersion["Update <code>version</code> field
-      in <code>wolfssl-sys/Cargo.toml</code>"]
-    BumpWolfsslVersion["Update <code>version</code> field
-      in <code>wolfssl/Cargo.toml</code>"]
-    BumpWolfsslSysDependency["
-      Update <code>wolfssl-sys = { ..., version = &quot;...&quot; }</code>
-      dependency line in <code>wolfssl/Cargo.toml</code> to new version
-    "]
-    RaiseWolfsslSysReleasePR[Raise, review and merge <code>wolfssl-sys</code> release PR]
-    RaiseWolfsslReleasePR[Raise, review and merge <code>wolfssl</code> release PR]
-
-    Complete((Done))
-
-    Start --> Determine
-    Determine --"No changes to <code>wolfssl-sys</code>,
-      no release is required"--> Released
-    Determine --"A <code>wolfssl-sys</code> release has already been prepared
-      and must be released"--> Pending
-    Determine --New <code>wolfssl-sys</code> release is required--> Unreleased
-    Determine --New <code>wolfssl-sys</code> release is required--> OutOfDate
-
-    Released --> BumpWolfsslVersion
-    Pending --> RaiseWolfsslSysReleasePR
-
-    RaiseWolfsslSysReleasePR --> Released
-
-    Unreleased --> BumpWolfsslSysVersion
-    OutOfDate --> BumpWolfsslSysDependency
-
-    BumpWolfsslSysVersion --> BumpWolfsslSysDependency
-
-    BumpWolfsslSysDependency --> Pending
-    BumpWolfsslVersion --> RaiseWolfsslReleasePR
-    RaiseWolfsslReleasePR --> Complete
-```
-
-## Releasing a Single Crate
-
-A GitHub Workflow is set up to automate the release of crates in this repo. Upon a release, it will create a release in GitHub and Crates.io
-
-To create a new release, follow the below steps:
-
-1. Bump the version in `<crate-name>/Cargo.toml`. We follow the semantic versioning pattern when deciding a new version number
-1. Open a PR, attach the `release` label to the PR
-1. Observe that a comment is add to the PR, indicating the current version and the upcoming version
-1. Merge the PR, a new version should be released to both GitHub and Crates.io
+Use the `ignore-release` label only on chore/CI-only PRs with no code changes. For any functional change, we expect a release unless there’s a strong reason not to. If no version bump is present and no `ignore-release` label is set, CI will block the release workflow.

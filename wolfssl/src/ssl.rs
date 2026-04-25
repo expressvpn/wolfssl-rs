@@ -439,9 +439,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             x @ wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR => match self.get_error(x) {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
                 wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
-                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
-                    if self.is_secure_renegotiation_supported() =>
-                {
+                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY => {
                     self.handle_app_data().map(Poll::AppData)
                 }
                 e => Err(Error::fatal(e)),
@@ -480,9 +478,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             x @ wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR => match self.get_error(x) {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
                 wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
-                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
-                    if self.is_secure_renegotiation_supported() =>
-                {
+                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY => {
                     self.handle_app_data().map(Poll::AppData)
                 }
                 x => Err(Error::fatal(x)),
@@ -509,6 +505,17 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     // update encryption keys). This can be seen in
     // [`Self::trigger_update_keys`].
     pub fn try_write(&mut self, data_in: &mut BytesMut) -> PollResult<usize> {
+        match self.try_write_slice(data_in) {
+            res @ Ok(Poll::Ready(len)) => {
+                data_in.advance(len);
+                res
+            }
+            other => other,
+        }
+    }
+
+    /// Like try_write, but reads from a simple slice instead.
+    pub fn try_write_slice(&mut self, data_in: &[u8]) -> PollResult<usize> {
         // SAFETY: [`wolfSSL_write`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
         // [Library design][2] access is synchronized via the requirement for `&mut self` in `WolfsslPointer::as_ptr()`.
         //
@@ -522,18 +529,13 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 data_in.len() as c_int,
             )
         } {
-            x if x > 0 => {
-                data_in.advance(x as usize);
-                Ok(Poll::Ready(x as usize))
-            }
+            x if x > 0 => Ok(Poll::Ready(x as usize)),
             x @ (0 | wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR) => {
                 match self.get_error(x) {
                     wolfssl_sys::WOLFSSL_ERROR_NONE_c_int => Ok(Poll::Ready(0)),
                     wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
                     wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
-                    wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
-                        if self.is_secure_renegotiation_supported() =>
-                    {
+                    wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY => {
                         self.handle_app_data().map(Poll::AppData)
                     }
                     e => Err(Error::fatal(e)),
@@ -556,37 +558,46 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     // is no space to allow WolfSSL's internal state to advance.
     pub fn try_read(&mut self, data_out: &mut BytesMut) -> PollResult<usize> {
         let buf = data_out.spare_capacity_mut();
+        // SAFETY: the length is obviously correct
+        match unsafe { self.try_read_ptr(buf.as_mut_ptr() as *mut c_void, buf.len() as c_int) } {
+            res @ Ok(Poll::Ready(read_len)) => {
+                // SAFETY: wolfSSL told us this memory region is now initialized
+                unsafe {
+                    data_out.set_len(data_out.len() + read_len);
+                }
+                res
+            }
+            other => other,
+        }
+    }
 
+    /// Like try_read, but writes into a mutable slice instead.
+    pub fn try_read_slice(&mut self, data_out: &mut [u8]) -> PollResult<usize> {
+        // SAFETY: the length is obviously correct
+        unsafe {
+            self.try_read_ptr(
+                data_out.as_mut_ptr() as *mut c_void,
+                data_out.len() as c_int,
+            )
+        }
+    }
+
+    unsafe fn try_read_ptr(&mut self, out_ptr: *mut c_void, out_len: c_int) -> PollResult<usize> {
         // SAFETY: [`wolfSSL_read`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
         // [Library design][2] access is synchronized via the requirement for `&mut self` in `WolfsslPointer::as_ptr()`.
-        // The input `buf` is a valid mutable buffer, with proper length.
+        // The input `out_ptr` is a valid mutable buffer, with proper length.
         //
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_read
         // [1]: https://www.wolfssl.com/doxygen/group__IO.html#ga80c3ccd3c0441c77307df3afe88a5c35
         // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
-        match unsafe {
-            wolfssl_sys::wolfSSL_read(
-                self.ssl.as_ptr(),
-                buf.as_mut_ptr() as *mut c_void,
-                buf.len() as c_int,
-            )
-        } {
-            x if x > 0 => {
-                // SAFETY: Now that we've initialized this memory segment, it is safe to update the
-                // length to account for the initialized data
-                unsafe {
-                    data_out.set_len(data_out.len() + x as usize);
-                }
-                Ok(Poll::Ready(x as usize))
-            }
+        match unsafe { wolfssl_sys::wolfSSL_read(self.ssl.as_ptr(), out_ptr, out_len) } {
+            x if x > 0 => Ok(Poll::Ready(x as usize)),
             x @ (0 | wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR) => {
                 match self.get_error(x) {
                     wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
                     wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
                     wolfssl_sys::WOLFSSL_ERROR_NONE_c_int => Ok(Poll::Ready(0)),
-                    wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
-                        if self.is_secure_renegotiation_supported() =>
-                    {
+                    wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY => {
                         self.handle_app_data().map(Poll::AppData)
                     }
                     e => Err(Error::fatal(e)),
@@ -598,7 +609,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
 
     /// Checks if this session supports secure renegotiation
     ///
-    /// Only some D/TLS connections support secure renegotiation, so this method
+    /// Only some D/TLS1.2 connections support secure renegotiation, so this method
     /// checks if it's something we can do here.
     pub fn is_secure_renegotiation_supported(&mut self) -> bool {
         // SAFETY: No documentation available for `wolfSSL_SSL_get_secure_renegotiation_support`
@@ -650,9 +661,7 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
             x @ wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR => match self.get_error(x) {
                 wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
                 wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
-                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY
-                    if self.is_secure_renegotiation_supported() =>
-                {
+                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY => {
                     self.handle_app_data().map(Poll::AppData)
                 }
                 e => Err(Error::fatal(e)),
@@ -1051,8 +1060,6 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
     // not return a `WANT_READ` or similar error code, so if we see them we will
     // convert it to an error.
     fn handle_app_data(&mut self) -> Result<Bytes> {
-        debug_assert!(self.is_secure_renegotiation_supported());
-
         let mut buf = BytesMut::with_capacity(TLS_MAX_RECORD_SIZE);
         // Collect the appdata wolfssl kindly informed us about.
         match self.try_read(&mut buf) {
@@ -1349,8 +1356,9 @@ mod tests {
         TLS_MAX_RECORD_SIZE,
     };
 
+    use std::cell::RefCell;
     use std::rc::Rc;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::OnceLock;
 
     use test_case::test_case;
 
@@ -1387,22 +1395,51 @@ mod tests {
         }
     }
 
-    struct TestIOCallbacks {
-        r: Rc<Mutex<BytesMut>>,
-        w: Rc<Mutex<BytesMut>>,
+    // TCP stream semantics: allows partial reads from a continuous buffer
+    struct TcpIOCallbacks {
+        r: Rc<RefCell<BytesMut>>,
+        w: Rc<RefCell<BytesMut>>,
     }
 
-    impl TestIOCallbacks {
-        fn pair() -> (Self, Self) {
-            let left_to_right = Rc::new(Mutex::new(Default::default()));
-            let right_to_left = Rc::new(Mutex::new(Default::default()));
+    // Message queue for UDP datagram semantics (preserves message boundaries)
+    #[derive(Default)]
+    struct MessageQueue {
+        messages: std::collections::VecDeque<Bytes>,
+    }
 
-            let left = TestIOCallbacks {
+    impl MessageQueue {
+        fn push(&mut self, data: &[u8]) {
+            self.messages.push_back(Bytes::copy_from_slice(data));
+        }
+
+        fn pop(&mut self, buf: &mut [u8]) -> IOCallbackResult<usize> {
+            let Some(msg) = self.messages.pop_front() else {
+                return IOCallbackResult::WouldBlock;
+            };
+
+            let n = std::cmp::min(buf.len(), msg.len());
+            buf[..n].copy_from_slice(&msg[..n]);
+            IOCallbackResult::Ok(n)
+        }
+    }
+
+    // UDP datagram semantics: message boundaries preserved
+    struct UdpIOCallbacks {
+        r: Rc<RefCell<MessageQueue>>,
+        w: Rc<RefCell<MessageQueue>>,
+    }
+
+    impl UdpIOCallbacks {
+        fn pair() -> (Self, Self) {
+            let left_to_right = Rc::new(RefCell::new(Default::default()));
+            let right_to_left = Rc::new(RefCell::new(Default::default()));
+
+            let left = UdpIOCallbacks {
                 r: right_to_left.clone(),
                 w: left_to_right.clone(),
             };
 
-            let right = TestIOCallbacks {
+            let right = UdpIOCallbacks {
                 r: left_to_right.clone(),
                 w: right_to_left.clone(),
             };
@@ -1411,9 +1448,45 @@ mod tests {
         }
     }
 
-    impl IOCallbacks for TestIOCallbacks {
+    impl IOCallbacks for UdpIOCallbacks {
         fn recv(&mut self, buf: &mut [u8]) -> IOCallbackResult<usize> {
-            let mut r = self.r.lock().unwrap();
+            let mut r = self.r.borrow_mut();
+            r.pop(buf)
+        }
+
+        fn send(&mut self, buf: &[u8]) -> IOCallbackResult<usize> {
+            if buf.is_empty() {
+                return IOCallbackResult::Ok(0);
+            }
+
+            let mut w = self.w.borrow_mut();
+            w.push(buf);
+            IOCallbackResult::Ok(buf.len())
+        }
+    }
+
+    impl TcpIOCallbacks {
+        fn pair() -> (Self, Self) {
+            let left_to_right = Rc::new(RefCell::new(Default::default()));
+            let right_to_left = Rc::new(RefCell::new(Default::default()));
+
+            let left = TcpIOCallbacks {
+                r: right_to_left.clone(),
+                w: left_to_right.clone(),
+            };
+
+            let right = TcpIOCallbacks {
+                r: left_to_right.clone(),
+                w: right_to_left.clone(),
+            };
+
+            (left, right)
+        }
+    }
+
+    impl IOCallbacks for TcpIOCallbacks {
+        fn recv(&mut self, buf: &mut [u8]) -> IOCallbackResult<usize> {
+            let mut r = self.r.borrow_mut();
             if r.is_empty() {
                 return IOCallbackResult::WouldBlock;
             }
@@ -1425,7 +1498,7 @@ mod tests {
         }
 
         fn send(&mut self, buf: &[u8]) -> IOCallbackResult<usize> {
-            let mut w = self.w.lock().unwrap();
+            let mut w = self.w.borrow_mut();
             w.extend_from_slice(buf);
             IOCallbackResult::Ok(buf.len()) // extend_from_slice expands w if needed
         }
@@ -1456,21 +1529,21 @@ mod tests {
         }
     }
 
-    struct TestClient {
+    struct TestClient<IOCB: IOCallbacks> {
         _ctx: Context,
-        ssl: Session<TestIOCallbacks>,
-        read_buffer: Rc<Mutex<BytesMut>>,
-        write_buffer: Rc<Mutex<BytesMut>>,
+        ssl: Session<IOCB>,
     }
 
-    fn make_connected_clients() -> (TestClient, TestClient) {
-        make_connected_clients_with_method(Method::TlsClientV1_3, Method::TlsServerV1_3)
+    fn make_connected_clients() -> (TestClient<TcpIOCallbacks>, TestClient<TcpIOCallbacks>) {
+        make_connected_tls_clients_with_method(Method::TlsClientV1_3, Method::TlsServerV1_3)
     }
 
-    fn make_connected_clients_with_method(
+    // Generic helper to create connected clients with any IO callback type
+    fn make_connected_clients_with_method<IOCB: IOCallbacks>(
         client_method: Method,
         server_method: Method,
-    ) -> (TestClient, TestClient) {
+        io_pair: (IOCB, IOCB),
+    ) -> (TestClient<IOCB>, TestClient<IOCB>) {
         let client_ctx = ContextBuilder::new(client_method)
             .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
             .with_root_certificate(RootCertificate::Asn1Buffer(CA_CERT))
@@ -1489,14 +1562,15 @@ mod tests {
             .unwrap()
             .build();
 
-        make_connected_clients_from_contexts(client_ctx, server_ctx)
+        make_connected_clients_from_contexts(client_ctx, server_ctx, io_pair)
     }
 
     /// Use a fixed pre-shared-key on both client and server.
-    fn make_connected_clients_with_method_psk(
+    fn make_connected_clients_with_method_psk<IOCB: IOCallbacks>(
         client_method: Method,
         server_method: Method,
-    ) -> (TestClient, TestClient) {
+        io_pair: (IOCB, IOCB),
+    ) -> (TestClient<IOCB>, TestClient<IOCB>) {
         let client_ctx = ContextBuilder::new(client_method)
             .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
             .with_pre_shared_key(&PSK)
@@ -1511,15 +1585,16 @@ mod tests {
             .unwrap()
             .build();
 
-        make_connected_clients_from_contexts(client_ctx, server_ctx)
+        make_connected_clients_from_contexts(client_ctx, server_ctx, io_pair)
     }
 
     /// Unlike [make_connected_clients_with_method_psk], will use custom PSK callbacks to transmit
     /// an "identity" from the client to the server, and verify it's the same on the server.
-    fn make_connected_clients_with_method_psk_custom_callbacks(
+    fn make_connected_clients_with_method_psk_custom_callbacks<IOCB: IOCallbacks>(
         client_method: Method,
         server_method: Method,
-    ) -> (TestClient, TestClient) {
+        io_pair: (IOCB, IOCB),
+    ) -> (TestClient<IOCB>, TestClient<IOCB>) {
         let callbacks = Box::new(PskTrivialIdentityCallbacks {});
 
         let client_ctx = ContextBuilder::new(client_method)
@@ -1536,19 +1611,15 @@ mod tests {
             .unwrap()
             .build();
 
-        make_connected_clients_from_contexts(client_ctx, server_ctx)
+        make_connected_clients_from_contexts(client_ctx, server_ctx, io_pair)
     }
 
-    fn make_connected_clients_from_contexts(
+    fn make_connected_clients_from_contexts<IOCB: IOCallbacks>(
         client_ctx: Context,
         server_ctx: Context,
-    ) -> (TestClient, TestClient) {
-        let (client_io, server_io) = TestIOCallbacks::pair();
-
-        let client_read_buffer = client_io.r.clone();
-        let client_write_buffer = client_io.w.clone();
-        let server_read_buffer = server_io.r.clone();
-        let server_write_buffer = server_io.w.clone();
+        io_pair: (IOCB, IOCB),
+    ) -> (TestClient<IOCB>, TestClient<IOCB>) {
+        let (client_io, server_io) = io_pair;
 
         let client_ssl = client_ctx
             .new_session(SessionConfig::new(client_io))
@@ -1560,15 +1631,11 @@ mod tests {
         let mut client = TestClient {
             _ctx: client_ctx,
             ssl: client_ssl,
-            read_buffer: client_read_buffer,
-            write_buffer: client_write_buffer,
         };
 
         let mut server = TestClient {
             _ctx: server_ctx,
             ssl: server_ssl,
-            read_buffer: server_read_buffer,
-            write_buffer: server_write_buffer,
         };
 
         for _ in 0..7 {
@@ -1584,6 +1651,20 @@ mod tests {
         (client, server)
     }
 
+    fn make_connected_tls_clients_with_method(
+        client_method: Method,
+        server_method: Method,
+    ) -> (TestClient<TcpIOCallbacks>, TestClient<TcpIOCallbacks>) {
+        make_connected_clients_with_method(client_method, server_method, TcpIOCallbacks::pair())
+    }
+
+    fn make_connected_dtls_clients_with_method(
+        client_method: Method,
+        server_method: Method,
+    ) -> (TestClient<UdpIOCallbacks>, TestClient<UdpIOCallbacks>) {
+        make_connected_clients_with_method(client_method, server_method, UdpIOCallbacks::pair())
+    }
+
     #[test]
     fn try_negotiate() {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
@@ -1592,21 +1673,36 @@ mod tests {
         let _ = make_connected_clients();
     }
 
-    #[test_case(Method::TlsClientV1_2, Method::TlsServerV1_2; "tls1.2")]
-    #[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3; "tls1.3")]
-    fn try_negotiate_psk(client_method: Method, server_method: Method) {
+    #[test_case(Method::TlsClientV1_2, Method::TlsServerV1_2, TcpIOCallbacks::pair(); "tls1.2")]
+    #[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3, TcpIOCallbacks::pair(); "tls1.3")]
+    #[test_case(Method::DtlsClientV1_2, Method::DtlsServerV1_2, UdpIOCallbacks::pair(); "dtls1.2")]
+    #[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_3, UdpIOCallbacks::pair(); "dtls1.3")]
+    fn try_negotiate_psk<IOCB: IOCallbacks>(
+        client_method: Method,
+        server_method: Method,
+        io_pair: (IOCB, IOCB),
+    ) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let _ = make_connected_clients_with_method_psk(client_method, server_method);
+        let _ = make_connected_clients_with_method_psk(client_method, server_method, io_pair);
     }
 
-    #[test_case(Method::TlsClientV1_2, Method::TlsServerV1_2; "tls1.2")]
-    #[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3; "tls1.3")]
-    fn try_negotiate_psk_custom_callbacks(client_method: Method, server_method: Method) {
+    #[test_case(Method::TlsClientV1_2, Method::TlsServerV1_2, TcpIOCallbacks::pair(); "tls1.2")]
+    #[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3, TcpIOCallbacks::pair(); "tls1.3")]
+    #[test_case(Method::DtlsClientV1_2, Method::DtlsServerV1_2, UdpIOCallbacks::pair(); "dtls1.2")]
+    #[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_3, UdpIOCallbacks::pair(); "dtls1.3")]
+    fn try_negotiate_psk_custom_callbacks<IOCB: IOCallbacks>(
+        client_method: Method,
+        server_method: Method,
+        io_pair: (IOCB, IOCB),
+    ) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let _ =
-            make_connected_clients_with_method_psk_custom_callbacks(client_method, server_method);
+        let _ = make_connected_clients_with_method_psk_custom_callbacks(
+            client_method,
+            server_method,
+            io_pair,
+        );
     }
 
     #[test]
@@ -1624,14 +1720,6 @@ mod tests {
                 assert!(
                     bytes.is_empty(),
                     "Bytes should have been consumed by WolfSSL"
-                );
-                assert!(
-                    !client.write_buffer.lock().unwrap().is_empty(),
-                    "The write buffer should be populated as a result"
-                );
-                assert!(
-                    client.read_buffer.lock().unwrap().is_empty(),
-                    "The read buffer should _not_ be populated as a result"
                 );
                 assert_eq!(
                     n,
@@ -1681,12 +1769,24 @@ mod tests {
         }
     }
 
+    #[test_case(Method::DtlsClientV1_2, Method::DtlsServerV1_2, true; "DTLS1.2")]
+    #[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_3, false; "DTLS1.3")]
+    fn verify_secure_nego_support(server_method: Method, client_method: Method, expected: bool) {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let (mut client, mut server) =
+            make_connected_dtls_clients_with_method(server_method, client_method);
+
+        assert_eq!(client.ssl.is_secure_renegotiation_supported(), expected);
+        assert_eq!(server.ssl.is_secure_renegotiation_supported(), expected);
+    }
+
     #[test]
     fn try_rehandshake() {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
         let (mut client, mut server) =
-            make_connected_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
+            make_connected_dtls_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
 
         assert!(client.ssl.is_secure_renegotiation_supported());
         assert!(server.ssl.is_secure_renegotiation_supported());
@@ -1741,11 +1841,10 @@ mod tests {
     }
 
     #[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3; "tls1.3")]
-    #[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_3; "dtls1.3")]
     fn try_trigger_update_keys(client: Method, server: Method) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        let (mut client, mut server) = make_connected_clients_with_method(client, server);
+        let (mut client, mut server) = make_connected_tls_clients_with_method(client, server);
 
         assert!(client.ssl.version().is_tls_13() || client.ssl.version().is_dtls_13());
         assert!(server.ssl.version().is_tls_13() || server.ssl.version().is_dtls_13());
@@ -1805,6 +1904,62 @@ mod tests {
     }
 
     #[test]
+    fn try_trigger_update_keys_dtls13() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let (mut client, mut server) =
+            make_connected_dtls_clients_with_method(Method::DtlsClientV1_3, Method::DtlsServerV1_3);
+
+        assert!(client.ssl.version().is_dtls_13());
+        assert!(server.ssl.version().is_dtls_13());
+
+        match client.ssl.try_trigger_update_key() {
+            Ok(Poll::Ready(_)) => {}
+            Ok(Poll::PendingRead | Poll::PendingWrite) => {
+                panic!("Should not be pending any data")
+            }
+            Ok(Poll::AppData(_)) => {
+                panic!("Should not receive AppData from anywhere")
+            }
+            Err(e) => panic!("{e}"),
+        }
+
+        assert!(
+            client.ssl.is_update_keys_pending(),
+            "Client should be expecting a response containing decryption keys"
+        );
+
+        match server.ssl.try_read(&mut BytesMut::with_capacity(0)) {
+            Ok(Poll::PendingRead) => {}
+            Ok(Poll::PendingWrite) => panic!("Should be nothing to write"),
+            Ok(Poll::Ready(_)) => {
+                panic!("There should be no data to read")
+            }
+            Ok(Poll::AppData(_)) => {
+                panic!("Should not receive AppData from anywhere");
+            }
+            Err(e) => panic!("{e}"),
+        };
+
+        match client.ssl.try_read(&mut BytesMut::with_capacity(0)) {
+            Ok(Poll::PendingRead) => {}
+            Ok(Poll::PendingWrite) => panic!("Should be nothing to write"),
+            Ok(Poll::Ready(_)) => {
+                panic!("There should be no data to read")
+            }
+            Ok(Poll::AppData(_)) => {
+                panic!("Should not receive AppData from anywhere")
+            }
+            Err(e) => panic!("{e}"),
+        };
+
+        assert!(
+            !client.ssl.is_update_keys_pending(),
+            "Key update should be done within one round trip"
+        );
+    }
+
+    #[test]
     fn dtls_current_timeout() {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
@@ -1830,7 +1985,7 @@ mod tests {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
         let (mut client, _server) =
-            make_connected_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
+            make_connected_dtls_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
 
         client
             .ssl
@@ -1959,13 +2114,13 @@ mod tests {
     }
 
     #[test_case(SslVerifyMode::SslVerifyNone, SslVerifyMode::SslVerifyNone)]
-    #[test_case(SslVerifyMode::SslVerifyNone, SslVerifyMode::SslVerifyPeer => panics "ASN no signer error to confirm failure")]
+    #[test_case(SslVerifyMode::SslVerifyNone, SslVerifyMode::SslVerifyPeer => panics "CaCertNotAvailable")]
     #[test_case(SslVerifyMode::SslVerifyPeer, SslVerifyMode::SslVerifyNone)]
-    #[test_case(SslVerifyMode::SslVerifyPeer, SslVerifyMode::SslVerifyPeer => panics "ASN no signer error to confirm failure")]
+    #[test_case(SslVerifyMode::SslVerifyPeer, SslVerifyMode::SslVerifyPeer => panics "CaCertNotAvailable")]
     #[test_case(SslVerifyMode::SslVerifyFailIfNoPeerCert, SslVerifyMode::SslVerifyNone => panics "peer did not return a certificate")]
-    #[test_case(SslVerifyMode::SslVerifyFailIfNoPeerCert, SslVerifyMode::SslVerifyPeer => panics "ASN no signer error to confirm failure")]
+    #[test_case(SslVerifyMode::SslVerifyFailIfNoPeerCert, SslVerifyMode::SslVerifyPeer => panics "CaCertNotAvailable")]
     #[test_case(SslVerifyMode::SslVerifyFailExceptPsk, SslVerifyMode::SslVerifyNone)]
-    #[test_case(SslVerifyMode::SslVerifyFailExceptPsk, SslVerifyMode::SslVerifyPeer => panics "ASN no signer error to confirm failure")]
+    #[test_case(SslVerifyMode::SslVerifyFailExceptPsk, SslVerifyMode::SslVerifyPeer => panics "CaCertNotAvailable")]
     fn test_client_set_verify(server_mode: SslVerifyMode, client_mode: SslVerifyMode) {
         let client_method = Method::TlsClientV1_3;
         // Create context without server CA certificate
@@ -1986,7 +2141,7 @@ mod tests {
             .unwrap()
             .build();
 
-        let (client_io, server_io) = TestIOCallbacks::pair();
+        let (client_io, server_io) = TcpIOCallbacks::pair();
 
         let mut client_ssl = client_ctx
             .new_session(SessionConfig::new(client_io).with_ssl_verify_mode(client_mode))
@@ -2021,7 +2176,7 @@ mod tests {
             .unwrap()
             .build();
 
-        let (client_io, server_io) = TestIOCallbacks::pair();
+        let (client_io, server_io) = TcpIOCallbacks::pair();
 
         let mut client_ssl = client_ctx
             .new_session(SessionConfig::new(client_io))

@@ -1,6 +1,6 @@
 [package]
 name = "wolfssl"
-version = "3.0.0"
+version = "6.0.0"
 description = "High-level bindings for WolfSSL"
 authors.workspace = true
 license.workspace = true
@@ -12,7 +12,7 @@ edition.workspace = true
 default = ["postquantum"]
 postquantum = ["wolfssl-sys/postquantum"]
 debug = ["wolfssl-sys/debug"] # Note that application code must also call wolfssl::enable_debugging(true)
-kyber_only = ["wolfssl-sys/kyber_only"]
+system_ca_certs = ["wolfssl-sys/system_ca_certs"]
 
 [lints.rust]
 missing_docs = "deny"
@@ -29,10 +29,11 @@ unnecessary_safety_comment = "deny"
 bytes = "1"
 log = "0.4"
 thiserror = "2.0"
-wolfssl-sys = { path = "../wolfssl-sys", version = "2.0.0" }
+wolfssl-sys = { path = "../wolfssl-sys", version = "4.0.0", features = ["psk"] }
 
 [dev-dependencies]
 async-trait = "0.1.73"
+cfg-if = "1.0.4"
 env_logger = "0.11.0"
 test-case = "3.0"
 tokio = { version = "1.31.0", features = ["rt", "net", "macros"] }

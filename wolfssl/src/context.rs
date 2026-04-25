@@ -578,6 +578,17 @@ impl ContextBuilder {
         self
     }
 
+    /// Wraps `wolfSSL_CTX_load_system_CA_certs`[0]([also][1])
+    // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__CertsKeys.html#function-wolfssl_ctx_load_system_ca_certs
+    // [1]: https://www.wolfssl.com/doxygen/group__CertsKeys.html#gaa66006fab6369002eda43cb4f83c857d
+    #[cfg(feature = "system_ca_certs")]
+    pub fn with_system_ca_certs(self) -> Self {
+        // SAFETY: [`wolfSSL_CTX_load_system_CA_certs`][0] ([also][1]) requires a valid `ctx` pointer
+        // from `wolfSSL_CTX_new()`.
+        unsafe { wolfssl_sys::wolfSSL_CTX_load_system_CA_certs(self.ctx.as_ptr()) };
+        self
+    }
+
     /// Finalizes a `WolfContext`.
     pub fn build(self) -> Context {
         Context {

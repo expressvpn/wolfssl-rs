@@ -1,6 +1,7 @@
 #![cfg(feature = "debug")]
 
 use std::fmt::{self, Display};
+#[allow(unused_imports)] // Needed for windows
 use std::os::raw::{c_int, c_uint};
 use std::sync::Arc;
 
@@ -29,12 +30,12 @@ pub trait Tls13SecretCallbacks {
 
         random
             .iter()
-            .for_each(|i| keylog.push_str(&format!("{:02x}", i)));
+            .for_each(|i| keylog.push_str(&format!("{i:02x}")));
         keylog.push(' ');
 
         secret
             .iter()
-            .for_each(|f| keylog.push_str(&format!("{:02x}", f)));
+            .for_each(|f| keylog.push_str(&format!("{f:02x}")));
         keylog.push('\n');
 
         self.wireshark_keylog(keylog);
@@ -45,6 +46,14 @@ pub trait Tls13SecretCallbacks {
 pub type Tls13SecretCallbacksArg = Arc<dyn Tls13SecretCallbacks + Send + Sync>;
 
 pub(crate) const RANDOM_SIZE: usize = 32;
+
+#[cfg(not(windows))]
+/// Tls13 Secret type from ffi
+pub type Tls13SecretType = c_uint;
+
+#[cfg(windows)]
+/// Tls13 Secret type from ffi
+pub type Tls13SecretType = c_int;
 
 /// Tls13 Secret types
 /// To be used in Wireshark
@@ -64,7 +73,7 @@ pub enum Tls13Secret {
     /// "EXPORTER_SECRET"
     ExporterSecret,
     /// "UNKNOWN_SECRET"
-    UnknownSecret(c_uint),
+    UnknownSecret(Tls13SecretType),
 }
 
 impl Display for Tls13Secret {
@@ -80,13 +89,13 @@ impl Display for Tls13Secret {
             ExporterSecret => "EXPORTER_SECRET",
             UnknownSecret(_e) => "UNKNOWN_SECRET",
         };
-        write!(f, "{}", secret)
+        write!(f, "{secret}")
     }
 }
 
 impl From<c_int> for Tls13Secret {
     fn from(value: c_int) -> Self {
-        match value as c_uint {
+        match value as Tls13SecretType {
             wolfssl_sys::Tls13Secret_CLIENT_EARLY_TRAFFIC_SECRET => {
                 Tls13Secret::ClientEarlyTrafficSecret
             }

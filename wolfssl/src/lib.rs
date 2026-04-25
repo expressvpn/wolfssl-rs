@@ -1,6 +1,7 @@
 //! The `wolfssl` crate is designed to be a Rust layer built on top of
 //! the `wolfssl-sys` crate (a C passthrough crate).
 
+mod aes256;
 mod callback;
 mod chacha20_poly1305;
 mod context;
@@ -9,6 +10,7 @@ mod error;
 mod rng;
 mod ssl;
 
+pub use aes256::*;
 pub use callback::*;
 pub use chacha20_poly1305::*;
 pub use context::*;
@@ -27,6 +29,8 @@ use wolfssl_sys::{
 };
 
 use std::{os::raw::c_int, ptr::NonNull};
+
+pub use wolfssl_sys::get_wolfssl_version_string;
 
 /// Record size is defined as `2^14 + 1`.
 ///
@@ -92,6 +96,29 @@ pub fn enable_debugging(on: bool) {
         // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Debug.html#function-wolfssl_debugging_off
         // [1]: https://www.wolfssl.com/doxygen/group__Debug.html#gafa8dab742182b891d80300fb195399ce
         unsafe { wolfssl_sys::wolfSSL_Debugging_OFF() }
+    }
+}
+
+#[cfg(feature = "debug")]
+pub use wolfssl_sys::wolfSSL_Logging_cb as LoggingCallback;
+
+/// Wraps [`wolfSSL_SetLoggingCb`][0]. You must call [`enable_debugging`] first to enable logging at runtime before setting the callback.
+///
+/// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Logging.html#function-wolfssl_setloggingcb
+#[cfg(feature = "debug")]
+pub fn set_logging_callback(cb: LoggingCallback) {
+    wolf_init().expect("Unable to initialize wolfSSL");
+
+    // SAFETY: [`wolfSSL_SetLoggingCb`][0] would return an error if a function pointer is not provided, or we failed to set logging callback.
+    // This function will be compiled only on enabling feature `debug`
+    //
+    // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Logging.html#function-wolfssl_setloggingcb
+    match unsafe { wolfssl_sys::wolfSSL_SetLoggingCb(cb) } {
+        0 => {}
+        wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => {
+            panic!("Function pointer is not provided")
+        }
+        e => unreachable!("wolfSSL_SetLoggingCb: {e:?}"),
     }
 }
 
@@ -255,19 +282,28 @@ pub enum CurveGroup {
     #[cfg(feature = "postquantum")]
     P521KyberLevel5,
 
-    /// `WOLFSSL_P256_ML_KEM_512`
-    #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
+    /// `WOLFSSL_SECP256R1MLKEM512`
+    #[cfg(feature = "postquantum")]
     P256MLKEM512,
-    /// `WOLFSSL_P384_ML_KEM_768`
-    #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
+    /// `WOLFSSL_SECP384R1MLKEM768`
+    #[cfg(feature = "postquantum")]
     P384MLKEM768,
-    /// `WOLFSSL_P521_ML_KEM_1024`
-    #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
+    /// `WOLFSSL_SECP521R1MLKEM1024`
+    #[cfg(feature = "postquantum")]
     P521MLKEM1024,
+
+    /// `WOLFSSL_X25519MLKEM768`
+    #[cfg(feature = "postquantum")]
+    X25519MLKEM768,
 }
 
+#[cfg(unix)]
+type CurveGroupType = std::os::raw::c_uint;
+#[cfg(windows)]
+type CurveGroupType = std::os::raw::c_int;
+
 impl CurveGroup {
-    fn as_ffi(&self) -> std::os::raw::c_uint {
+    fn as_ffi(&self) -> CurveGroupType {
         use CurveGroup::*;
         match self {
             EccSecp256R1 => wolfssl_sys::WOLFSSL_ECC_SECP256R1,
@@ -278,17 +314,20 @@ impl CurveGroup {
             P384KyberLevel3 => wolfssl_sys::WOLFSSL_P384_KYBER_LEVEL3,
             #[cfg(feature = "postquantum")]
             P521KyberLevel5 => wolfssl_sys::WOLFSSL_P521_KYBER_LEVEL5,
-            #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
-            P256MLKEM512 => wolfssl_sys::WOLFSSL_P256_ML_KEM_512,
-            #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
-            P384MLKEM768 => wolfssl_sys::WOLFSSL_P384_ML_KEM_768,
-            #[cfg(all(feature = "postquantum", not(feature = "kyber_only")))]
-            P521MLKEM1024 => wolfssl_sys::WOLFSSL_P521_ML_KEM_1024,
+            #[cfg(feature = "postquantum")]
+            P256MLKEM512 => wolfssl_sys::WOLFSSL_SECP256R1MLKEM512,
+            #[cfg(feature = "postquantum")]
+            P384MLKEM768 => wolfssl_sys::WOLFSSL_SECP384R1MLKEM768,
+            #[cfg(feature = "postquantum")]
+            P521MLKEM1024 => wolfssl_sys::WOLFSSL_SECP521R1MLKEM1024,
+            #[cfg(feature = "postquantum")]
+            X25519MLKEM768 => wolfssl_sys::WOLFSSL_X25519MLKEM768,
         }
     }
 }
 
 /// Defines a CA certificate
+#[derive(Debug, Copy, Clone)]
 pub enum RootCertificate<'a> {
     /// In-memory PEM buffer
     PemBuffer(&'a [u8]),
@@ -299,6 +338,7 @@ pub enum RootCertificate<'a> {
 }
 
 /// Defines either a public or private key
+#[derive(Debug, Copy, Clone)]
 pub enum Secret<'a> {
     /// In-memory ASN1 buffer
     Asn1Buffer(&'a [u8]),
@@ -312,22 +352,17 @@ pub enum Secret<'a> {
 
 /// SSL Verification method
 /// Ref: `https://www.wolfssl.com/doxygen/group__Setup.html#gaf9198658e31dd291088be18262ef2354`
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Copy, Clone)]
 pub enum SslVerifyMode {
     /// No verification done
     SslVerifyNone,
     /// Verify peers certificate
+    #[default]
     SslVerifyPeer,
     /// Verify client's certificate (applicable only for server)
     SslVerifyFailIfNoPeerCert,
     /// Verify client's certificate except PSK connection (applicable only for server)
     SslVerifyFailExceptPsk,
-}
-
-impl Default for SslVerifyMode {
-    fn default() -> Self {
-        Self::SslVerifyPeer
-    }
 }
 
 impl From<SslVerifyMode> for c_int {
