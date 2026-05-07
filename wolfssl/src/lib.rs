@@ -100,13 +100,13 @@ pub fn enable_debugging(on: bool) {
 }
 
 #[cfg(feature = "debug")]
-pub use wolfssl_sys::wolfSSL_Logging_cb as LoggingCallback;
+pub(crate) use wolfssl_sys::wolfSSL_Logging_cb as RawLoggingCallback;
 
 /// Wraps [`wolfSSL_SetLoggingCb`][0]. You must call [`enable_debugging`] first to enable logging at runtime before setting the callback.
 ///
 /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Logging.html#function-wolfssl_setloggingcb
 #[cfg(feature = "debug")]
-pub fn set_logging_callback(cb: LoggingCallback) {
+pub(crate) fn set_logging_callback(cb: RawLoggingCallback) {
     wolf_init().expect("Unable to initialize wolfSSL");
 
     // SAFETY: [`wolfSSL_SetLoggingCb`][0] would return an error if a function pointer is not provided, or we failed to set logging callback.
