@@ -1,9 +1,11 @@
 #![cfg(feature = "debug")]
+#![allow(unsafe_code)]
 
+use std::ffi::{c_char, CStr};
 use std::fmt::{self, Display};
 #[allow(unused_imports)] // Needed for windows
 use std::os::raw::{c_int, c_uint};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// Application provided callbacks to receive TLS1.3 secrets
 ///
@@ -112,4 +114,37 @@ impl From<c_int> for Tls13Secret {
             e => Tls13Secret::UnknownSecret(e),
         }
     }
+}
+
+/// Application-supplied callback invoked for each wolfSSL log line
+///
+/// The callback runs on wolfSSL caller thread.
+pub type LoggingCallback = fn(message: &str);
+
+static LOGGING_CALLBACK: OnceLock<LoggingCallback> = OnceLock::new();
+
+unsafe extern "C" fn logging_trampoline(_level: c_int, msg: *const c_char) {
+    if msg.is_null() {
+        return;
+    }
+    // SAFETY: null-checked; wolfSSL emits NUL-terminated strings via snprintf.
+    let c_str = unsafe { CStr::from_ptr(msg) };
+    let message = c_str.to_str().unwrap_or("Unable to decode C string");
+
+    if let Some(cb) = LOGGING_CALLBACK.get() {
+        if std::panic::catch_unwind(|| cb(message)).is_err() {
+            log::warn!("Panic in logging callback");
+        }
+    }
+}
+
+/// Install a Rust callback to receive wolfSSL log lines
+///
+/// Also calls [`enable_debugging`](super::enable_debugging) so
+/// logging is active. Currently setting callback is a one-shot
+/// and subsequent calls silently no-op.
+pub fn install_logging_callback(cb: LoggingCallback) {
+    let _ = LOGGING_CALLBACK.set(cb);
+    super::enable_debugging(true);
+    super::set_logging_callback(Some(logging_trampoline));
 }
