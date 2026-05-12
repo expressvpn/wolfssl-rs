@@ -139,7 +139,10 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
 }
 
 const PATCH_DIR: &str = "patches";
-const PATCHES: &[&str] = &["CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch"];
+const PATCHES: &[&str] = &[
+    "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
+    "revert-pr10007.patch",
+];
 const OPTIONAL_FEATURES: &[&str] = &["aesccm", "dh", "opensslall", "opensslextra", "psk"];
 const MACRO_FEATURES: &[(&str, &str)] = &[("ex_data", "HAVE_EX_DATA"), ("alpn", "HAVE_ALPN")];
 
