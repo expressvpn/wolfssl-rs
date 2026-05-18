@@ -67,7 +67,14 @@ build-dev:
 # build-release builds with the Cargo release profile and produces release artifacts
 build-release:
     FROM +copy-src
-    DO lib-rust+CARGO --args="build --release" --output="release/[^/]+"
+    DO lib-rust+CARGO --args="build --release" --output="(release/[^/]+|.*/build/.*/out/wolfssl_config\.json)"
+
+    # Copy wolfssl configuration to release directory so it gets saved as an artifact
+    RUN find target -name "wolfssl_config.json" -type f && \
+        find target -name "wolfssl_config.json" -type f -exec cp {} target/release/wolfssl_config.json \; && \
+        echo "Config file copied successfully" && ls -la target/release/wolfssl_config.json || \
+        echo "WARNING: wolfssl_config.json not found in target"
+
     SAVE ARTIFACT target/release /release AS LOCAL artifacts/release
 
 # run-tests executes all unit and integration tests via Cargo
@@ -134,6 +141,7 @@ fmt:
 check-dependencies:
     FROM +copy-src
     DO lib-rust+CARGO --args="deny --all-features check --deny warnings bans license sources"
+
 
 # publish publishes the target crate to cargo.io. Must specify package by --PACKAGE=<package-name>
 publish:
