@@ -29,7 +29,7 @@ unnecessary_safety_comment = "deny"
 bytes = "1"
 log = "0.4"
 thiserror = "2.0"
-wolfssl-sys = { path = "../wolfssl-sys", version = "4.0.0" }
+wolfssl-sys = { path = "../wolfssl-sys", version = "4.0.0", features = ["psk"] }
 
 [dev-dependencies]
 async-trait = "0.1.73"
