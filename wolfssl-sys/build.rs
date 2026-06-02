@@ -325,7 +325,7 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .cflag("-DUSE_CERT_BUFFERS_4096")
         .cflag("-DUSE_CERT_BUFFERS_256")
         .cflag("-DWOLFSSL_NO_SPHINCS")
-        .cflag("-DWOLFSSL_DTLS13_5_9_0_COMPAT")
+        .cflag("-DWOLFSSL_DTLS13_ECHO_LEGACY_SESSION_ID")
         .cflag("-DWOLFSSL_TLS13_MIDDLEBOX_COMPAT");
 
     for feature in OPTIONAL_FEATURES {
