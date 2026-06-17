@@ -240,7 +240,11 @@ Builds WolfSSL in windows
 */
 #[cfg(windows)]
 fn build_win(wolfssl_src: &Path) -> PathBuf {
-    let msb = MsBuild::find_msbuild(Some("2022")).expect("Failed to find MsBuild 2022");
+    let msb = MsBuild::find_msbuild_in_range(
+        Some(msbuild::ProductLineVersion::Vs2026.installation_version_max()),
+        Some(msbuild::ProductLineVersion::Vs2022.installation_version_min()),
+    )
+    .expect("Failed to find MsBuild with required version");
 
     let (configuration, platform) = get_windows_build_params();
 
