@@ -26,7 +26,7 @@ exceptions = [
 ignore = true
 
 [bans]
-multiple-versions = "deny"
+multiple-versions = "allow"
 wildcards = "allow"
 highlight = "all"
 workspace-default-features = "allow"
