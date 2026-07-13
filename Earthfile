@@ -133,7 +133,7 @@ fmt:
 # check-dependencies lints our dependencies via cargo-deny
 check-dependencies:
     FROM +copy-src
-    DO lib-rust+CARGO --args="deny --all-features check --deny warnings bans license sources"
+    DO lib-rust+CARGO --args="deny --all-features check --deny warnings bans licenses sources"
 
 # publish publishes the target crate to cargo.io. Must specify package by --PACKAGE=<package-name>
 publish:
