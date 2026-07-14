@@ -530,12 +530,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     }
 
     if build_target::target_os() == build_target::Os::iOS {
-        // Check whether we have set IPHONEOS_DEPLOYMENT_TARGET to ensure we support older iOS
-        let ios_target = env::var("IPHONEOS_DEPLOYMENT_TARGET")
-            .expect("Must have set minimum supported iOS version (IPHONEOS_DEPLOYMENT_TARGET)");
-        if ios_target.is_empty() {
-            panic!("IPHONEOS_DEPLOYMENT_TARGET is empty")
-        }
+        let deployment_target = apple_deployment_target("IPHONEOS_DEPLOYMENT_TARGET");
+        env::set_var("IPHONEOS_DEPLOYMENT_TARGET", deployment_target);
 
         // Check if we are building for Mac Catalyst or iOS device
         let arm64_arch = if build_target::target_env()
