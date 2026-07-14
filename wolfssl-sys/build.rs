@@ -564,12 +564,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     }
 
     if build_target::target_os() == build_target::Os::TvOS {
-        // Check whether we have set TVOS_DEPLOYMENT_TARGET to ensure we support older tvOS
-        let ios_target = env::var("TVOS_DEPLOYMENT_TARGET")
-            .expect("Must have set minimum supported tvOS version");
-        if ios_target.is_empty() {
-            panic!("TVOS_DEPLOYMENT_TARGET is empty")
-        }
+        let deployment_target = apple_deployment_target("TVOS_DEPLOYMENT_TARGET");
+        env::set_var("TVOS_DEPLOYMENT_TARGET", deployment_target);
 
         // Build options for tvos
         let (chost, arch_flags, arch) = match build_target::target_arch() {
