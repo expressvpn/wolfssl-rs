@@ -216,6 +216,55 @@ fn apply_patch(wolfssl_path: &Path, patch: impl AsRef<Path>) -> Result<(), Strin
 }
 
 /**
+ * Resolve the Apple deployment target (minimum supported OS version) for the current build.
+ *
+ * Uses the given environment variable when set — the standard override understood by
+ * clang, rustc and Xcode alike — otherwise falls back to rustc's own default deployment
+ * target for this target triple, so the C objects always match the minimum OS version of
+ * the Rust objects they are linked with.
+ */
+fn apple_deployment_target(env_var: &str) -> String {
+    println!("cargo:rerun-if-env-changed={env_var}");
+
+    match env::var(env_var) {
+        Ok(version) if !version.is_empty() => version,
+        _ => {
+            let rustc = env::var("RUSTC").unwrap_or_else(|_| String::from("rustc"));
+            let target = env::var("TARGET").unwrap();
+            let output = Command::new(&rustc)
+                .args(["--print", "deployment-target", "--target", &target])
+                .output()
+                .unwrap_or_else(|e| panic!("Failed to run {rustc}: {e}"));
+            if !output.status.success() {
+                panic!(
+                    "rustc --print deployment-target failed: {}\nSet {env_var} explicitly to work around this",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+
+            // Output looks like "MACOSX_DEPLOYMENT_TARGET=11.0"
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let version = stdout
+                .trim()
+                .split('=')
+                .nth(1)
+                .filter(|version| !version.is_empty())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Unexpected rustc --print deployment-target output: {stdout:?}\nSet {env_var} explicitly to work around this"
+                    )
+                })
+                .to_string();
+
+            println!(
+                "cargo:warning={env_var} is not set; defaulting to rustc's deployment target {version} for {target}"
+            );
+            version
+        }
+    }
+}
+
+/**
  * Get Windows build configuration and platform based on build profile and target architecture
  */
 fn get_windows_build_params() -> (&'static str, &'static str) {
@@ -462,12 +511,12 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     }
 
     if build_target::target_os() == build_target::Os::MacOS {
-        // Check whether we have set MACOSX_DEPLOYMENT_TARGET to ensure we support older MacOS
-        let deployment_target = env::var("MACOSX_DEPLOYMENT_TARGET")
-            .expect("Must have set minimum supported MacOS version (MACOSX_DEPLOYMENT_TARGET)");
-        if deployment_target.is_empty() {
-            panic!("MACOSX_DEPLOYMENT_TARGET is empty")
-        }
+        // Minimum supported MacOS version. Must be in the process env before conf.build():
+        // cc-rs reads it there when computing the -mmacosx-version-min= flag it bakes into
+        // the CFLAGS handed to configure (env vars on the configure/make processes are
+        // ignored in favour of that explicit flag).
+        let deployment_target = apple_deployment_target("MACOSX_DEPLOYMENT_TARGET");
+        env::set_var("MACOSX_DEPLOYMENT_TARGET", deployment_target);
 
         // Build options for MacOS
         let chost = match build_target::target_arch() {
