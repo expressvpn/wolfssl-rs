@@ -25,6 +25,12 @@ pub enum Aes256GcmError {
 }
 
 /// Struct for encrypt/decrypt using Aes256Gcm cipher
+///
+/// For concurrent use, create one instance per thread with the same key
+/// (construction and key expansion are one-time costs). A single instance
+/// cannot be shared across threads without external exclusion because
+/// [`Self::encrypt`]/[`Self::decrypt`] take `&mut self` - see the safety
+/// notes on the `Send`/`Sync` impls below.
 pub struct Aes256Gcm {
     aes: Box<Aes>,
     valid_key: bool,
@@ -32,17 +38,24 @@ pub struct Aes256Gcm {
 
 /// Safety: Aes256Gcm is safe to Send between threads because:
 /// - Each instance owns its WolfSSL Aes context completely (`Box<Aes>`)
-/// - The underlying Aes structure contains only per-instance cryptographic state
-/// - No shared mutable state exists between different Aes256Gcm instances
+/// - No shared state exists between different Aes256Gcm instances
 /// - WolfSSL is built with single-threaded mode, placing thread synchronization
 ///   responsibility on the application (which Rust's ownership system handles)
 unsafe impl Send for Aes256Gcm {}
 
-/// Safety: Aes256Gcm is safe to Sync (concurrent access from multiple threads) because:
-/// - Each Aes256Gcm instance maintains completely separate cryptographic state
-/// - The underlying WolfSSL Aes structure has no internal shared mutable state
-/// - Concurrent access means multiple threads each using their own Aes256Gcm instance,
-///   not multiple threads accessing the same instance (which &mut self prevents)
+/// Safety: Aes256Gcm is safe to Sync because every FFI call that passes
+/// `*mut Aes` is reachable only through `&mut self`, so Rust's aliasing rules
+/// guarantee the context is never accessed from two threads at once.
+///
+/// Note: wolfSSL mutates the Aes context during
+/// encrypt/decrypt on some targets (with armasm, `aes->tmp`/`aes->reg` are
+/// passed to the assembly as per-call scratch [0]; with OPENSSL_EXTRA,
+/// `aes->gcm.aadLen` is written in the hot path [1]). Relaxing any method to
+/// `&self` would make concurrent calls a data race producing wrong
+/// ciphertext/auth tags on those targets.
+///
+/// [0]: https://github.com/wolfSSL/wolfssl/blob/v5.9.1-stable/wolfcrypt/src/aes.c#L10132-L10152
+/// [1]: https://github.com/wolfSSL/wolfssl/blob/v5.9.1-stable/wolfcrypt/src/aes.c#L9842-L9847
 unsafe impl Sync for Aes256Gcm {}
 
 impl Aes256Gcm {
@@ -289,5 +302,33 @@ mod tests {
             .decrypt(IV, CIPHER_TEXT.as_ref(), AUTH_VEC, EXP_AUTH_TAG)
             .unwrap();
         assert_eq!(&plaint_text[..], &PLAIN_TEXT);
+    }
+
+    #[test]
+    fn test_aes256gcm_parallel_instances() {
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    let mut cipher = Aes256Gcm::new().unwrap();
+                    cipher.set_key(KEY).unwrap();
+
+                    for _ in 0..100 {
+                        let (cipher_text, auth_tag) =
+                            cipher.encrypt(IV, &PLAIN_TEXT, AUTH_VEC).unwrap();
+                        assert_eq!(&cipher_text[..], &CIPHER_TEXT);
+                        assert_eq!(&auth_tag[..], &EXP_AUTH_TAG[..]);
+
+                        let plain_text = cipher
+                            .decrypt(IV, CIPHER_TEXT.as_ref(), AUTH_VEC, EXP_AUTH_TAG)
+                            .unwrap();
+                        assert_eq!(&plain_text[..], &PLAIN_TEXT);
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
     }
 }
