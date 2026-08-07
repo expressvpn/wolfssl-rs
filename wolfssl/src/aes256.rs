@@ -19,12 +19,22 @@ pub enum Aes256GcmError {
     #[error("Invalid key")]
     InvalidKey,
 
+    /// The caller-supplied output buffer is shorter than the input
+    #[error("Output buffer too small")]
+    BufferTooSmall,
+
     /// Top-level errors from WolfSSL API invocations.
     #[error("Fatal: {0}")]
     Fatal(ErrorKind),
 }
 
 /// Struct for encrypt/decrypt using Aes256Gcm cipher
+///
+/// For concurrent use, create one instance per thread with the same key
+/// (construction and key expansion are one-time costs). A single instance
+/// cannot be shared across threads without external exclusion because
+/// [`Self::encrypt`]/[`Self::decrypt`] take `&mut self` - see the safety
+/// notes on the `Send`/`Sync` impls below.
 pub struct Aes256Gcm {
     aes: Box<Aes>,
     valid_key: bool,
@@ -32,17 +42,24 @@ pub struct Aes256Gcm {
 
 /// Safety: Aes256Gcm is safe to Send between threads because:
 /// - Each instance owns its WolfSSL Aes context completely (`Box<Aes>`)
-/// - The underlying Aes structure contains only per-instance cryptographic state
-/// - No shared mutable state exists between different Aes256Gcm instances
+/// - No shared state exists between different Aes256Gcm instances
 /// - WolfSSL is built with single-threaded mode, placing thread synchronization
 ///   responsibility on the application (which Rust's ownership system handles)
 unsafe impl Send for Aes256Gcm {}
 
-/// Safety: Aes256Gcm is safe to Sync (concurrent access from multiple threads) because:
-/// - Each Aes256Gcm instance maintains completely separate cryptographic state
-/// - The underlying WolfSSL Aes structure has no internal shared mutable state
-/// - Concurrent access means multiple threads each using their own Aes256Gcm instance,
-///   not multiple threads accessing the same instance (which &mut self prevents)
+/// Safety: Aes256Gcm is safe to Sync because every FFI call that passes
+/// `*mut Aes` is reachable only through `&mut self`, so Rust's aliasing rules
+/// guarantee the context is never accessed from two threads at once.
+///
+/// Note: wolfSSL mutates the Aes context during
+/// encrypt/decrypt on some targets (with armasm, `aes->tmp`/`aes->reg` are
+/// passed to the assembly as per-call scratch [0]; with OPENSSL_EXTRA,
+/// `aes->gcm.aadLen` is written in the hot path [1]). Relaxing any method to
+/// `&self` would make concurrent calls a data race producing wrong
+/// ciphertext/auth tags on those targets.
+///
+/// [0]: https://github.com/wolfSSL/wolfssl/blob/v5.9.1-stable/wolfcrypt/src/aes.c#L10132-L10152
+/// [1]: https://github.com/wolfSSL/wolfssl/blob/v5.9.1-stable/wolfcrypt/src/aes.c#L9842-L9847
 unsafe impl Sync for Aes256Gcm {}
 
 impl Aes256Gcm {
@@ -98,6 +115,103 @@ impl Aes256Gcm {
         }
         self.valid_key = true;
         Ok(())
+    }
+
+    /// Encrypt `plain_text` into `cipher_text`, returning the authentication
+    /// tag. `cipher_text` must be at least `plain_text.len()` bytes; AES-GCM
+    /// is a stream cipher, so the ciphertext is exactly as long as the input.
+    ///
+    /// The allocating [`Self::encrypt`] is the same call with an owned output
+    /// buffer. Prefer this one on a per-packet path, where the allocation is
+    /// a measurable share of the work and callers already own their buffers.
+    ///
+    /// On failure the contents of `cipher_text` are unspecified.
+    pub fn encrypt_into(
+        &mut self,
+        iv: [u8; Aes256Gcm::IV_SIZE],
+        plain_text: &[u8],
+        auth_vec: &[u8],
+        cipher_text: &mut [u8],
+    ) -> Result<[u8; Aes256Gcm::AUTHTAG_SIZE], Aes256GcmError> {
+        if !self.valid_key {
+            return Err(Aes256GcmError::InvalidKey);
+        }
+        if cipher_text.len() < plain_text.len() {
+            return Err(Aes256GcmError::BufferTooSmall);
+        }
+
+        let mut auth_tag = [0u8; Aes256Gcm::AUTHTAG_SIZE];
+
+        // SAFETY: [`wc_AesGcmEncrypt`][0] writes plain_text.len() bytes to the
+        // output pointer, which the length check above has established
+        // `cipher_text` has room for. Every other pointer is a live borrow for
+        // the duration of the call.
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__AES.html#function-wc_aesgcmencrypt
+        match unsafe {
+            wc_AesGcmEncrypt(
+                self.aes.as_mut(),
+                cipher_text.as_mut_ptr(),
+                plain_text.as_ptr(),
+                plain_text.len() as u32,
+                iv.as_ptr(),
+                Aes256Gcm::IV_SIZE as u32,
+                auth_tag.as_mut_ptr(),
+                auth_tag.len() as u32,
+                auth_vec.as_ptr(),
+                auth_vec.len() as u32,
+            )
+        } {
+            0 => Ok(auth_tag),
+            ret => Err(Aes256GcmError::Fatal(ErrorKind::from(ret))),
+        }
+    }
+
+    /// Decrypt `cipher_text` into `plain_text`, returning the plaintext
+    /// length. `plain_text` must be at least `cipher_text.len()` bytes.
+    ///
+    /// The allocating [`Self::decrypt`] is the same call with an owned output
+    /// buffer; see [`Self::encrypt_into`] for when to prefer this one.
+    ///
+    /// On failure - including a failed tag check - the contents of
+    /// `plain_text` are unspecified. A caller that retries the same bytes
+    /// under a different key must keep its own copy of the ciphertext.
+    pub fn decrypt_into(
+        &mut self,
+        iv: [u8; Aes256Gcm::IV_SIZE],
+        cipher_text: &[u8],
+        auth_vec: &[u8],
+        auth_tag: &[u8; Aes256Gcm::AUTHTAG_SIZE],
+        plain_text: &mut [u8],
+    ) -> Result<usize, Aes256GcmError> {
+        if !self.valid_key {
+            return Err(Aes256GcmError::InvalidKey);
+        }
+        if plain_text.len() < cipher_text.len() {
+            return Err(Aes256GcmError::BufferTooSmall);
+        }
+
+        // SAFETY: [`wc_AesGcmDecrypt`][0] writes cipher_text.len() bytes to the
+        // output pointer, which the length check above has established
+        // `plain_text` has room for. Every other pointer is a live borrow for
+        // the duration of the call.
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__AES.html#function-wc_aesgcmdecrypt
+        match unsafe {
+            wc_AesGcmDecrypt(
+                self.aes.as_mut(),
+                plain_text.as_mut_ptr(),
+                cipher_text.as_ptr(),
+                cipher_text.len() as u32,
+                iv.as_ptr(),
+                Aes256Gcm::IV_SIZE as u32,
+                auth_tag.as_ptr(),
+                auth_tag.len() as u32,
+                auth_vec.as_ptr(),
+                auth_vec.len() as u32,
+            )
+        } {
+            0 => Ok(cipher_text.len()),
+            ret => Err(Aes256GcmError::Fatal(ErrorKind::from(ret))),
+        }
     }
 
     /// This function encrypts an input message `plain_text`, using AES-GCM cipher,
@@ -289,5 +403,115 @@ mod tests {
             .decrypt(IV, CIPHER_TEXT.as_ref(), AUTH_VEC, EXP_AUTH_TAG)
             .unwrap();
         assert_eq!(&plaint_text[..], &PLAIN_TEXT);
+    }
+
+    #[test]
+    fn test_aes256gcm_encrypt_decrypt_into() {
+        let mut cipher = Aes256Gcm::new().unwrap();
+        cipher.set_key(KEY).unwrap();
+
+        let mut cipher_text = vec![0u8; PLAIN_TEXT.len()];
+        let auth_tag = cipher
+            .encrypt_into(IV, &PLAIN_TEXT, AUTH_VEC, &mut cipher_text)
+            .unwrap();
+        assert_eq!(&cipher_text[..], &CIPHER_TEXT);
+        assert_eq!(&auth_tag[..], &EXP_AUTH_TAG[..]);
+
+        let mut plain_text = vec![0u8; CIPHER_TEXT.len()];
+        let len = cipher
+            .decrypt_into(
+                IV,
+                CIPHER_TEXT.as_ref(),
+                AUTH_VEC,
+                EXP_AUTH_TAG,
+                &mut plain_text,
+            )
+            .unwrap();
+        assert_eq!(len, PLAIN_TEXT.len());
+        assert_eq!(&plain_text[..len], &PLAIN_TEXT);
+    }
+
+    /// The allocating and in-place entry points are the same FFI call, so
+    /// they must not be able to disagree on the bytes.
+    #[test]
+    fn test_aes256gcm_into_matches_allocating() {
+        let mut cipher = Aes256Gcm::new().unwrap();
+        cipher.set_key(KEY).unwrap();
+
+        let (owned_ct, owned_tag) = cipher.encrypt(IV, &PLAIN_TEXT, AUTH_VEC).unwrap();
+
+        let mut ct = vec![0u8; PLAIN_TEXT.len()];
+        let tag = cipher
+            .encrypt_into(IV, &PLAIN_TEXT, AUTH_VEC, &mut ct)
+            .unwrap();
+
+        assert_eq!(&ct[..], &owned_ct[..]);
+        assert_eq!(tag, owned_tag);
+    }
+
+    #[test]
+    fn test_aes256gcm_into_rejects_short_output() {
+        let mut cipher = Aes256Gcm::new().unwrap();
+        cipher.set_key(KEY).unwrap();
+
+        let mut too_small = vec![0u8; PLAIN_TEXT.len() - 1];
+        assert!(matches!(
+            cipher.encrypt_into(IV, &PLAIN_TEXT, AUTH_VEC, &mut too_small),
+            Err(Aes256GcmError::BufferTooSmall)
+        ));
+
+        let mut too_small = vec![0u8; CIPHER_TEXT.len() - 1];
+        assert!(matches!(
+            cipher.decrypt_into(
+                IV,
+                CIPHER_TEXT.as_ref(),
+                AUTH_VEC,
+                EXP_AUTH_TAG,
+                &mut too_small
+            ),
+            Err(Aes256GcmError::BufferTooSmall)
+        ));
+    }
+
+    #[test]
+    fn test_aes256gcm_decrypt_into_rejects_tampered_tag() {
+        let mut cipher = Aes256Gcm::new().unwrap();
+        cipher.set_key(KEY).unwrap();
+
+        let mut tag = *EXP_AUTH_TAG;
+        tag[0] ^= 0xFF;
+
+        let mut plain_text = vec![0u8; CIPHER_TEXT.len()];
+        assert!(cipher
+            .decrypt_into(IV, CIPHER_TEXT.as_ref(), AUTH_VEC, &tag, &mut plain_text)
+            .is_err());
+    }
+
+    #[test]
+    fn test_aes256gcm_parallel_instances() {
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    let mut cipher = Aes256Gcm::new().unwrap();
+                    cipher.set_key(KEY).unwrap();
+
+                    for _ in 0..100 {
+                        let (cipher_text, auth_tag) =
+                            cipher.encrypt(IV, &PLAIN_TEXT, AUTH_VEC).unwrap();
+                        assert_eq!(&cipher_text[..], &CIPHER_TEXT);
+                        assert_eq!(&auth_tag[..], &EXP_AUTH_TAG[..]);
+
+                        let plain_text = cipher
+                            .decrypt(IV, CIPHER_TEXT.as_ref(), AUTH_VEC, EXP_AUTH_TAG)
+                            .unwrap();
+                        assert_eq!(&plain_text[..], &PLAIN_TEXT);
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
     }
 }
