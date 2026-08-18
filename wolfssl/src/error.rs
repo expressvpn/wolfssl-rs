@@ -5,6 +5,7 @@ use thiserror::Error;
 use wolfssl_sys::wolfCrypt_ErrorCodes_ASN_NO_SIGNER_E as WOLFSSL_ERROR_ASN_NO_SIGNER;
 use wolfssl_sys::wolfSSL_ErrorCodes_DOMAIN_NAME_MISMATCH as WOLFSSL_ERROR_DOMAIN_NAME_MISMATCH;
 use wolfssl_sys::wolfSSL_ErrorCodes_DUPLICATE_MSG_E as WOLFSSL_ERROR_DUPLICATE_MSG_E;
+use wolfssl_sys::wolfSSL_ErrorCodes_FATAL_ERROR as WOLFSSL_ERROR_FATAL_ERROR;
 use wolfssl_sys::wolfSSL_ErrorCodes_ZERO_RETURN as WOLFSSL_ERROR_ZERO_RETURN_ALT;
 use wolfssl_sys::WOLFSSL_ERROR_ZERO_RETURN_c_int as WOLFSSL_ERROR_ZERO_RETURN;
 
@@ -70,6 +71,9 @@ pub enum ErrorKind {
     /// Peer sent close notify alert
     #[error("Peer sent close notify alert")]
     PeerClosed,
+    /// Peer sent a fatal TLS alert, terminating the connection
+    #[error("Peer sent a fatal TLS alert")]
+    PeerFatalAlert,
     /// All other wolfssl fatal errors
     #[error("code: {code}, what: {what}")]
     Other {
@@ -91,6 +95,7 @@ impl std::convert::From<c_int> for ErrorKind {
             WOLFSSL_ERROR_DUPLICATE_MSG_E => Self::DuplicateMessage,
             WOLFSSL_ERROR_ZERO_RETURN => Self::PeerClosed,
             WOLFSSL_ERROR_ZERO_RETURN_ALT => Self::PeerClosed,
+            WOLFSSL_ERROR_FATAL_ERROR => Self::PeerFatalAlert,
             _other => Self::Other {
                 what: wolf_error_string(code as std::ffi::c_ulong),
                 code,
@@ -161,5 +166,25 @@ mod wolf_error {
     fn wolf_error_string_check_string() {
         let s = wolf_error_string(wolfssl_sys::WOLFSSL_ERROR_WANT_READ as std::ffi::c_ulong);
         assert_eq!(s, "non-blocking socket wants data to be read");
+    }
+
+    #[test]
+    fn error_kind_from_fatal_alert_code() {
+        assert!(matches!(
+            ErrorKind::from(wolfssl_sys::wolfSSL_ErrorCodes_FATAL_ERROR),
+            ErrorKind::PeerFatalAlert
+        ));
+    }
+
+    #[test]
+    fn error_kind_from_both_zero_return_codes() {
+        assert!(matches!(
+            ErrorKind::from(wolfssl_sys::WOLFSSL_ERROR_ZERO_RETURN_c_int),
+            ErrorKind::PeerClosed
+        ));
+        assert!(matches!(
+            ErrorKind::from(wolfssl_sys::wolfSSL_ErrorCodes_ZERO_RETURN),
+            ErrorKind::PeerClosed
+        ));
     }
 }
