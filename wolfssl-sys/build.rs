@@ -41,6 +41,9 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
     copy_dir_recursive(src, &dest_dir)?;
 
     if build_target::target_os() == build_target::Os::Windows {
+        // The generated user_settings.h is assembled from these headers
+        println!("cargo:rerun-if-changed=windows");
+
         // Determine architecture-specific user_settings file
         let arch_settings = match build_target::target_arch() {
             build_target::Arch::X86_64 => "windows/user_settings-x86_64.h",
