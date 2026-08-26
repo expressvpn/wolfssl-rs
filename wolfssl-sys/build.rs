@@ -503,6 +503,13 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         conf.env("ARCH", arch);
         conf.env("CONFIGURE_PLATFORM", configure_platform);
 
+        // Configure falls back to the host `ar`/`ranlib` when the `<triplet>-`prefixed
+        // ones are missing, as they are in modern NDKs. On macOS that picks Xcode's,
+        // which cannot index ELF and silently leaves `libwolfssl.a` an empty archive.
+        let cc_build = cc::Build::new();
+        conf.env("AR", cc_build.get_archiver().get_program());
+        conf.env("RANLIB", cc_build.get_ranlib().get_program());
+
         // General Android specific configurations
         conf.disable("crypttests", None);
         conf.cflag("-DFP_MAX_BITS=8192");

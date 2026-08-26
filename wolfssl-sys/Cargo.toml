@@ -1,6 +1,6 @@
 [package]
 name = "wolfssl-sys"
-version = "4.3.0"
+version = "4.3.1"
 description = "System bindings for WolfSSL"
 readme = "README.md"
 authors.workspace = true
@@ -15,6 +15,7 @@ edition.workspace = true
 bindgen = "0.72"
 autotools = "0.2"
 build-target = "0.8.0"
+cc = "1"
 
 [target.'cfg(windows)'.build-dependencies]
 msbuild = "0.2.0"
