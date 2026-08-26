@@ -124,7 +124,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
-      - run: npm install @iarna/toml axios compare-versions
+      - run: npm ci
 
       - name: Pre-check version bumps
         id: pre_process_release
@@ -322,7 +322,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
-      - run: npm install axios
+      - run: npm ci
 
       - name: Publish crates sequentially
         uses: actions/github-script@v7
