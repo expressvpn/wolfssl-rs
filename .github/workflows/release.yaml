@@ -124,7 +124,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
-      - run: npm ci
+      - run: npm ci --ignore-scripts
 
       - name: Pre-check version bumps
         id: pre_process_release
@@ -322,7 +322,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
-      - run: npm ci
+      - run: npm ci --ignore-scripts
 
       - name: Publish crates sequentially
         uses: actions/github-script@v7
