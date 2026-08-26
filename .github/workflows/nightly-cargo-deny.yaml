@@ -11,4 +11,5 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: true
+        persist-credentials: false
     - uses: EmbarkStudios/cargo-deny-action@v2

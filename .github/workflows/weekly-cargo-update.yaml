@@ -12,6 +12,7 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: true
+        persist-credentials: false
 
     - name: Import GPG Key
       uses: crazy-max/ghaction-import-gpg@v6
