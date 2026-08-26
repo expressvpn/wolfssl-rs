@@ -1,0 +1,98 @@
+From c4cd0160192b12b2b38da0d696bf66f02040f422 Mon Sep 17 00:00:00 2001
+From: Eric Blankenhorn <eric@wolfssl.com>
+Date: Wed, 26 Aug 2026 15:04:42 +0800
+Subject: [PATCH] MSVC: pass SP feature defines to ml64 for sp_x86_64_asm.asm
+
+Backport of https://github.com/wolfSSL/wolfssl/pull/11254 to v5.9.1.
+
+Adds a WolfSSLSpAsmDefs MSBuild property spliced into the ml64 command
+for sp_x86_64_asm.asm. The MASM file's P-384, P-521, 4096-bit and SAKKE
+1024 sections are opt-in (IFDEF), so without assembler-side defines a C
+build enabling WOLFSSL_SP_384/WOLFSSL_SP_4096 fails to link (LNK2001 on
+sp_384_*/sp_4096_*). The property defaults to the full superset so the
+assembly always provides a superset of what sp_x86_64.c can reference;
+build.rs trims it to the sizes actually enabled via
+-p:WolfSSLSpAsmDefs.
+
+Backport notes: the upstream commit is against master and also patches
+wolfssl-VS2022.vcxproj, the FIPS projects, the CSharp wrapper and
+IDE/WIN/user_settings.h. This backport is limited to wolfssl.vcxproj,
+the only project wolfssl-sys builds: the upstream PropertyGroup hunks
+assume master-only context (WolfSSLIntelAsm), wolfssl-VS2022.vcxproj is
+committed with CRLF line endings (which this repository's gitattributes
+would corrupt in a patch), and build.rs overwrites
+IDE/WIN/user_settings.h with generated settings before patches apply.
+Drop this patch when the wolfSSL submodule is bumped past the PR.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ wolfssl.vcxproj | 31 +++++++++++++++++++++++--------
+ 1 file changed, 23 insertions(+), 8 deletions(-)
+
+diff --git a/wolfssl.vcxproj b/wolfssl.vcxproj
+index 58410b1..26646e0 100644
+--- a/wolfssl.vcxproj
++++ b/wolfssl.vcxproj
+@@ -56,6 +56,21 @@
+     <Keyword>Win32Proj</Keyword>
+   </PropertyGroup>
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
++  <PropertyGroup Label="WolfSSLSpAsm">
++    <!-- Feature macros the single precision (SP) x86_64 assembly is guarded by.
++         ml64.exe cannot read user_settings.h, so every opt-in IFDEF section of
++         wolfcrypt\src\sp_x86_64_asm.asm has to be enabled on the assembler
++         command line instead.  RSA/DH 2048 and 3072 and ECC P-256 are always
++         assembled; ECC P-384, ECC P-521, RSA/DH 4096 and SAKKE 1024 are opt in
++         and are turned on here so the assembly always provides a superset of
++         what the C compile of sp_x86_64.c can reference.  A section assembled
++         but not enabled for the C build is simply unreferenced code, while a
++         section the C build enables but that is missing here is an unresolved
++         external at link time (LNK2001 on sp_384_*, sp_521_*, sp_4096_* or
++         sp_1024_*).  Trim the list for a smaller library, e.g.:
++             msbuild /p:WolfSSLSpAsmDefs="/DWOLFSSL_SP_384" -->
++    <WolfSSLSpAsmDefs Condition="'$(WolfSSLSpAsmDefs)'==''">/DWOLFSSL_SP_384 /DWOLFSSL_SP_521 /DWOLFSSL_SP_4096 /DWOLFSSL_SP_1024</WolfSSLSpAsmDefs>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+     <ConfigurationType>StaticLibrary</ConfigurationType>
+     <PlatformToolset>v110</PlatformToolset>
+@@ -479,14 +494,14 @@
+     <CustomBuild Include="wolfcrypt\src\aes_asm.asm">
+       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DLL Debug|x64'">false</ExcludedFromBuild>
+-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ml64.exe /c /Zi /Fo"$(OutDir)%(Filename).obj" %(Identity)</Command>
+-      <Command Condition="'$(Configuration)|$(Platform)'=='DLL Debug|x64'">ml64.exe /c /Zi /Fo"$(IntDir)%(Filename).obj" %(Identity)</Command>
++      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ml64.exe $(WolfSSLSpAsmDefs) /c /Zi /Fo"$(OutDir)%(Filename).obj" %(Identity)</Command>
++      <Command Condition="'$(Configuration)|$(Platform)'=='DLL Debug|x64'">ml64.exe $(WolfSSLSpAsmDefs) /c /Zi /Fo"$(IntDir)%(Filename).obj" %(Identity)</Command>
+       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)%(Filename).obj</Outputs>
+       <Outputs Condition="'$(Configuration)|$(Platform)'=='DLL Debug|x64'">$(IntDir)%(Filename).obj</Outputs>
+       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DLL Release|x64'">false</ExcludedFromBuild>
+-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">ml64.exe /c /Zi /Fo"$(OutDir)%(Filename).obj" %(Identity)</Command>
+-      <Command Condition="'$(Configuration)|$(Platform)'=='DLL Release|x64'">ml64.exe /c /Zi /Fo"$(IntDir)%(Filename).obj" %(Identity)</Command>
++      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">ml64.exe $(WolfSSLSpAsmDefs) /c /Zi /Fo"$(OutDir)%(Filename).obj" %(Identity)</Command>
++      <Command Condition="'$(Configuration)|$(Platform)'=='DLL Release|x64'">ml64.exe $(WolfSSLSpAsmDefs) /c /Zi /Fo"$(IntDir)%(Filename).obj" %(Identity)</Command>
+       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)%(Filename).obj</Outputs>
+       <Outputs Condition="'$(Configuration)|$(Platform)'=='DLL Release|x64'">$(IntDir)%(Filename).obj</Outputs>
+     </CustomBuild>
+@@ -549,14 +564,14 @@
+     <CustomBuild Include="wolfcrypt\src\sp_x86_64_asm.asm">
+       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DLL Debug|x64'">false</ExcludedFromBuild>
+-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ml64.exe /c /Zi /Fo"$(OutDir)%(Filename).obj" %(Identity)</Command>
+-      <Command Condition="'$(Configuration)|$(Platform)'=='DLL Debug|x64'">ml64.exe /c /Zi /Fo"$(IntDir)%(Filename).obj" %(Identity)</Command>
++      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ml64.exe $(WolfSSLSpAsmDefs) /c /Zi /Fo"$(OutDir)%(Filename).obj" %(Identity)</Command>
++      <Command Condition="'$(Configuration)|$(Platform)'=='DLL Debug|x64'">ml64.exe $(WolfSSLSpAsmDefs) /c /Zi /Fo"$(IntDir)%(Filename).obj" %(Identity)</Command>
+       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)%(Filename).obj</Outputs>
+       <Outputs Condition="'$(Configuration)|$(Platform)'=='DLL Debug|x64'">$(IntDir)%(Filename).obj</Outputs>
+       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DLL Release|x64'">false</ExcludedFromBuild>
+-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">ml64.exe /c /Zi /Fo"$(OutDir)%(Filename).obj" %(Identity)</Command>
+-      <Command Condition="'$(Configuration)|$(Platform)'=='DLL Release|x64'">ml64.exe /c /Zi /Fo"$(IntDir)%(Filename).obj" %(Identity)</Command>
++      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">ml64.exe $(WolfSSLSpAsmDefs) /c /Zi /Fo"$(OutDir)%(Filename).obj" %(Identity)</Command>
++      <Command Condition="'$(Configuration)|$(Platform)'=='DLL Release|x64'">ml64.exe $(WolfSSLSpAsmDefs) /c /Zi /Fo"$(IntDir)%(Filename).obj" %(Identity)</Command>
+       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)%(Filename).obj</Outputs>
+       <Outputs Condition="'$(Configuration)|$(Platform)'=='DLL Release|x64'">$(IntDir)%(Filename).obj</Outputs>
+     </CustomBuild>
+-- 
+2.55.0.windows.5
+
