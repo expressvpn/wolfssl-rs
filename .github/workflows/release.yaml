@@ -138,7 +138,7 @@ jobs:
                 const fs = require('fs');
                 const axios = require('axios');
                 const compare_versions = require('compare-versions')
-                    
+
                 async function get_crate_max_version(name) {
                     try {
                         const resp = await axios(`https://crates.io/api/v1/crates/${name}`);
@@ -148,22 +148,22 @@ jobs:
                         throw error;
                     }
                 }
-                
+
                 const crates_to_check = ['wolfssl/Cargo.toml', 'wolfssl-sys/Cargo.toml']
                 let has_version_bump = false
                 const bump_details = []
-                
+
                 for (const crate_path of crates_to_check) {
                     const data = toml.parse(fs.readFileSync(crate_path, 'utf-8'))
                     const name = data.package.name
                     const version_on_file = data.package.version
                     const version_on_crate_io = await get_crate_max_version(name)
-                    
+
                     if (compare_versions.compare(version_on_file, version_on_crate_io, '<')) {
                         core.setFailed(`${name} version ${version_on_file} is lower than crates.io ${version_on_crate_io}`);
                         return;
                     }
-                    
+
                     if (compare_versions.compare(version_on_file, version_on_crate_io, '>')) {
                         console.log(`✓ ${name}: ${version_on_crate_io} → ${version_on_file}`);
                         bump_details.push(`${name}: ${version_on_crate_io} → ${version_on_file}`);
@@ -172,7 +172,7 @@ jobs:
                         console.log(`${name}: ${version_on_file} (unchanged)`);
                     }
                 }
-                
+
                 if (!has_version_bump) {
                     core.setFailed('No version bumps detected in wolfssl or wolfssl-sys. Either bump a version or add the "ignore-release" label to the PR.');
                 } else {
@@ -237,7 +237,7 @@ jobs:
                     } catch (e) {
                         console.log(`  Error checking crates.io: ${e.message}, retrying...`);
                     }
-                    
+
                     await new Promise(r => setTimeout(r, interval_ms));
                 }
                 throw new Error(`Timed out waiting for ${name}@${version} on crates.io after ${timeoutMs / 1000}s`);
@@ -375,7 +375,7 @@ jobs:
                 } else {
                   await run_command(["earthly", "--push", "--ci", "--secret", "CARGO_REGISTRY_TOKEN", "+publish", `--PACKAGE=${name}`, `--DRY_RUN=${is_dry_run}`]);
                 }
-    
+
                 if (!is_dry_run) {
                     // Polling for the published version to appear on crates.io
                     await wait_for_crates_io(name, version_on_file);
