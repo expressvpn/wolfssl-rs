@@ -319,7 +319,7 @@ jobs:
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         id: process_release
         env:
-          CARGO_REGISTRY_TOKEN: "${{ secrets.CARGO_REGISTRY_TOKEN }}"
+          CARGO_REGISTRY_TOKEN: ${{ needs.plan.outputs.is_dry_run == 'false' && secrets.CARGO_REGISTRY_TOKEN || '' }}
           PUBLISH_PLAN: ${{ needs.plan.outputs.publish_plan }}
           IS_DRY_RUN: ${{ needs.plan.outputs.is_dry_run }}
         with:
