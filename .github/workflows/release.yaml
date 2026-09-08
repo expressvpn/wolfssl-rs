@@ -138,18 +138,8 @@ jobs:
             script: |
                 const toml = require('@iarna/toml');
                 const fs = require('fs');
-                const axios = require('axios');
                 const compare_versions = require('compare-versions')
-
-                async function get_crate_max_version(name) {
-                    try {
-                        const resp = await axios(`https://crates.io/api/v1/crates/${name}`);
-                        return resp.data.crate.max_version;
-                    } catch(error) {
-                        console.error(`Error fetching crate details for ${name}:`, error.message);
-                        throw error;
-                    }
-                }
+                const get_crate_max_version = require('./.github/scripts/get-crate-max-version.js');
 
                 const crates_to_check = ['wolfssl/Cargo.toml', 'wolfssl-sys/Cargo.toml']
                 let has_version_bump = false
@@ -194,18 +184,8 @@ jobs:
 
             const toml = require('@iarna/toml');
             const fs = require('fs');
-            const axios = require('axios');
             const compare_versions = require('compare-versions');
-
-            async function get_crate_max_version(name) {
-              try {
-                const resp = await axios(`https://crates.io/api/v1/crates/${name}`);
-                return resp.data.crate.max_version;
-              } catch(error) {
-                console.error(`Error fetching crate details for ${name}:`, error.message);
-                throw error;
-              }
-            }
+            const get_crate_max_version = require('./.github/scripts/get-crate-max-version.js');
 
             const is_dry_run = !is_merge_event;
             console.log("Dry run:", is_dry_run);
@@ -344,21 +324,11 @@ jobs:
           IS_DRY_RUN: ${{ needs.plan.outputs.is_dry_run }}
         with:
           script: |
-            const axios = require('axios');
             const { spawn } = require('child_process');
+            const get_crate_max_version = require('./.github/scripts/get-crate-max-version.js');
 
             const is_dry_run = process.env.IS_DRY_RUN === 'true';
             const publish_plan = JSON.parse(process.env.PUBLISH_PLAN || '[]');
-
-            async function get_crate_max_version(name) {
-              try {
-                const resp = await axios(`https://crates.io/api/v1/crates/${name}`);
-                return resp.data.crate.max_version;
-              } catch(error) {
-                console.error(`Error fetching crate details for ${name}:`, error.message);
-                throw error;
-              }
-            }
 
             function run_command(command_arr) {
                 return new Promise((resolve, reject) => {
