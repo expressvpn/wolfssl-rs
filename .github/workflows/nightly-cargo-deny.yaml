@@ -4,11 +4,16 @@ on:
     - cron:  '24 12 * * *'
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   cargo-deny:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         submodules: true
-    - uses: EmbarkStudios/cargo-deny-action@v2
+        persist-credentials: false
+    - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
