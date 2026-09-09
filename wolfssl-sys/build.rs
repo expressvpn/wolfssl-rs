@@ -431,8 +431,22 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         conf.enable("sys-ca-certs", None);
     }
 
+    // wolfSSL's ARMv8 assembly exports plain OpenSSL/BoringSSL names, among
+    // them AES_set_encrypt_key, and it hides those symbols only under
+    // __ELF__: `WC_ASM_ATT_HIDDEN` in wolfssl/wolfcrypt/visibility.h is a null
+    // expansion everywhere else. On Mach-O they therefore stay public and
+    // collide with a BoringSSL linked into the same binary, whose
+    // AES_set_encrypt_key returns zero on success where wolfSSL's assembly
+    // routine has neither that signature nor that convention. Whichever
+    // definition the linker drops, one library then runs against the other's
+    // AES key schedule.
+    //
+    // ELF targets are unaffected, so this narrows to Apple ones and gives up
+    // the ARM AES assembly only there.
+    let is_apple = matches!(env::var("CARGO_CFG_TARGET_VENDOR").as_deref(), Ok("apple"));
+
     match build_target::target_arch() {
-        build_target::Arch::AArch64 => {
+        build_target::Arch::AArch64 if !is_apple => {
             // Enable ARM ASM optimisations
             conf.enable("armasm", None);
         }
