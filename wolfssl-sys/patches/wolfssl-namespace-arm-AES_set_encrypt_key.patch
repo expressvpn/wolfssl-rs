@@ -1,0 +1,179 @@
+diff --git a/wolfcrypt/src/aes.c b/wolfcrypt/src/aes.c
+index 41b0103..db4a67e 100644
+--- a/wolfcrypt/src/aes.c
++++ b/wolfcrypt/src/aes.c
+@@ -4502,7 +4502,7 @@ WC_ALL_ARGS_NOT_NULL static WARN_UNUSED_RESULT int wc_AesDecrypt(
+ #ifndef WOLFSSL_ARMASM_NO_HW_CRYPTO
+         AES_set_key_AARCH32(userKey, keylen, (byte*)aes->key, dir);
+ #else
+-        AES_set_encrypt_key(userKey, keylen * 8, (byte*)aes->key);
++        wc_AES_set_encrypt_key(userKey, keylen * 8, (byte*)aes->key);
+ 
+     #ifdef HAVE_AES_DECRYPT
+         if (dir == AES_DECRYPTION) {
+@@ -5243,7 +5243,7 @@ static void AesSetKey_C(Aes* aes, const byte* key, word32 keySz, int dir)
+         }
+     #elif defined(__aarch64__) || defined(WOLFSSL_ARMASM_NO_HW_CRYPTO)
+         {
+-            AES_set_encrypt_key(userKey, keylen * 8, (byte*)aes->key);
++            wc_AES_set_encrypt_key(userKey, keylen * 8, (byte*)aes->key);
+         #ifdef HAVE_AES_DECRYPT
+             if (dir == AES_DECRYPTION) {
+                 AES_invert_key((byte*)aes->key, aes->rounds);
+diff --git a/wolfcrypt/src/port/arm/armv8-32-aes-asm.S b/wolfcrypt/src/port/arm/armv8-32-aes-asm.S
+index 88882b3..5ea94a0 100644
+--- a/wolfcrypt/src/port/arm/armv8-32-aes-asm.S
++++ b/wolfcrypt/src/port/arm/armv8-32-aes-asm.S
+@@ -8587,9 +8587,9 @@ L_AES_ARM32_rcon:
+ 	.word	0x36000000
+ 	.text
+ 	.align	4
+-	.globl	AES_set_encrypt_key
+-	.type	AES_set_encrypt_key, %function
+-AES_set_encrypt_key:
++	.globl	wc_AES_set_encrypt_key
++	.type	wc_AES_set_encrypt_key, %function
++wc_AES_set_encrypt_key:
+ 	push	{r4, r5, r6, r7, r8, lr}
+ 	adr	r8, L_AES_ARM32_te
+ 	ldr	r8, [r8]
+@@ -9049,7 +9049,7 @@ L_AES_set_encrypt_key_loop_128:
+ 	bne	L_AES_set_encrypt_key_loop_128
+ L_AES_set_encrypt_key_end:
+ 	pop	{r4, r5, r6, r7, r8, pc}
+-	.size	AES_set_encrypt_key,.-AES_set_encrypt_key
++	.size	wc_AES_set_encrypt_key,.-wc_AES_set_encrypt_key
+ #ifndef WOLFSSL_ARMASM_AES_BLOCK_INLINE
+ 	.text
+ 	.align	4
+diff --git a/wolfcrypt/src/port/arm/armv8-32-aes-asm_c.c b/wolfcrypt/src/port/arm/armv8-32-aes-asm_c.c
+index 360e0fc..bef3b1e 100644
+--- a/wolfcrypt/src/port/arm/armv8-32-aes-asm_c.c
++++ b/wolfcrypt/src/port/arm/armv8-32-aes-asm_c.c
+@@ -8848,13 +8848,13 @@ static const word32 L_AES_ARM32_rcon[] = {
+     0x1b000000, 0x36000000
+ };
+ 
+-void AES_set_encrypt_key(const unsigned char* key_p, word32 len_p,
++void wc_AES_set_encrypt_key(const unsigned char* key_p, word32 len_p,
+     unsigned char* ks_p);
+ #ifndef WOLFSSL_NO_VAR_ASSIGN_REG
+-WC_OMIT_FRAME_POINTER void AES_set_encrypt_key(const unsigned char* key_p,
++WC_OMIT_FRAME_POINTER void wc_AES_set_encrypt_key(const unsigned char* key_p,
+     word32 len_p, unsigned char* ks_p)
+ #else
+-WC_OMIT_FRAME_POINTER void AES_set_encrypt_key(const unsigned char* key,
++WC_OMIT_FRAME_POINTER void wc_AES_set_encrypt_key(const unsigned char* key,
+     word32 len, unsigned char* ks)
+ #endif /* WOLFSSL_NO_VAR_ASSIGN_REG */
+ {
+diff --git a/wolfcrypt/src/port/arm/armv8-aes-asm.S b/wolfcrypt/src/port/arm/armv8-aes-asm.S
+index cf46a07..1de960b 100644
+--- a/wolfcrypt/src/port/arm/armv8-aes-asm.S
++++ b/wolfcrypt/src/port/arm/armv8-aes-asm.S
+@@ -51993,15 +51993,15 @@ L_AES_ARM64_rcon:
+ 	.word	0x36000000
+ #ifndef __APPLE__
+ .text
+-.globl	AES_set_encrypt_key
+-.type	AES_set_encrypt_key,@function
++.globl	wc_AES_set_encrypt_key
++.type	wc_AES_set_encrypt_key,@function
+ .align	2
+-AES_set_encrypt_key:
++wc_AES_set_encrypt_key:
+ #else
+ .section	__TEXT,__text
+-.globl	_AES_set_encrypt_key
++.globl	_wc_AES_set_encrypt_key
+ .p2align	2
+-_AES_set_encrypt_key:
++_wc_AES_set_encrypt_key:
+ #endif /* __APPLE__ */
+ #ifndef __APPLE__
+ 	adrp x5, L_AES_ARM64_rcon
+@@ -52246,7 +52246,7 @@ L_AES_set_encrypt_key_loop_128:
+ L_AES_set_encrypt_key_end:
+ 	ret
+ #ifndef __APPLE__
+-	.size	AES_set_encrypt_key,.-AES_set_encrypt_key
++	.size	wc_AES_set_encrypt_key,.-wc_AES_set_encrypt_key
+ #endif /* __APPLE__ */
+ #if defined(HAVE_AESCCM) || defined(HAVE_AESGCM) || \
+     defined(WOLFSSL_AES_DIRECT) || defined(WOLFSSL_AES_COUNTER) || \
+diff --git a/wolfcrypt/src/port/arm/armv8-aes-asm_c.c b/wolfcrypt/src/port/arm/armv8-aes-asm_c.c
+index 26f11a7..830a283 100644
+--- a/wolfcrypt/src/port/arm/armv8-aes-asm_c.c
++++ b/wolfcrypt/src/port/arm/armv8-aes-asm_c.c
+@@ -51761,9 +51761,9 @@ static const word32 L_AES_ARM64_rcon[] = {
+     0x1b000000, 0x36000000,
+ };
+ 
+-void AES_set_encrypt_key(const unsigned char* key, word32 len,
++void wc_AES_set_encrypt_key(const unsigned char* key, word32 len,
+     unsigned char* ks);
+-void AES_set_encrypt_key(const unsigned char* key, word32 len,
++void wc_AES_set_encrypt_key(const unsigned char* key, word32 len,
+     unsigned char* ks)
+ {
+     const word32* rcon = L_AES_ARM64_rcon;
+diff --git a/wolfcrypt/src/port/arm/thumb2-aes-asm.S b/wolfcrypt/src/port/arm/thumb2-aes-asm.S
+index ceea679..362003a 100644
+--- a/wolfcrypt/src/port/arm/thumb2-aes-asm.S
++++ b/wolfcrypt/src/port/arm/thumb2-aes-asm.S
+@@ -700,9 +700,9 @@ L_AES_Thumb2_rcon:
+ 	.word	0x36000000
+ 	.text
+ 	.align	4
+-	.globl	AES_set_encrypt_key
+-	.type	AES_set_encrypt_key, %function
+-AES_set_encrypt_key:
++	.globl	wc_AES_set_encrypt_key
++	.type	wc_AES_set_encrypt_key, %function
++wc_AES_set_encrypt_key:
+ 	PUSH	{r4, r5, r6, r7, r8, r9, r10, lr}
+ 	LDR	r10, L_AES_Thumb2_te
+ 	ADR	lr, L_AES_Thumb2_rcon
+@@ -921,7 +921,7 @@ L_AES_set_encrypt_key_loop_128:
+ L_AES_set_encrypt_key_end:
+ 	POP	{r4, r5, r6, r7, r8, r9, r10, pc}
+ 	/* Cycle Count = 340 */
+-	.size	AES_set_encrypt_key,.-AES_set_encrypt_key
++	.size	wc_AES_set_encrypt_key,.-wc_AES_set_encrypt_key
+ #ifndef WOLFSSL_ARMASM_AES_BLOCK_INLINE
+ 	.text
+ 	.align	4
+diff --git a/wolfcrypt/src/port/arm/thumb2-aes-asm_c.c b/wolfcrypt/src/port/arm/thumb2-aes-asm_c.c
+index fd89d39..7cbe041 100644
+--- a/wolfcrypt/src/port/arm/thumb2-aes-asm_c.c
++++ b/wolfcrypt/src/port/arm/thumb2-aes-asm_c.c
+@@ -341,13 +341,13 @@ XALIGNED(16) static const word32 L_AES_Thumb2_rcon[] = {
+     0x1b000000, 0x36000000
+ };
+ 
+-void AES_set_encrypt_key(const unsigned char* key, word32 len,
++void wc_AES_set_encrypt_key(const unsigned char* key, word32 len,
+         unsigned char* ks);
+ #ifndef WOLFSSL_NO_VAR_ASSIGN_REG
+-WC_OMIT_FRAME_POINTER void AES_set_encrypt_key(const unsigned char* key_p,
++WC_OMIT_FRAME_POINTER void wc_AES_set_encrypt_key(const unsigned char* key_p,
+     word32 len_p, unsigned char* ks_p)
+ #else
+-WC_OMIT_FRAME_POINTER void AES_set_encrypt_key(const unsigned char* key,
++WC_OMIT_FRAME_POINTER void wc_AES_set_encrypt_key(const unsigned char* key,
+     word32 len, unsigned char* ks)
+ #endif /* !WOLFSSL_NO_VAR_ASSIGN_REG */
+ {
+diff --git a/wolfssl/wolfcrypt/aes.h b/wolfssl/wolfcrypt/aes.h
+index 3c4a7db..3f2cfb7 100644
+--- a/wolfssl/wolfcrypt/aes.h
++++ b/wolfssl/wolfcrypt/aes.h
+@@ -902,7 +902,7 @@ WOLFSSL_API int wc_AesCtsDecryptFinal(Aes* aes, byte* out, word32* outSz);
+ 
+ #if defined(WOLFSSL_ARMASM)
+ #if defined(__aarch64__) || defined(WOLFSSL_ARMASM_NO_HW_CRYPTO)
+-WOLFSSL_LOCAL void AES_set_encrypt_key(const unsigned char* key, word32 len,
++WOLFSSL_LOCAL void wc_AES_set_encrypt_key(const unsigned char* key, word32 len,
+     unsigned char* ks);
+ WOLFSSL_LOCAL void AES_invert_key(unsigned char* ks, word32 rounds);
+ WOLFSSL_LOCAL void AES_ECB_encrypt(const unsigned char* in, unsigned char* out,
