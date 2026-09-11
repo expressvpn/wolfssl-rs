@@ -165,12 +165,12 @@ impl ProtocolVersion {
     }
 
     /// Checks if the protocol version is compatible with TLS 1.3
-    fn is_tls_13(&self) -> bool {
+    pub fn is_tls_13(&self) -> bool {
         matches!(self, Self::TlsV1_3)
     }
 
     /// Checks if the protocol version is compatible with DTLS 1.3
-    fn is_dtls_13(&self) -> bool {
+    pub fn is_dtls_13(&self) -> bool {
         matches!(self, Self::DtlsV1_3)
     }
 }
