@@ -41,6 +41,9 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
     copy_dir_recursive(src, &dest_dir)?;
 
     if build_target::target_os() == build_target::Os::Windows {
+        // The generated user_settings.h is assembled from these headers
+        println!("cargo:rerun-if-changed=windows");
+
         // Determine architecture-specific user_settings file
         let arch_settings = match build_target::target_arch() {
             build_target::Arch::X86_64 => "windows/user_settings-x86_64.h",
@@ -142,6 +145,7 @@ const PATCH_DIR: &str = "patches";
 const PATCHES: &[&str] = &[
     "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
     "PR10492-DTLS13-backward-compatible.patch",
+    "PR11254-MSVC-pass-SP-defines-to-ml64.patch",
 ];
 const OPTIONAL_FEATURES: &[&str] = &["aesccm", "dh", "opensslall", "opensslextra", "psk"];
 const MACRO_FEATURES: &[(&str, &str)] = &[("ex_data", "HAVE_EX_DATA"), ("alpn", "HAVE_ALPN")];
@@ -297,17 +301,26 @@ fn build_win(wolfssl_src: &Path) -> PathBuf {
 
     let (configuration, platform) = get_windows_build_params();
 
-    msb.run(
-        wolfssl_src,
-        &[
-            ".\\wolfssl.vcxproj",
-            "-t:Build",
-            &format!("-p:Configuration={}", configuration),
-            &format!("-p:Platform={}", platform),
-            "-p:PlatformToolset=v143",
-        ],
-    )
-    .expect("Failed to build WolfSSL");
+    let mut args = vec![
+        ".\\wolfssl.vcxproj".to_string(),
+        "-t:Build".to_string(),
+        format!("-p:Configuration={}", configuration),
+        format!("-p:Platform={}", platform),
+        "-p:PlatformToolset=v143".to_string(),
+    ];
+
+    if build_target::target_arch() == build_target::Arch::X86_64 {
+        // Assemble only the opt-in SP sizes enabled in windows/user_settings-common.h
+        // (keep the two in sync). The vcxproj default (see the WolfSSLSpAsmDefs
+        // property added by the PR11254 patch) is the full superset, which adds
+        // ~54 KB of unreferenced SP_521/SP_1024 assembly to the whole-archive
+        // linked library.
+        args.push("-p:WolfSSLSpAsmDefs=/DWOLFSSL_SP_384 /DWOLFSSL_SP_4096".to_string());
+    }
+
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    msb.run(wolfssl_src, &args)
+        .expect("Failed to build WolfSSL");
     wolfssl_src.to_path_buf()
 }
 
