@@ -1,0 +1,31 @@
+From 44c2c02869ab10457b566bfce5cd0e450f15c42c Mon Sep 17 00:00:00 2001
+From: "ben.hung@kape.com" <ben.hung@kape.com>
+Date: Mon, 28 Sep 2026 12:42:19 +0800
+Subject: [PATCH] Allow single-label hostnames in IsValidFQDN behind
+ WOLFSSL_ALLOW_SINGLE_LABEL_HOSTNAME
+
+WolfSSL 5.9.2 restricts domain-name checks to valid FQDNs (at least two
+labels). Patch provided by the wolfSSL team: when
+WOLFSSL_ALLOW_SINGLE_LABEL_HOSTNAME is defined, single-label names such as
+"Server-12345-0a" are accepted again, matching pre-5.9.2 behaviour.
+---
+ src/ssl.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/ssl.c b/src/ssl.c
+index 7cd6aa28ba..22edc38beb 100644
+--- a/src/ssl.c
++++ b/src/ssl.c
+@@ -3905,7 +3905,12 @@ int wolfssl_local_IsValidFQDN(const char* name, word32 nameSz)
+         return 0;
+     ++labelCount;
+ 
++#ifdef WOLFSSL_ALLOW_SINGLE_LABEL_HOSTNAME
++    (void)labelCount;
++    return curLabelHasAlpha;
++#else
+     return ((labelCount > 1) && curLabelHasAlpha);
++#endif
+ }
+ 
+ /* call before SSL_connect, if verifying will add name check to
