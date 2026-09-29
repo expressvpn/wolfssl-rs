@@ -139,7 +139,10 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
 }
 
 const PATCH_DIR: &str = "patches";
-const PATCHES: &[&str] = &["CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch"];
+const PATCHES: &[&str] = &[
+    "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
+    "Allow-single-label-hostname-in-IsValidFQDN.patch",
+];
 const OPTIONAL_FEATURES: &[&str] = &["aesccm", "dh", "opensslall", "opensslextra", "psk"];
 const MACRO_FEATURES: &[(&str, &str)] = &[("ex_data", "HAVE_EX_DATA"), ("alpn", "HAVE_ALPN")];
 
@@ -376,7 +379,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .cflag("-DUSE_CERT_BUFFERS_256")
         .cflag("-DWOLFSSL_NO_SPHINCS")
         .cflag("-DWOLFSSL_DTLS13_ECHO_LEGACY_SESSION_ID")
-        .cflag("-DWOLFSSL_TLS13_MIDDLEBOX_COMPAT");
+        .cflag("-DWOLFSSL_TLS13_MIDDLEBOX_COMPAT")
+        .cflag("-DWOLFSSL_ALLOW_SINGLE_LABEL_HOSTNAME");
 
     for feature in OPTIONAL_FEATURES {
         // Determine if feature is enabled, enable or disable feature in configure
