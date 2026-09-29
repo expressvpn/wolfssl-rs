@@ -58,8 +58,8 @@ unsafe impl Send for Aes256Gcm {}
 /// `&self` would make concurrent calls a data race producing wrong
 /// ciphertext/auth tags on those targets.
 ///
-/// [0]: https://github.com/wolfSSL/wolfssl/blob/v5.9.1-stable/wolfcrypt/src/aes.c#L10132-L10152
-/// [1]: https://github.com/wolfSSL/wolfssl/blob/v5.9.1-stable/wolfcrypt/src/aes.c#L9842-L9847
+/// [0]: https://github.com/wolfSSL/wolfssl/blob/v5.9.4-stable/wolfcrypt/src/aes.c#L11608-L11654
+/// [1]: https://github.com/wolfSSL/wolfssl/blob/v5.9.4-stable/wolfcrypt/src/aes.c#L11238-L11243
 unsafe impl Sync for Aes256Gcm {}
 
 impl Aes256Gcm {
@@ -354,7 +354,7 @@ mod tests {
     fn test_aes_size() {
         cfg_if::cfg_if! {
             if #[cfg(not(windows))] {
-                assert_eq!(std::mem::size_of::<Aes>(), 123728);
+                assert_eq!(std::mem::size_of::<Aes>(), 123744);
             } else if #[cfg(all(windows, target_arch = "aarch64"))] {
                 assert_eq!(std::mem::size_of::<Aes>(), 320);
             } else {
