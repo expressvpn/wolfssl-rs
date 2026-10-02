@@ -42,6 +42,20 @@ fn io_errorkind_into_wolfssl_cbio_error(
     }
 }
 
+/// What a client offers in the `key_share` extension of its first ClientHello.
+#[derive(Debug, Copy, Clone)]
+pub enum KeyShareOffer {
+    /// A share for this group (`wolfSSL_UseKeyShare`). The group stays in
+    /// `supported_groups` alongside wolfSSL's defaults.
+    Group(CurveGroup),
+    /// No share at all (`wolfSSL_NoKeyShares`):
+    /// This can be used to keep the first ClientHello small.
+    ///
+    /// NOTE: This option is only valid for Client side connection,
+    /// setting this on Server side will trigger wolfSSL_NoKeyShares's `SIDE_ERROR`
+    Empty,
+}
+
 /// Stores configurations we want to initialize a [`Session`] with.
 pub struct SessionConfig<IOCB: IOCallbacks> {
     /// I/O callback handlers
@@ -60,8 +74,10 @@ pub struct SessionConfig<IOCB: IOCallbacks> {
     /// If set, configures the session to check the given domain against the
     /// peer certificate during connection.
     pub checked_domain_name: Option<String>,
-    /// If set, specifies a curve group to use for key share
-    pub keyshare_group: Option<CurveGroup>,
+    /// If set, what the client offers in the `key_share` extension of its
+    /// first ClientHello. `None` leaves wolfSSL's default (a share for its
+    /// preferred group).
+    pub key_share: Option<KeyShareOffer>,
     /// If set, specifies if fragmented ClientHello (CH) is allowed
     pub dtls13_allow_ch_frag: Option<bool>,
     /// SSL Verify mode
@@ -81,7 +97,7 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
             dtls_mtu: Default::default(),
             server_name_indicator: Default::default(),
             checked_domain_name: Default::default(),
-            keyshare_group: Default::default(),
+            key_share: Default::default(),
             dtls13_allow_ch_frag: Default::default(),
             ssl_verify_mode: Default::default(),
             #[cfg(feature = "debug")]
@@ -143,10 +159,15 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
         self
     }
 
-    /// Sets [`Self::keyshare_group`]
-    pub fn with_keyshare_group(mut self, curve: CurveGroup) -> Self {
-        self.keyshare_group = Some(curve);
+    /// Sets [`Self::key_share`]
+    pub fn with_key_share(mut self, offer: KeyShareOffer) -> Self {
+        self.key_share = Some(offer);
         self
+    }
+
+    /// Sets [`Self::key_share`] to [`KeyShareOffer::Group`]
+    pub fn with_keyshare_group(self, curve: CurveGroup) -> Self {
+        self.with_key_share(KeyShareOffer::Group(curve))
     }
 
     /// Sets [`Self::ssl_verify_mode`]
@@ -230,10 +251,14 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 .map_err(|e| NewSessionError::SetupFailed("set_domain_name_to_check", e))?;
         }
 
-        if let Some(curve) = config.keyshare_group {
-            session
+        match config.key_share {
+            Some(KeyShareOffer::Group(curve)) => session
                 .use_key_share_curve(curve)
-                .map_err(|e| NewSessionError::SetupFailed("use_key_share_curve", e))?;
+                .map_err(|e| NewSessionError::SetupFailed("use_key_share_curve", e))?,
+            Some(KeyShareOffer::Empty) => session
+                .no_key_shares()
+                .map_err(|e| NewSessionError::SetupFailed("no_key_shares", e))?,
+            None => {}
         }
 
         if let Some(mode) = config.ssl_verify_mode {
@@ -1179,6 +1204,31 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         }
     }
 
+    /// Invokes [`wolfSSL_NoKeyShares`][0]
+    ///
+    /// Sends an empty `key_share` extension in the first ClientHello so the
+    /// server selects the group with a HelloRetryRequest. Clears any key share
+    /// previously registered with [`Self::use_key_share_curve`]. Client side
+    /// only.
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_nokeyshares
+    fn no_key_shares(&mut self) -> Result<()> {
+        // SAFETY: [`wolfSSL_NoKeyShares`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the requirement for `&mut self` in `WolfsslPointer::as_ptr()`.
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_nokeyshares
+        // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#ga1ee3e9ce4b1bb77b6b0d8a1c0b0fcb1e
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
+        match unsafe { wolfssl_sys::wolfSSL_NoKeyShares(self.ssl.as_ptr()) } {
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
+            wolfssl_sys::wolfCrypt_ErrorCodes_MEMORY_E => panic!("Memory Allocation Failed"),
+            e @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => {
+                unreachable!("wolfSSL_NoKeyShares: {e:?}")
+            }
+            e => Err(Error::fatal(e)),
+        }
+    }
+
     /// Enable TLS1.3 key logging for applications
     #[cfg(feature = "debug")]
     pub(crate) fn enable_tls13_keylog(&mut self, secret_cb: Tls13SecretCallbacksArg) -> Result<()> {
@@ -1542,6 +1592,93 @@ mod tests {
 
         // Internally this calls `try_negotiate`
         let _ = make_connected_clients();
+    }
+
+    // Client sends an empty key_share in its first ClientHello; the server
+    // answers with a HelloRetryRequest and the handshake still completes.
+    fn connect_with_no_key_shares<IOCB: IOCallbacks>(
+        client_method: Method,
+        server_method: Method,
+        io_pair: (IOCB, IOCB),
+        exp_version: ProtocolVersion,
+    ) {
+        let client_ctx = ContextBuilder::new(client_method)
+            .unwrap()
+            .with_root_certificate(RootCertificate::Asn1Buffer(CA_CERT))
+            .unwrap()
+            .build();
+        let server_ctx = ContextBuilder::new(server_method)
+            .unwrap()
+            .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
+            .unwrap()
+            .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
+            .unwrap()
+            .build();
+
+        let (client_io, server_io) = io_pair;
+        let mut client = client_ctx
+            .new_session(SessionConfig::new(client_io).with_key_share(KeyShareOffer::Empty))
+            .unwrap();
+        let mut server = server_ctx
+            .new_session(SessionConfig::new(server_io))
+            .unwrap();
+
+        // One extra flight compared to a plain handshake (CH1 -> HRR -> CH2).
+        for _ in 0..10 {
+            let _ = client.try_negotiate().unwrap();
+            let _ = server.try_negotiate().unwrap();
+        }
+
+        assert!(client.is_init_finished());
+        assert!(server.is_init_finished());
+        assert_eq!(client.version(), exp_version);
+    }
+
+    #[test]
+    fn no_key_shares_tls13() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+        connect_with_no_key_shares(
+            Method::TlsClientV1_3,
+            Method::TlsServerV1_3,
+            TcpIOCallbacks::pair(),
+            ProtocolVersion::TlsV1_3,
+        );
+    }
+
+    #[test]
+    fn no_key_shares_dtls13() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+        connect_with_no_key_shares(
+            Method::DtlsClientV1_3,
+            Method::DtlsServerV1_3,
+            UdpIOCallbacks::pair(),
+            ProtocolVersion::DtlsV1_3,
+        );
+    }
+
+    #[test]
+    fn no_key_shares_rejected_on_server() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+        let server_ctx = ContextBuilder::new(Method::DtlsServerV1_3)
+            .unwrap()
+            .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
+            .unwrap()
+            .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
+            .unwrap()
+            .build();
+        let err = server_ctx
+            .new_session(SessionConfig::new(NoIOCallbacks).with_key_share(KeyShareOffer::Empty))
+            .err()
+            .expect("server side must reject no_key_shares");
+        assert!(matches!(
+            err,
+            NewSessionError::SetupFailed("no_key_shares", _)
+        ));
+        // What a caller sees in its logs.
+        assert_eq!(
+            err.to_string(),
+            "Failed to setup SSL session context: no_key_shares: Fatal: code: -344, what: wrong client/server type"
+        );
     }
 
     #[test]
