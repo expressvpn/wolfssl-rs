@@ -349,9 +349,8 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .enable("dtls-frag-ch", None)
         // Enable setting the D/TLS MTU size
         .enable("dtls-mtu", None)
-        // Disable the RFC 5746 renegotiation_info extension
-        // field in CH, which only affects DTLS1.2
-        .disable("secure-renegotiation-info", None)
+        // Enable Secure Renegotiation
+        .enable("secure-renegotiation", None)
         // Enable single threaded mode
         .enable("singlethreaded", None)
         // Enable SNI

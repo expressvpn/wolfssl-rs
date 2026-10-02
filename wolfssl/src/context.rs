@@ -393,6 +393,20 @@ impl ContextBuilder {
         }
     }
 
+    /// Wraps `wolfSSL_CTX_UseSecureRenegotiation`
+    ///
+    /// NOTE: No official documentation available for this api from wolfssl
+    pub fn with_secure_renegotiation(self) -> Result<Self> {
+        // SAFETY: [`wolfSSL_CTX_UseSecureRenegotiation`][1] does not have proper documentation.
+        // Based on the implementation, the only requirement is the context which is passed to this api has to be a valid `WOLFSSL_CTX`
+        let result = unsafe { wolfssl_sys::wolfSSL_CTX_UseSecureRenegotiation(self.ctx.as_ptr()) };
+        if result == wolfssl_sys::WOLFSSL_SUCCESS as c_int {
+            Ok(self)
+        } else {
+            Err(Error::fatal(result))
+        }
+    }
+
     /// Wraps `wolfSSL_CTX_set_verify`[0]([also][1])
     // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_set_verify
     // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#ga26c623e093cf15f81cdfc3bb26682089
@@ -657,6 +671,14 @@ mod tests {
         let _ = ContextBuilder::new(Method::TlsClient)
             .unwrap()
             .with_private_key(key)
+            .unwrap();
+    }
+
+    #[test]
+    fn set_secure_renegotiation() {
+        let _ = ContextBuilder::new(Method::TlsClient)
+            .unwrap()
+            .with_secure_renegotiation()
             .unwrap();
     }
 

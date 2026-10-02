@@ -42,6 +42,20 @@ fn io_errorkind_into_wolfssl_cbio_error(
     }
 }
 
+/// What a client offers in the `key_share` extension of its first ClientHello.
+#[derive(Debug, Copy, Clone)]
+pub enum KeyShareOffer {
+    /// A share for this group (`wolfSSL_UseKeyShare`). The group stays in
+    /// `supported_groups` alongside wolfSSL's defaults.
+    Group(CurveGroup),
+    /// No share at all (`wolfSSL_NoKeyShares`):
+    /// This can be used to keep the first ClientHello small.
+    ///
+    /// NOTE: This option is only valid for Client side connection,
+    /// setting this on Server side will trigger wolfSSL_NoKeyShares's `SIDE_ERROR`
+    Empty,
+}
+
 /// Stores configurations we want to initialize a [`Session`] with.
 pub struct SessionConfig<IOCB: IOCallbacks> {
     /// I/O callback handlers
@@ -60,8 +74,10 @@ pub struct SessionConfig<IOCB: IOCallbacks> {
     /// If set, configures the session to check the given domain against the
     /// peer certificate during connection.
     pub checked_domain_name: Option<String>,
-    /// If set, specifies a curve group to use for key share
-    pub keyshare_group: Option<CurveGroup>,
+    /// If set, what the client offers in the `key_share` extension of its
+    /// first ClientHello. `None` leaves wolfSSL's default (a share for its
+    /// preferred group).
+    pub key_share: Option<KeyShareOffer>,
     /// If set, specifies if fragmented ClientHello (CH) is allowed
     pub dtls13_allow_ch_frag: Option<bool>,
     /// SSL Verify mode
@@ -81,7 +97,7 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
             dtls_mtu: Default::default(),
             server_name_indicator: Default::default(),
             checked_domain_name: Default::default(),
-            keyshare_group: Default::default(),
+            key_share: Default::default(),
             dtls13_allow_ch_frag: Default::default(),
             ssl_verify_mode: Default::default(),
             #[cfg(feature = "debug")]
@@ -143,10 +159,15 @@ impl<IOCB: IOCallbacks> SessionConfig<IOCB> {
         self
     }
 
-    /// Sets [`Self::keyshare_group`]
-    pub fn with_keyshare_group(mut self, curve: CurveGroup) -> Self {
-        self.keyshare_group = Some(curve);
+    /// Sets [`Self::key_share`]
+    pub fn with_key_share(mut self, offer: KeyShareOffer) -> Self {
+        self.key_share = Some(offer);
         self
+    }
+
+    /// Sets [`Self::key_share`] to [`KeyShareOffer::Group`]
+    pub fn with_keyshare_group(self, curve: CurveGroup) -> Self {
+        self.with_key_share(KeyShareOffer::Group(curve))
     }
 
     /// Sets [`Self::ssl_verify_mode`]
@@ -230,10 +251,14 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                 .map_err(|e| NewSessionError::SetupFailed("set_domain_name_to_check", e))?;
         }
 
-        if let Some(curve) = config.keyshare_group {
-            session
+        match config.key_share {
+            Some(KeyShareOffer::Group(curve)) => session
                 .use_key_share_curve(curve)
-                .map_err(|e| NewSessionError::SetupFailed("use_key_share_curve", e))?;
+                .map_err(|e| NewSessionError::SetupFailed("use_key_share_curve", e))?,
+            Some(KeyShareOffer::Empty) => session
+                .no_key_shares()
+                .map_err(|e| NewSessionError::SetupFailed("no_key_shares", e))?,
+            None => {}
         }
 
         if let Some(mode) = config.ssl_verify_mode {
@@ -560,6 +585,69 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
                     e => Err(Error::fatal(e)),
                 }
             }
+            e => Err(Error::fatal(e)),
+        }
+    }
+
+    /// Checks if this session supports secure renegotiation
+    ///
+    /// Only some D/TLS1.2 connections support secure renegotiation, so this method
+    /// checks if it's something we can do here.
+    pub fn is_secure_renegotiation_supported(&mut self) -> bool {
+        // SAFETY: No documentation available for `wolfSSL_SSL_get_secure_renegotiation_support`
+        // But based on the implementation, it is safe to call the api as long as the `ssl` pointer points
+        // to valid `WOLFSSL` struct
+        match unsafe {
+            wolfssl_sys::wolfSSL_SSL_get_secure_renegotiation_support(self.ssl.as_ptr())
+        } {
+            0 => false,
+            1 => true,
+            e => unreachable!("wolfSSL_SSL_get_secure_renegotiation_support: {e:?}"),
+        }
+    }
+
+    /// Checks if there is an ongoing secure renegotiation triggered by
+    /// [`Self::try_rehandshake`].
+    //
+    // NOTE: No documentation found for `wolfSSL_SSL_renegotiate_pending`
+    pub fn is_secure_renegotiation_pending(&mut self) -> bool {
+        // SAFETY: No documentation available for `wolfSSL_SSL_renegotiate_pending`
+        // But based on the implementation, it is safe to call the api as long as the `ssl` pointer points
+        // to valid `WOLFSSL` struct
+        match unsafe { wolfssl_sys::wolfSSL_SSL_renegotiate_pending(self.ssl.as_ptr()) } {
+            0 => false,
+            1 => true,
+            e => unreachable!("wolfSSL_SSL_renegotiate_pending: {e:?}"),
+        }
+    }
+
+    /// Invokes [`wolfSSL_Rehandshake`][0] *once*.
+    ///
+    /// Is a no-op unless the session supports secure renegotiation.
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html?query=wolfssl_rehandshake#function-wolfssl_rehandshake
+    pub fn try_rehandshake(&mut self) -> PollResult<()> {
+        if !self.is_secure_renegotiation_supported() {
+            return Ok(Poll::Ready(()));
+        }
+
+        // SAFETY: [`wolfSSL_Rehandshake`][0] ([also][1]) expects valid pointer to `WOLFSSL` and since the `WOLFSSL` struct
+        // can be used in multiple threads based on [`Library design`][2], protected by the requirement for `&mut self` in
+        // `WolfsslPointer::as_ptr()`.
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__IO.html#function-wolfssl_rehandshake
+        // [1]: https://www.wolfssl.com/doxygen/group__IO.html#ga7ba02472014a68d0717ca9243d9dd646
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
+        match unsafe { wolfssl_sys::wolfSSL_Rehandshake(self.ssl.as_ptr()) } {
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(Poll::Ready(())),
+            x @ wolfssl_sys::wolfSSL_ErrorCodes_WOLFSSL_FATAL_ERROR => match self.get_error(x) {
+                wolfssl_sys::WOLFSSL_ERROR_WANT_READ_c_int => Ok(Poll::PendingRead),
+                wolfssl_sys::WOLFSSL_ERROR_WANT_WRITE_c_int => Ok(Poll::PendingWrite),
+                wolfssl_sys::wolfSSL_ErrorCodes_APP_DATA_READY => {
+                    self.handle_app_data().map(Poll::AppData)
+                }
+                e => Err(Error::fatal(e)),
+            },
             e => Err(Error::fatal(e)),
         }
     }
@@ -1116,6 +1204,31 @@ impl<IOCB: IOCallbacks> Session<IOCB> {
         }
     }
 
+    /// Invokes [`wolfSSL_NoKeyShares`][0]
+    ///
+    /// Sends an empty `key_share` extension in the first ClientHello so the
+    /// server selects the group with a HelloRetryRequest. Clears any key share
+    /// previously registered with [`Self::use_key_share_curve`]. Client side
+    /// only.
+    ///
+    /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_nokeyshares
+    fn no_key_shares(&mut self) -> Result<()> {
+        // SAFETY: [`wolfSSL_NoKeyShares`][0] ([also][1]) expects a valid pointer to `WOLFSSL`. Per the
+        // [Library design][2] access is synchronized via the requirement for `&mut self` in `WolfsslPointer::as_ptr()`.
+        //
+        // [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/ssl_8h.html#function-wolfssl_nokeyshares
+        // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#ga1ee3e9ce4b1bb77b6b0d8a1c0b0fcb1e
+        // [2]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html#thread-safety
+        match unsafe { wolfssl_sys::wolfSSL_NoKeyShares(self.ssl.as_ptr()) } {
+            wolfssl_sys::WOLFSSL_SUCCESS_c_int => Ok(()),
+            wolfssl_sys::wolfCrypt_ErrorCodes_MEMORY_E => panic!("Memory Allocation Failed"),
+            e @ wolfssl_sys::wolfCrypt_ErrorCodes_BAD_FUNC_ARG => {
+                unreachable!("wolfSSL_NoKeyShares: {e:?}")
+            }
+            e => Err(Error::fatal(e)),
+        }
+    }
+
     /// Enable TLS1.3 key logging for applications
     #[cfg(feature = "debug")]
     pub(crate) fn enable_tls13_keylog(&mut self, secret_cb: Tls13SecretCallbacksArg) -> Result<()> {
@@ -1285,20 +1398,6 @@ mod tests {
         }
     }
 
-    /// Swallows everything sent and never has anything to read, so a
-    /// handshake started on it stays pending forever.
-    struct BlackHoleIOCallbacks;
-
-    impl IOCallbacks for BlackHoleIOCallbacks {
-        fn recv(&mut self, _buf: &mut [u8]) -> IOCallbackResult<usize> {
-            IOCallbackResult::WouldBlock
-        }
-
-        fn send(&mut self, buf: &[u8]) -> IOCallbackResult<usize> {
-            IOCallbackResult::Ok(buf.len())
-        }
-    }
-
     // TCP stream semantics: allows partial reads from a continuous buffer
     struct TcpIOCallbacks {
         r: Rc<RefCell<BytesMut>>,
@@ -1427,6 +1526,8 @@ mod tests {
             .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
             .with_root_certificate(RootCertificate::Asn1Buffer(CA_CERT))
             .unwrap()
+            .with_secure_renegotiation()
+            .unwrap()
             .build();
 
         let server_ctx = ContextBuilder::new(server_method)
@@ -1434,6 +1535,8 @@ mod tests {
             .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
             .unwrap()
             .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
+            .unwrap()
+            .with_secure_renegotiation()
             .unwrap()
             .build();
 
@@ -1489,6 +1592,93 @@ mod tests {
 
         // Internally this calls `try_negotiate`
         let _ = make_connected_clients();
+    }
+
+    // Client sends an empty key_share in its first ClientHello; the server
+    // answers with a HelloRetryRequest and the handshake still completes.
+    fn connect_with_no_key_shares<IOCB: IOCallbacks>(
+        client_method: Method,
+        server_method: Method,
+        io_pair: (IOCB, IOCB),
+        exp_version: ProtocolVersion,
+    ) {
+        let client_ctx = ContextBuilder::new(client_method)
+            .unwrap()
+            .with_root_certificate(RootCertificate::Asn1Buffer(CA_CERT))
+            .unwrap()
+            .build();
+        let server_ctx = ContextBuilder::new(server_method)
+            .unwrap()
+            .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
+            .unwrap()
+            .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
+            .unwrap()
+            .build();
+
+        let (client_io, server_io) = io_pair;
+        let mut client = client_ctx
+            .new_session(SessionConfig::new(client_io).with_key_share(KeyShareOffer::Empty))
+            .unwrap();
+        let mut server = server_ctx
+            .new_session(SessionConfig::new(server_io))
+            .unwrap();
+
+        // One extra flight compared to a plain handshake (CH1 -> HRR -> CH2).
+        for _ in 0..10 {
+            let _ = client.try_negotiate().unwrap();
+            let _ = server.try_negotiate().unwrap();
+        }
+
+        assert!(client.is_init_finished());
+        assert!(server.is_init_finished());
+        assert_eq!(client.version(), exp_version);
+    }
+
+    #[test]
+    fn no_key_shares_tls13() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+        connect_with_no_key_shares(
+            Method::TlsClientV1_3,
+            Method::TlsServerV1_3,
+            TcpIOCallbacks::pair(),
+            ProtocolVersion::TlsV1_3,
+        );
+    }
+
+    #[test]
+    fn no_key_shares_dtls13() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+        connect_with_no_key_shares(
+            Method::DtlsClientV1_3,
+            Method::DtlsServerV1_3,
+            UdpIOCallbacks::pair(),
+            ProtocolVersion::DtlsV1_3,
+        );
+    }
+
+    #[test]
+    fn no_key_shares_rejected_on_server() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+        let server_ctx = ContextBuilder::new(Method::DtlsServerV1_3)
+            .unwrap()
+            .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
+            .unwrap()
+            .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
+            .unwrap()
+            .build();
+        let err = server_ctx
+            .new_session(SessionConfig::new(NoIOCallbacks).with_key_share(KeyShareOffer::Empty))
+            .err()
+            .expect("server side must reject no_key_shares");
+        assert!(matches!(
+            err,
+            NewSessionError::SetupFailed("no_key_shares", _)
+        ));
+        // What a caller sees in its logs.
+        assert_eq!(
+            err.to_string(),
+            "Failed to setup SSL session context: no_key_shares: Fatal: code: -344, what: wrong client/server type"
+        );
     }
 
     #[test]
@@ -1553,6 +1743,77 @@ mod tests {
             }
             e => panic!("Expected bytes to be read! Got {e:?}"),
         }
+    }
+
+    #[test_case(Method::DtlsClientV1_2, Method::DtlsServerV1_2, true; "DTLS1.2")]
+    #[test_case(Method::DtlsClientV1_3, Method::DtlsServerV1_3, false; "DTLS1.3")]
+    fn verify_secure_nego_support(server_method: Method, client_method: Method, expected: bool) {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let (mut client, mut server) =
+            make_connected_dtls_clients_with_method(server_method, client_method);
+
+        assert_eq!(client.ssl.is_secure_renegotiation_supported(), expected);
+        assert_eq!(server.ssl.is_secure_renegotiation_supported(), expected);
+    }
+
+    #[test]
+    fn try_rehandshake() {
+        INIT_ENV_LOGGER.get_or_init(env_logger::init);
+
+        let (mut client, mut server) =
+            make_connected_dtls_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
+
+        assert!(client.ssl.is_secure_renegotiation_supported());
+        assert!(server.ssl.is_secure_renegotiation_supported());
+
+        const TEST: &str = "foobar";
+
+        for _ in 0..5 {
+            let mut bytes = BytesMut::from(TEST.as_bytes());
+
+            // Keep invoking `try_rehandshake` to progress the secure
+            // renegotiation.
+            match client.ssl.try_rehandshake() {
+                Ok(Poll::Ready(_)) => {
+                    break;
+                }
+                Ok(Poll::PendingRead | Poll::PendingWrite) => {}
+                Ok(Poll::AppData(_)) => {
+                    panic!("Should not receive AppData from anywhere")
+                }
+                Err(e) => panic!("{e}"),
+            }
+
+            // While we are here, also test out the Application Data
+            // functionality. Lets send some app data while a secure
+            // renegotiation is ongoing.
+            match client.ssl.try_write(&mut bytes) {
+                Ok(Poll::Ready(_) | Poll::PendingRead | Poll::PendingWrite) => {}
+                Ok(Poll::AppData(_)) => {
+                    panic!("Should not receive AppData from anywhere")
+                }
+                Err(e) => panic!("{e}"),
+            };
+
+            // We should expect to see on the server side that some application
+            // data has been discovered, and that we should get it out or
+            // otherwise lose it.
+            let mut server_bytes = BytesMut::with_capacity(TEST.len());
+            match server.ssl.try_read(&mut server_bytes) {
+                Ok(Poll::Ready(_) | Poll::PendingRead | Poll::PendingWrite) => {}
+                Ok(Poll::AppData(b)) => {
+                    assert_eq!(b, TEST);
+                    // `server_bytes` should not have been modified if appdata
+                    // is discovered.
+                    assert!(server_bytes.is_empty());
+                }
+                Err(e) => panic!("{e}"),
+            };
+        }
+
+        assert!(!client.ssl.is_secure_renegotiation_pending());
+        assert!(!server.ssl.is_secure_renegotiation_pending());
     }
 
     #[test_case(Method::TlsClientV1_3, Method::TlsServerV1_3; "tls1.3")]
@@ -1699,19 +1960,17 @@ mod tests {
     fn dtls_timeout(should_timeout: bool) {
         INIT_ENV_LOGGER.get_or_init(env_logger::init);
 
-        // A DTLS 1.2 client whose ClientHello goes into a black hole: the
-        // handshake stays pending on wolfSSL's retransmission timer, which is
-        // what `dtls_has_timed_out` inspects.
-        let client_ctx = ContextBuilder::new(Method::DtlsClientV1_2).unwrap().build();
-        let mut client = client_ctx
-            .new_session(SessionConfig::new(BlackHoleIOCallbacks))
-            .unwrap();
+        let (mut client, _server) =
+            make_connected_dtls_clients_with_method(Method::DtlsClientV1_2, Method::DtlsServerV1_2);
 
-        client.dtls_set_max_timeout(Duration::from_secs(2)).unwrap();
-        client.dtls_set_timeout(Duration::from_secs(2)).unwrap();
+        client
+            .ssl
+            .dtls_set_max_timeout(Duration::from_secs(2))
+            .unwrap();
+        client.ssl.dtls_set_timeout(Duration::from_secs(2)).unwrap();
 
         // Force a duration that must cause a timeout.
-        let curr_timeout = client.dtls_current_timeout();
+        let curr_timeout = client.ssl.dtls_current_timeout();
         let dtls_timeout = if should_timeout {
             let d = Duration::from_secs(3);
             assert!(d > curr_timeout);
@@ -1722,23 +1981,23 @@ mod tests {
             d
         };
 
-        // Start the handshake: sends the ClientHello, which is never answered.
-        match client.try_negotiate() {
-            Ok(Poll::PendingRead | Poll::PendingWrite) => {}
+        // Initiate something that requires a handshake
+        match client.ssl.try_rehandshake() {
+            Ok(Poll::Ready(_) | Poll::PendingRead | Poll::PendingWrite) => {}
             e => panic!("{e:?}"),
         }
 
         std::thread::sleep(dtls_timeout);
 
-        // Ask for progress again; still nothing to read.
-        match client.try_negotiate() {
-            Ok(Poll::PendingRead | Poll::PendingWrite) => {}
+        // Ask for a handshake again.
+        match client.ssl.try_rehandshake() {
+            Ok(Poll::Ready(_) | Poll::PendingRead | Poll::PendingWrite) => {}
             e => panic!("{e:?}"),
         }
 
         // This should have timed out since no reply has been returned
         // (deliberately) past the timeout period.
-        let res = match client.dtls_has_timed_out() {
+        let res = match client.ssl.dtls_has_timed_out() {
             Poll::Ready(x) => x,
             e => panic!("{e:?}"),
         };
@@ -1843,6 +2102,8 @@ mod tests {
         // Create context without server CA certificate
         let client_ctx = ContextBuilder::new(client_method)
             .unwrap_or_else(|e| panic!("new({client_method:?}): {e}"))
+            .with_secure_renegotiation()
+            .unwrap()
             .build();
 
         let server_method = Method::TlsServerV1_3;
@@ -1851,6 +2112,8 @@ mod tests {
             .with_certificate(Secret::Asn1Buffer(SERVER_CERT))
             .unwrap()
             .with_private_key(Secret::Asn1Buffer(SERVER_KEY))
+            .unwrap()
+            .with_secure_renegotiation()
             .unwrap()
             .build();
 
