@@ -763,7 +763,6 @@ version = "8.0.0"
 dependencies = [
  "async-trait",
  "bytes",
- "cfg-if",
  "env_logger",
  "log",
  "test-case",
