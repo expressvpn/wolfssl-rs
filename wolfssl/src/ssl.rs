@@ -1357,7 +1357,7 @@ impl<IOCB: IOCallbacks> Drop for Session<IOCB> {
 mod tests {
     use super::*;
     use crate::{
-        context::ContextBuilder, Context, Method, RootCertificate, Secret, Session,
+        context::ContextBuilder, Context, ErrorKind, Method, RootCertificate, Secret, Session,
         TLS_MAX_RECORD_SIZE,
     };
 
@@ -1671,12 +1671,12 @@ mod tests {
             .expect("server side must reject no_key_shares");
         assert!(matches!(
             err,
-            NewSessionError::SetupFailed("no_key_shares", _)
+            NewSessionError::SetupFailed("no_key_shares", Error::Fatal(ErrorKind::WrongSide))
         ));
         // What a caller sees in its logs.
         assert_eq!(
             err.to_string(),
-            "Failed to setup SSL session context: no_key_shares: Fatal: code: -344, what: wrong client/server type"
+            "Failed to setup SSL session context: no_key_shares: Fatal: Operation not valid on this side of the connection (client/server)"
         );
     }
 

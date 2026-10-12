@@ -6,6 +6,7 @@ use wolfssl_sys::wolfCrypt_ErrorCodes_ASN_NO_SIGNER_E as WOLFSSL_ERROR_ASN_NO_SI
 use wolfssl_sys::wolfSSL_ErrorCodes_DOMAIN_NAME_MISMATCH as WOLFSSL_ERROR_DOMAIN_NAME_MISMATCH;
 use wolfssl_sys::wolfSSL_ErrorCodes_DUPLICATE_MSG_E as WOLFSSL_ERROR_DUPLICATE_MSG_E;
 use wolfssl_sys::wolfSSL_ErrorCodes_FATAL_ERROR as WOLFSSL_ERROR_FATAL_ERROR;
+use wolfssl_sys::wolfSSL_ErrorCodes_SIDE_ERROR as WOLFSSL_ERROR_SIDE_ERROR;
 use wolfssl_sys::wolfSSL_ErrorCodes_ZERO_RETURN as WOLFSSL_ERROR_ZERO_RETURN_ALT;
 use wolfssl_sys::WOLFSSL_ERROR_ZERO_RETURN_c_int as WOLFSSL_ERROR_ZERO_RETURN;
 
@@ -74,6 +75,10 @@ pub enum ErrorKind {
     /// Peer sent a fatal TLS alert, terminating the connection
     #[error("Peer sent a fatal TLS alert")]
     PeerFatalAlert,
+    /// The operation is only valid on the other side of the connection
+    /// (e.g. a client-only setting applied to a server session)
+    #[error("Operation not valid on this side of the connection (client/server)")]
+    WrongSide,
     /// All other wolfssl fatal errors
     #[error("code: {code}, what: {what}")]
     Other {
@@ -96,6 +101,7 @@ impl std::convert::From<c_int> for ErrorKind {
             WOLFSSL_ERROR_ZERO_RETURN => Self::PeerClosed,
             WOLFSSL_ERROR_ZERO_RETURN_ALT => Self::PeerClosed,
             WOLFSSL_ERROR_FATAL_ERROR => Self::PeerFatalAlert,
+            WOLFSSL_ERROR_SIDE_ERROR => Self::WrongSide,
             _other => Self::Other {
                 what: wolf_error_string(code as std::ffi::c_ulong),
                 code,
@@ -173,6 +179,14 @@ mod wolf_error {
         assert!(matches!(
             ErrorKind::from(wolfssl_sys::wolfSSL_ErrorCodes_FATAL_ERROR),
             ErrorKind::PeerFatalAlert
+        ));
+    }
+
+    #[test]
+    fn error_kind_from_side_error_code() {
+        assert!(matches!(
+            ErrorKind::from(wolfssl_sys::wolfSSL_ErrorCodes_SIDE_ERROR),
+            ErrorKind::WrongSide
         ));
     }
 
