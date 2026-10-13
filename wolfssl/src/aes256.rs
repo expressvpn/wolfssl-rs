@@ -58,8 +58,8 @@ unsafe impl Send for Aes256Gcm {}
 /// `&self` would make concurrent calls a data race producing wrong
 /// ciphertext/auth tags on those targets.
 ///
-/// [0]: https://github.com/wolfSSL/wolfssl/blob/v5.9.1-stable/wolfcrypt/src/aes.c#L10132-L10152
-/// [1]: https://github.com/wolfSSL/wolfssl/blob/v5.9.1-stable/wolfcrypt/src/aes.c#L9842-L9847
+/// [0]: https://github.com/wolfSSL/wolfssl/blob/v5.9.4-stable/wolfcrypt/src/aes.c#L11608-L11654
+/// [1]: https://github.com/wolfSSL/wolfssl/blob/v5.9.4-stable/wolfcrypt/src/aes.c#L11238-L11243
 unsafe impl Sync for Aes256Gcm {}
 
 impl Aes256Gcm {
@@ -317,9 +317,8 @@ impl Drop for Aes256Gcm {
 
 #[cfg(test)]
 mod tests {
+    use super::Aes256Gcm;
     use crate::Aes256GcmError;
-
-    use super::{Aes, Aes256Gcm};
 
     const KEY: [u8; Aes256Gcm::KEY_SIZE] = [
         0xfe, 0xff, 0xe9, 0x92, 0x86, 0x65, 0x73, 0x1c, 0x6d, 0x6a, 0x8f, 0x94, 0x67, 0x30, 0x83,
@@ -350,19 +349,15 @@ mod tests {
         0x1b,
     ];
 
+    // Keep aes256gcm in Box<T> to prevent big stack allocations.
     #[test]
-    fn test_aes_size() {
-        cfg_if::cfg_if! {
-            if #[cfg(not(windows))] {
-                assert_eq!(std::mem::size_of::<Aes>(), 123728);
-            } else if #[cfg(all(windows, target_arch = "aarch64"))] {
-                assert_eq!(std::mem::size_of::<Aes>(), 320);
-            } else {
-                // Non-arm64 windows
-                assert_eq!(std::mem::size_of::<Aes>(), 336);
-            }
-        }
-        assert_eq!(std::mem::size_of::<Aes256Gcm>(), 16);
+    fn test_aes256gcm_uses_little_stack() {
+        let struct_size = std::mem::size_of::<Aes256Gcm>();
+        let warning_limit = 32;
+        assert!(
+            struct_size <= warning_limit,
+            "Aes256Gcm is {struct_size} bytes, which is > {warning_limit}, is `Aes` in `Aes256Gcm` still boxed?"
+        );
     }
 
     #[test]
