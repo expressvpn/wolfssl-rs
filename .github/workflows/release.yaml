@@ -255,8 +255,10 @@ jobs:
                     // Get wolfssl-sys latest version on crates.io
                     const live_sys_version = await get_crate_max_version('wolfssl-sys');
 
-                    // On real publish, verify wolfssl-sys is available on crates.io else skip if dry run.
-                    if (!is_dry_run) {
+                    // On real publish, verify wolfssl-sys is available on crates.io, unless this
+                    // same run publishes it first (the publish job waits for it to appear on
+                    // crates.io before publishing wolfssl so it's safe). Skipped on dry run.
+                    if (!is_dry_run && !sys_needs_publishing) {
                         if (live_sys_version !== sys_version) {
                             core.setFailed(`wolfssl-sys@${sys_version} is not yet live on crates.io (found ${live_sys_version}). This should not happen.`);
                             return;
