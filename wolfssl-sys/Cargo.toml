@@ -8,7 +8,19 @@ license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 links = "wolfssl"
-exclude = ["wolfssl-src/**/*.pdf"] # crates.io has a size limit for publishing. Exclude unused files to keep the size under the limit.
+exclude = [
+    # crates.io has a size limit for publishing.
+    # Exclude unused files to keep the size under the limit.
+    # Note: Automake fails if include.am is removed, so put them back in.
+    "wolfssl-src/**/*.pdf",
+    "wolfssl-src/certs/**",
+    "!wolfssl-src/certs/**/",
+    "!wolfssl-src/certs/**/include.am",
+    "!wolfssl-src/certs/taoCert.txt",
+    "wolfssl-src/tests/**",
+    "!wolfssl-src/tests/**/",
+    "!wolfssl-src/tests/**/include.am",
+]
 edition.workspace = true
 
 [build-dependencies]
