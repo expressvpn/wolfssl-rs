@@ -119,6 +119,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78e2ceaf91e22593e194211930aea78a41af58e49e872474ebf4335bf649aad1"
 
 [[package]]
+name = "built"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c0e531d93d39c34eef561e929e8a7f86d77a5af08aac4f6d6e39976c51858e9"
+
+[[package]]
 name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -759,7 +765,7 @@ dependencies = [
 
 [[package]]
 name = "wolfssl"
-version = "8.0.0"
+version = "8.1.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -773,11 +779,12 @@ dependencies = [
 
 [[package]]
 name = "wolfssl-sys"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "autotools",
  "bindgen",
  "build-target",
+ "built",
  "cc",
  "msbuild",
  "test-case",

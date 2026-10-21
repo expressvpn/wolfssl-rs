@@ -32,6 +32,36 @@ use std::{os::raw::c_int, ptr::NonNull};
 
 pub use wolfssl_sys::get_wolfssl_version_string;
 
+/// Describes the `wolfssl` and `wolfssl-sys` crates and the wolfSSL library in
+/// use, for diagnostics.
+///
+/// The [`Display`](std::fmt::Display) impl renders a single line suitable for
+/// logging, e.g.
+/// `wolfssl 8.1.0, wolfssl-sys 5.1.0, wolfSSL 5.9.4, features: default,postquantum`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BuildInfo {
+    /// Version of the `wolfssl` crate
+    pub crate_version: &'static str,
+    /// Build information of the resolved `wolfssl-sys` crate, which may
+    /// differ from the version this `wolfssl` was released with
+    pub sys: wolfssl_sys::BuildInfo,
+}
+
+impl std::fmt::Display for BuildInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "wolfssl {}, {}", self.crate_version, self.sys)
+    }
+}
+
+/// Get build information for the `wolfssl` and `wolfssl-sys` crates in use
+pub fn build_info() -> BuildInfo {
+    BuildInfo {
+        crate_version: env!("CARGO_PKG_VERSION"),
+        sys: wolfssl_sys::build_info(),
+    }
+}
+
 /// Record size is defined as `2^14 + 1`.
 ///
 /// > ...the full encoded TLSInnerPlaintext MUST NOT exceed 2^14 + 1
@@ -366,6 +396,22 @@ mod tests {
     #[test]
     fn wolf_init_test() {
         wolf_init().unwrap();
+    }
+
+    #[test]
+    fn build_info_crate_version_matches_cargo_toml() {
+        let manifest = include_str!("../Cargo.toml");
+        let expected = format!("version = \"{}\"", build_info().crate_version);
+        assert!(manifest.lines().any(|l| l.trim() == expected));
+    }
+
+    #[test]
+    fn build_info_display() {
+        let info = build_info();
+        assert_eq!(
+            info.to_string(),
+            format!("wolfssl {}, {}", env!("CARGO_PKG_VERSION"), info.sys)
+        );
     }
 
     #[test_case(ProtocolVersion::SslV2 => "ssl_2")]
