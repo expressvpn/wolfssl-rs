@@ -154,11 +154,9 @@
 #undef WOLFSSL_SP_384
 #define WOLFSSL_SP_384
 
+/* SP assembly is enabled per architecture (see user_settings-x86_64.h) */
 #undef WOLFSSL_SP_ASM
-// #define WOLFSSL_SP_ASM
-
 #undef WOLFSSL_SP_X86_64_ASM
-// #define WOLFSSL_SP_X86_64_ASM
 
 #undef WC_NO_ASYNC_THREADING
 #define WC_NO_ASYNC_THREADING
