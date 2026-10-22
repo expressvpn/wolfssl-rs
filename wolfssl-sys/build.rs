@@ -146,6 +146,7 @@ const PATCH_DIR: &str = "patches";
 const PATCHES: &[&str] = &[
     "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
     "Allow-single-label-hostname-in-IsValidFQDN.patch",
+    "Enable-Intel-AVX512-VAES-asm-on-Windows.patch",
 ];
 const OPTIONAL_FEATURES: &[&str] = &[
     "aesccm",
@@ -308,21 +309,34 @@ fn build_win(wolfssl_src: &Path) -> PathBuf {
 
     let (configuration, platform) = get_windows_build_params();
 
-    msb.run(
-        wolfssl_src,
-        &[
-            ".\\wolfssl.vcxproj",
-            "-t:Build",
-            &format!("-p:Configuration={}", configuration),
-            &format!("-p:Platform={}", platform),
-            "-p:PlatformToolset=v143",
-            // SP sizes assembled into sp_x86_64_asm.asm (x64 only). The vcxproj
-            // default omits P-521; keep in sync with the WOLFSSL_SP_* sizes in
-            // windows/user_settings-common.h.
-            "-p:WolfSSLSpAsmDefs=/DWOLFSSL_SP_384 /DWOLFSSL_SP_4096 /DWOLFSSL_SP_521",
-        ],
-    )
-    .expect("Failed to build WolfSSL");
+    let mut args = vec![
+        ".\\wolfssl.vcxproj".to_string(),
+        "-t:Build".to_string(),
+        format!("-p:Configuration={}", configuration),
+        format!("-p:Platform={}", platform),
+        "-p:PlatformToolset=v143".to_string(),
+        // SP sizes assembled into sp_x86_64_asm.asm (x64 only). The vcxproj
+        // default omits P-521; keep in sync with the WOLFSSL_SP_* sizes in
+        // windows/user_settings-common.h.
+        "-p:WolfSSLSpAsmDefs=/DWOLFSSL_SP_384 /DWOLFSSL_SP_4096 /DWOLFSSL_SP_521".to_string(),
+    ];
+
+    if build_target::target_arch() == build_target::Arch::X86_64 {
+        // Assemble the x86_64 crypto .asm files with ml64 and compile the matching
+        // USE_INTEL_SPEEDUP code paths. The macro is also defined in
+        // windows/user_settings-x86_64.h so bindgen sees the same struct layouts.
+        args.push("-p:WolfSSLIntelAsm=true".to_string());
+        // ml64 cannot read user_settings.h. Mirror the AVX-512/VAES opt-outs from
+        // windows/user_settings-x86_64.h so the assembler emits the same ISA levels the
+        // C dispatch uses (and no dead AVX-512 code). Drop this line together with the
+        // NO_AVX512_SUPPORT / NO_VAES_SUPPORT defines to turn those kernels on; the
+        // patched vcxproj then defaults to /DHAVE_INTEL_AVX512 /DHAVE_INTEL_VAES.
+        args.push("-p:WolfSSLIntelAsmDefs=/DNO_AVX512_SUPPORT /DNO_VAES_SUPPORT".to_string());
+    }
+
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    msb.run(wolfssl_src, &args)
+        .expect("Failed to build WolfSSL");
     wolfssl_src.to_path_buf()
 }
 
