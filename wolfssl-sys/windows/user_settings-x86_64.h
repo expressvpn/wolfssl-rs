@@ -11,8 +11,8 @@
 // #define USE_INTEL_SPEEDUP // Needs ASM stubs which are not included in the vxproj
 
 /* Single precision x86_64 assembly for RSA/ECC (sp_x86_64_asm.asm). The vcxproj
- * always assembles it for x64 with /DWOLFSSL_SP_384 /DWOLFSSL_SP_4096, matching
- * the WOLFSSL_SP_384 / WOLFSSL_SP_4096 enabled in user_settings-common.h. This
+ * is assembled for x64 with the SP sizes build.rs passes in WolfSSLSpAsmDefs,
+ * which must match the WOLFSSL_SP_* sizes in user_settings-common.h. This
  * does not need USE_INTEL_SPEEDUP; BMI2/ADX variants are picked on CPUID. */
 #undef WOLFSSL_SP_ASM
 #define WOLFSSL_SP_ASM
