@@ -37,7 +37,7 @@ impl Random {
         // SAFETY:
         // The following invariants required by [`wc_RNG_GenerateBlock()`][0] is satisfied:
         //      - first argument `&rng` is mutable reference to properly initialised random number generator
-        //      - second argment has valid mutable buffer with proper size corresponding to the size `sz`
+        //      - second argument has valid mutable buffer with proper size corresponding to the size `sz`
         //
         // [0]: https://www.wolfssl.com/doxygen/group__Random.html#ga9a289fb3f58f4a5f7e15c2b5a1b0d7c6
         match unsafe {
@@ -58,7 +58,7 @@ impl Random {
 impl Drop for Random {
     fn drop(&mut self) {
         // SAFETY:
-        // [`wc_FreeRng()`][0] receives properly initialised random number generator [`WC_RNG`] as input to securely free drgb.
+        // [`wc_FreeRng()`][0] receives properly initialised random number generator [`WC_RNG`] as input to securely free DRBG.
         // The pointer used as argument is created by `wc_InitRng` api call in new() constructor.
         //
         // [0]: https://www.wolfssl.com/doxygen/group__Random.html#ga72ffd8b507b3a895af8a6e9996caba86
