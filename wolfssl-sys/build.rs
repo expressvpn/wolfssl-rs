@@ -305,6 +305,10 @@ fn build_win(wolfssl_src: &Path) -> PathBuf {
             &format!("-p:Configuration={}", configuration),
             &format!("-p:Platform={}", platform),
             "-p:PlatformToolset=v143",
+            // SP sizes assembled into sp_x86_64_asm.asm (x64 only). The vcxproj
+            // default omits P-521; keep in sync with the WOLFSSL_SP_* sizes in
+            // windows/user_settings-common.h.
+            "-p:WolfSSLSpAsmDefs=/DWOLFSSL_SP_384 /DWOLFSSL_SP_4096 /DWOLFSSL_SP_521",
         ],
     )
     .expect("Failed to build WolfSSL");
