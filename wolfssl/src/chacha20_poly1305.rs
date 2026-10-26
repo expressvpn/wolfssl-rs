@@ -1,6 +1,8 @@
 use bytes::BytesMut;
 use wolfssl_sys::{wc_ChaCha20Poly1305_Decrypt, wc_ChaCha20Poly1305_Encrypt};
 
+use crate::thread_guard::ThreadGuard;
+
 /// Struct for encrypt/decrypt using Chacha20 cipher and authentication
 /// using Poly1305
 pub struct Chacha20Poly1305Aead {
@@ -30,6 +32,7 @@ impl Chacha20Poly1305Aead {
         iv: [u8; Self::IV_SIZE],
         plain_text: &[u8],
     ) -> Result<(BytesMut, [u8; Self::AUTHTAG_SIZE]), String> {
+        let _guard = ThreadGuard::acquire();
         let mut cipher_text = BytesMut::with_capacity(plain_text.len());
         let mut auth_tag = [0u8; Self::AUTHTAG_SIZE];
 
@@ -81,6 +84,7 @@ impl Chacha20Poly1305Aead {
         cipher_text: &[u8],
         auth_tag: [u8; Self::AUTHTAG_SIZE],
     ) -> Result<BytesMut, String> {
+        let _guard = ThreadGuard::acquire();
         let mut plain_text = BytesMut::with_capacity(cipher_text.len());
 
         // SAFETY: [`wc_ChaCha20Poly1305_Decrypt`][0] have the following requirements:

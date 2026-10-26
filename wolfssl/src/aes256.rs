@@ -6,7 +6,7 @@ use wolfssl_sys::{
     wc_AesFree, wc_AesGcmDecrypt, wc_AesGcmEncrypt, wc_AesGcmSetKey, wc_AesInit, Aes, INVALID_DEVID,
 };
 
-use crate::ErrorKind;
+use crate::{thread_guard::ThreadGuard, ErrorKind};
 
 #[derive(Error, Debug)]
 /// The failure result of an operation.
@@ -35,16 +35,19 @@ pub enum Aes256GcmError {
 /// cannot be shared across threads without external exclusion because
 /// [`Self::encrypt`]/[`Self::decrypt`] take `&mut self` - see the safety
 /// notes on the `Send`/`Sync` impls below.
+///
+/// With the `singlethreaded` feature instances are `!Send` and `!Sync`, so
+/// per-thread instances are not possible.
 pub struct Aes256Gcm {
     aes: Box<Aes>,
     valid_key: bool,
+    _guard: ThreadGuard,
 }
 
 /// Safety: Aes256Gcm is safe to Send between threads because:
 /// - Each instance owns its WolfSSL Aes context completely (`Box<Aes>`)
 /// - No shared state exists between different Aes256Gcm instances
-/// - WolfSSL is built with single-threaded mode, placing thread synchronization
-///   responsibility on the application (which Rust's ownership system handles)
+#[cfg(not(wolfssl_single_threaded))]
 unsafe impl Send for Aes256Gcm {}
 
 /// Safety: Aes256Gcm is safe to Sync because every FFI call that passes
@@ -60,6 +63,7 @@ unsafe impl Send for Aes256Gcm {}
 ///
 /// [0]: https://github.com/wolfSSL/wolfssl/blob/v5.9.4-stable/wolfcrypt/src/aes.c#L11608-L11654
 /// [1]: https://github.com/wolfSSL/wolfssl/blob/v5.9.4-stable/wolfcrypt/src/aes.c#L11238-L11243
+#[cfg(not(wolfssl_single_threaded))]
 unsafe impl Sync for Aes256Gcm {}
 
 impl Aes256Gcm {
@@ -74,6 +78,7 @@ impl Aes256Gcm {
 
     /// Creates new `Aes256Gcm`
     pub fn new() -> Result<Self, Aes256GcmError> {
+        let guard = ThreadGuard::acquire();
         let mut aes = Box::new(MaybeUninit::<Aes>::uninit());
 
         // SAFETY: [`wc_AesInit`] have the following requirements from:
@@ -97,6 +102,7 @@ impl Aes256Gcm {
         Ok(Aes256Gcm {
             aes,
             valid_key: false,
+            _guard: guard,
         })
     }
 
@@ -482,6 +488,7 @@ mod tests {
             .is_err());
     }
 
+    #[cfg(not(wolfssl_single_threaded))]
     #[test]
     fn test_aes256gcm_parallel_instances() {
         let handles: Vec<_> = (0..8)

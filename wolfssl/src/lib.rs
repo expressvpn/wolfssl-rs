@@ -9,6 +9,7 @@ mod debug;
 mod error;
 mod rng;
 mod ssl;
+mod thread_guard;
 
 pub use aes256::*;
 pub use callback::*;
@@ -83,6 +84,8 @@ fn wolf_init() -> Result<()> {
     static ONCE: std::sync::OnceLock<Result<()>> = std::sync::OnceLock::new();
 
     ONCE.get_or_init(|| {
+        let _guard = thread_guard::ThreadGuard::acquire();
+
         // SAFETY: [`wolfSSL_Init`][0] ([also][1]) must be called once
         // per application, this is enforced using the `ONCE:
         // OnceLock` and by ensuring that all entry points into this
@@ -104,6 +107,7 @@ fn wolf_init() -> Result<()> {
 /// [1]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Debug.html#function-wolfssl_debugging_off
 #[cfg(feature = "debug")]
 pub fn enable_debugging(on: bool) {
+    let _guard = thread_guard::ThreadGuard::acquire();
     wolf_init().expect("Unable to initialize wolfSSL");
 
     if on {
@@ -137,6 +141,7 @@ pub(crate) use wolfssl_sys::wolfSSL_Logging_cb as RawLoggingCallback;
 /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Logging.html#function-wolfssl_setloggingcb
 #[cfg(feature = "debug")]
 pub(crate) fn set_logging_callback(cb: RawLoggingCallback) {
+    let _guard = thread_guard::ThreadGuard::acquire();
     wolf_init().expect("Unable to initialize wolfSSL");
 
     // SAFETY: [`wolfSSL_SetLoggingCb`][0] would return an error if a function pointer is not provided, or we failed to set logging callback.
