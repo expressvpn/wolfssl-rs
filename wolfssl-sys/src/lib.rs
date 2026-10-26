@@ -4,6 +4,11 @@ pub use bindings::*;
 use std::ffi::CStr;
 use std::fmt;
 
+/// Whether wolfSSL was built with `SINGLE_THREADED`, i.e. without any internal
+/// locking or atomics. Set by the `singlethreaded` feature, but configure also
+/// falls back to it when pthreads are unavailable.
+pub const SINGLE_THREADED: bool = cfg!(wolfssl_single_threaded);
+
 /// Get WolfSSL version via `LIBWOLFSSL_VERSION_STRING` header defined in wolfssl/version.h
 pub fn get_wolfssl_version_string() -> &'static str {
     CStr::from_bytes_until_nul(LIBWOLFSSL_VERSION_STRING)
@@ -140,6 +145,18 @@ mod tests {
             // Check that ML-KEM was enabled
             assert_eq!(res, WOLFSSL_SUCCESS as c_int);
         }
+    }
+
+    // configure falls back to SINGLE_THREADED without pthreads, and CFLAGS
+    // can force it, so the feature alone does not decide the build mode.
+    #[cfg(not(windows))]
+    #[test]
+    fn single_threaded_matches_built_library() {
+        let options = include_str!(concat!(env!("OUT_DIR"), "/include/wolfssl/options.h"));
+        let built = options
+            .lines()
+            .any(|line| line.trim() == "#define SINGLE_THREADED");
+        assert_eq!(SINGLE_THREADED, built);
     }
 
     #[test]

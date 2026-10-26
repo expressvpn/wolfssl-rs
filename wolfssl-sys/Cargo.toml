@@ -47,6 +47,7 @@ dh = []
 opensslall = []
 opensslextra = []
 psk = []
+singlethreaded = []
 # Define feature flags
 ex_data = []
 alpn = []
