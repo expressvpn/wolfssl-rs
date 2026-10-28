@@ -2,6 +2,7 @@ use crate::{
     callback::IOCallbacks,
     error::{Error, Result},
     ssl::{Session, SessionConfig},
+    thread_guard::ThreadGuard,
     CurveGroup, Method, NewSessionError, RootCertificate, Secret, SslVerifyMode,
 };
 use std::os::raw::c_int;
@@ -13,6 +14,8 @@ use thiserror::Error;
 pub struct ContextBuilder {
     ctx: NonNull<wolfssl_sys::WOLFSSL_CTX>,
     method: Method,
+    // Not `Send`, so every method runs on the thread holding this.
+    guard: ThreadGuard,
 }
 
 /// Error creating a [`ContextBuilder`] object.
@@ -36,6 +39,7 @@ impl ContextBuilder {
     ///
     /// [0]: https://www.wolfssl.com/documentation/manuals/wolfssl/group__Setup.html#function-wolfssl_ctx_new
     pub fn new(method: Method) -> std::result::Result<Self, NewContextBuilderError> {
+        let guard = ThreadGuard::acquire();
         crate::wolf_init().map_err(NewContextBuilderError::InitFailed)?;
 
         let method_fn = method
@@ -49,7 +53,7 @@ impl ContextBuilder {
         let ctx = unsafe { wolfssl_sys::wolfSSL_CTX_new(method_fn.as_ptr()) };
         let ctx = NonNull::new(ctx).ok_or(NewContextBuilderError::CreateFailed)?;
 
-        Ok(Self { ctx, method })
+        Ok(Self { ctx, method, guard })
     }
 
     /// When `cond` is True call fallible `func` on `Self`
@@ -437,20 +441,18 @@ impl ContextBuilder {
     pub fn build(self) -> Context {
         Context {
             method: self.method,
-            ctx: ContextPointer(self.ctx),
+            ctx: ContextPointer(self.ctx, self.guard),
         }
     }
 }
 
 // Wrap a valid pointer to a [`wolfssl_sys::WOLFSSL_CONTEXT`] such that we can
 // add traits such as `Send`.
-pub(crate) struct ContextPointer(NonNull<wolfssl_sys::WOLFSSL_CTX>);
+pub(crate) struct ContextPointer(NonNull<wolfssl_sys::WOLFSSL_CTX>, ThreadGuard);
 
-impl std::ops::Deref for ContextPointer {
-    type Target = NonNull<wolfssl_sys::WOLFSSL_CTX>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl ContextPointer {
+    pub(crate) fn as_ptr(&self) -> *mut wolfssl_sys::WOLFSSL_CTX {
+        self.0.as_ptr()
     }
 }
 
@@ -475,7 +477,10 @@ impl std::ops::Deref for ContextPointer {
 // neither [`ContextPointer`] nor [`Context`] have any methods which
 // offer writeable access.
 //
+// That documentation assumes a thread-safe build, hence the cfg.
+//
 // [Library Design]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html
+#[cfg(not(wolfssl_single_threaded))]
 unsafe impl Send for ContextPointer {}
 
 // SAFETY: Per documentation quoted for `Send` above: once built the
@@ -483,11 +488,12 @@ unsafe impl Send for ContextPointer {}
 // `ContextBuilder` enforces that the `Context` is completely built
 // before a `Context` can be obtained and there are no mutable APIs on
 // `Context` object once it is built.
+#[cfg(not(wolfssl_single_threaded))]
 unsafe impl Sync for ContextPointer {}
 
 // Wrap a valid pointer to a [`wolfssl_sys::WOLFSSL`] such that we can
 // add traits such as `Send`.
-pub(crate) struct WolfsslPointer(NonNull<wolfssl_sys::WOLFSSL>);
+pub(crate) struct WolfsslPointer(NonNull<wolfssl_sys::WOLFSSL>, ThreadGuard);
 
 impl WolfsslPointer {
     pub(crate) fn as_ptr(&mut self) -> *mut wolfssl_sys::WOLFSSL {
@@ -504,9 +510,10 @@ impl WolfsslPointer {
 //
 // This is consistent with the requirements for `Send`. The required
 // syncronization is handled by requiring `&mut self` in all relevant
-// methods.
+// methods. That documentation assumes a thread-safe build, hence the cfg.
 //
 // [Library Design]: https://www.wolfssl.com/documentation/manuals/wolfssl/chapter09.html
+#[cfg(not(wolfssl_single_threaded))]
 unsafe impl Send for WolfsslPointer {}
 
 /// A wrapper around a `WOLFSSL_CTX`.
@@ -532,7 +539,8 @@ impl Context {
         // [1]: https://www.wolfssl.com/doxygen/group__Setup.html#gaa37dc22775da8f6a3b5c149d5dfd6e1c
         let ptr = unsafe { wolfssl_sys::wolfSSL_new(self.ctx.as_ptr()) };
 
-        let ssl = WolfsslPointer(NonNull::new(ptr).ok_or(NewSessionError::CreateFailed)?);
+        let ptr = NonNull::new(ptr).ok_or(NewSessionError::CreateFailed)?;
+        let ssl = WolfsslPointer(ptr, ThreadGuard::acquire());
 
         Session::new_from_wolfssl_pointer(ssl, config)
     }

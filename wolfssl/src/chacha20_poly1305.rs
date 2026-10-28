@@ -1,10 +1,15 @@
 use bytes::BytesMut;
 use wolfssl_sys::{wc_ChaCha20Poly1305_Decrypt, wc_ChaCha20Poly1305_Encrypt};
 
+use crate::thread_guard::ThreadGuard;
+
 /// Struct for encrypt/decrypt using Chacha20 cipher and authentication
 /// using Poly1305
+///
+/// With the `singlethreaded` feature instances are `!Send` and `!Sync`.
 pub struct Chacha20Poly1305Aead {
     key: [u8; Self::KEY_SIZE],
+    _guard: ThreadGuard,
 }
 
 impl Chacha20Poly1305Aead {
@@ -19,7 +24,10 @@ impl Chacha20Poly1305Aead {
 
     /// Creates new `Chacha20Poly1305Aead` instance
     pub fn new(key: [u8; Self::KEY_SIZE]) -> Self {
-        Self { key }
+        Self {
+            key,
+            _guard: ThreadGuard::acquire(),
+        }
     }
 
     /// This function encrypts an input message `plain_text`, using the ChaCha20 stream cipher,

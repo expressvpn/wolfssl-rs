@@ -1,11 +1,13 @@
 use crate::error::{Error, Result};
+use crate::thread_guard::ThreadGuard;
 
 /// Provides a way to extract random values from WolfSSL.
-pub struct Random(wolfssl_sys::WC_RNG);
+pub struct Random(wolfssl_sys::WC_RNG, ThreadGuard);
 
 impl Random {
     /// Initializes a [`Random`] object.
     pub fn new() -> Result<Random> {
+        let guard = ThreadGuard::acquire();
         crate::wolf_init()?;
 
         let mut rng = std::mem::MaybeUninit::<wolfssl_sys::WC_RNG>::uninit();
@@ -23,7 +25,7 @@ impl Random {
                 //
                 // [0]: https://www.wolfssl.com/doxygen/group__Random.html#ga1a87307fac65d3c2a47ffb743020f83c
                 let rng = unsafe { rng.assume_init() };
-                Ok(Random(rng))
+                Ok(Random(rng, guard))
             }
             e => Err(Error::fatal(e)),
         }

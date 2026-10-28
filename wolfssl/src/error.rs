@@ -140,6 +140,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 // Which is odd, because we're supposed to pass this the result of
 // `wolfSSL_get_error`, which returns a `c_int`
 fn wolf_error_string(raw_err: std::ffi::c_ulong) -> String {
+    let _guard = crate::thread_guard::ThreadGuard::acquire();
     let mut buffer = vec![0u8; wolfssl_sys::WOLFSSL_MAX_ERROR_SZ as usize];
 
     // SAFETY:

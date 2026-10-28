@@ -67,6 +67,10 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
             combined_content.push_str("#define ENABLED_SYS_CA_CERTS yes\n");
         };
 
+        if cfg!(feature = "singlethreaded") {
+            combined_content.push_str("#define SINGLE_THREADED\n");
+        };
+
         // Write the combined content to user_settings.h file
 
         let settings_path = dest_dir.join("wolfssl").join("user_settings.h");
@@ -143,7 +147,14 @@ const PATCHES: &[&str] = &[
     "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
     "Allow-single-label-hostname-in-IsValidFQDN.patch",
 ];
-const OPTIONAL_FEATURES: &[&str] = &["aesccm", "dh", "opensslall", "opensslextra", "psk"];
+const OPTIONAL_FEATURES: &[&str] = &[
+    "aesccm",
+    "dh",
+    "opensslall",
+    "opensslextra",
+    "psk",
+    "singlethreaded",
+];
 const MACRO_FEATURES: &[(&str, &str)] = &[("ex_data", "HAVE_EX_DATA"), ("alpn", "HAVE_ALPN")];
 
 /**
@@ -355,8 +366,6 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
         .enable("dtls-mtu", None)
         // Enable Secure Renegotiation
         .enable("secure-renegotiation", None)
-        // Enable single threaded mode
-        .enable("singlethreaded", None)
         // Enable SNI
         .enable("sni", None)
         // Enable single precision 4096 bits RSA/DH support
@@ -604,6 +613,26 @@ fn build_wolfssl(wolfssl_src: &Path) -> PathBuf {
     conf.build()
 }
 
+/**
+ * Whether wolfSSL was actually built with `SINGLE_THREADED`. Besides the
+ * `singlethreaded` feature, configure falls back to it when pthreads are not
+ * found, and `CFLAGS` can force it.
+ */
+fn built_single_threaded(wolfssl_install_dir: &Path) -> bool {
+    let header = if build_target::target_os() == build_target::Os::Windows {
+        wolfssl_install_dir.join("wolfssl").join("user_settings.h")
+    } else {
+        wolfssl_install_dir
+            .join("include")
+            .join("wolfssl")
+            .join("options.h")
+    };
+    fs::read_to_string(&header)
+        .unwrap_or_else(|e| panic!("Failed to read {}: {}", header.display(), e))
+        .lines()
+        .any(|line| line.trim() == "#define SINGLE_THREADED")
+}
+
 fn main() -> std::io::Result<()> {
     // Get the build directory
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
@@ -620,6 +649,20 @@ fn main() -> std::io::Result<()> {
 
     // Configure and build WolfSSL
     let wolfssl_install_dir = build_wolfssl(&wolfssl_src);
+
+    println!("cargo:rustc-check-cfg=cfg(wolfssl_single_threaded)");
+    let single_threaded = built_single_threaded(&wolfssl_install_dir);
+    // Read by the wolfssl build script as DEP_WOLFSSL_SINGLE_THREADED.
+    println!(
+        "cargo::metadata=single_threaded={}",
+        u8::from(single_threaded)
+    );
+    if single_threaded {
+        println!("cargo:rustc-cfg=wolfssl_single_threaded");
+        if env::var("CARGO_FEATURE_SINGLETHREADED").is_err() {
+            println!("cargo:warning=wolfSSL was built with SINGLE_THREADED without the `singlethreaded` feature, wolfssl will only allow use from one thread at a time");
+        }
+    }
 
     // We want to block some macros as they are incorrectly creating duplicate values
     // https://github.com/rust-lang/rust-bindgen/issues/687
@@ -660,6 +703,9 @@ fn main() -> std::io::Result<()> {
         builder
             .clang_arg(format!("-include{}", user_settings_path.to_str().unwrap()))
             .clang_arg(format!("-I{}/", wolfssl_install_dir.to_str().unwrap()))
+            // Pulled in via <intrin.h> by the MSVC atomics; bindgen gets their
+            // 64-byte aligned vector layout wrong.
+            .blocklist_type("_*tile1024i.*")
     } else {
         [
             "wolfssl/.*.h",

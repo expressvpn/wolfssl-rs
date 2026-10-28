@@ -75,6 +75,12 @@ run-tests:
     FROM +copy-src
     DO lib-rust+CARGO --args="test"
 
+# run-tests-singlethreaded executes all tests against wolfSSL built without
+# thread support. Tests run one at a time since only one thread may use it.
+run-tests-singlethreaded:
+    FROM +copy-src
+    DO lib-rust+CARGO --args="test --features singlethreaded -- --test-threads=1"
+
 # run-coverage generates a report of code coverage by unit and integration tests via cargo-llvm-cov
 run-coverage:
     FROM +copy-src
