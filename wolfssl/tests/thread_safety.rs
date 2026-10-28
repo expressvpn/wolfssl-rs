@@ -84,6 +84,8 @@ mod singlethreaded {
     assert_not_impl!(Random: Sync);
     assert_not_impl!(Aes256Gcm: Send);
     assert_not_impl!(Aes256Gcm: Sync);
+    assert_not_impl!(Chacha20Poly1305Aead: Send);
+    assert_not_impl!(Chacha20Poly1305Aead: Sync);
 
     fn panics_on_other_thread<F: FnOnce() + Send>(f: F) -> bool {
         thread::scope(|s| s.spawn(f).join().is_err())
@@ -119,10 +121,11 @@ mod singlethreaded {
     #[test]
     fn chacha_from_other_thread_panics() {
         let _ctx = context();
-        let aead = Chacha20Poly1305Aead::new([0; Chacha20Poly1305Aead::KEY_SIZE]);
-        assert!(panics_on_other_thread(|| drop(
-            aead.encrypt([0; Chacha20Poly1305Aead::IV_SIZE], b"ping")
-        )));
+        let key = [0; Chacha20Poly1305Aead::KEY_SIZE];
+        assert!(panics_on_other_thread(|| {
+            Chacha20Poly1305Aead::new(key);
+        }));
+        Chacha20Poly1305Aead::new(key);
     }
 
     #[test]
