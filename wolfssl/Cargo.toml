@@ -34,6 +34,11 @@ wolfssl-sys = { path = "../wolfssl-sys", version = "5.3.0" }
 
 [dev-dependencies]
 async-trait = "0.1.73"
+criterion = "0.8.2"
 env_logger = "0.11.0"
 test-case = "3.0"
 tokio = { version = "1.31.0", features = ["rt", "net", "macros"] }
+
+[[bench]]
+name = "crypto"
+harness = false
