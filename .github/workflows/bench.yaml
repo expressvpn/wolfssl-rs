@@ -1,0 +1,145 @@
+name: Benchmark
+on:
+  pull_request:
+    paths:
+      - 'wolfssl/**'
+      - 'wolfssl-sys/**'
+      - 'Cargo.lock'
+      - '.github/workflows/bench.yaml'
+      - '.github/scripts/bench-table.py'
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Branch, tag or SHA to compare against'
+        default: main
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  RUST_VERSION: 1.99.1
+  XCODE_VERSION: 26.0.1
+
+jobs:
+  bench:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-2025]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        # Git Bash on Windows
+        shell: bash
+    env:
+      CRITERION_HOME: ${{ github.workspace }}/criterion
+      MACOSX_DEPLOYMENT_TARGET: "15.0"
+      # Keep the benchmark on one core on Linux; not done on macOS or Windows
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: taskset -c 1
+      # Alternating base/PR rounds on the same runner, so drift and noisy
+      # neighbours affect both sides and are visible as spread between rounds
+      ROUNDS: 3
+      BENCH_ARGS: --noplot --warm-up-time 1 --measurement-time 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: pr
+          submodules: true
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: base
+          ref: ${{ github.event.pull_request.base.sha || inputs.base }}
+          submodules: true
+          persist-credentials: false
+      - name: Install automake
+        if: runner.os == 'macOS'
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install autoconf automake libtool
+      - name: Setup Xcode ${{ env.XCODE_VERSION }}
+        if: runner.os == 'macOS'
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+      - name: Setup MSBuild
+        if: runner.os == 'Windows'
+        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2.0.0
+        with:
+          vs-version: '17'
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - name: Build benchmarks
+        run: |
+          (cd pr && cargo bench -p wolfssl --bench crypto --no-run)
+          if [[ -f base/wolfssl/benches/crypto.rs ]]; then
+            (cd base && cargo bench -p wolfssl --bench crypto --no-run)
+          else
+            echo "::notice::Base has no wolfssl/benches/crypto.rs, reporting PR results only"
+            touch no-base
+          fi
+      - name: Run benchmarks
+        run: |
+          for i in $(seq "$ROUNDS"); do
+            if [[ ! -f no-base ]]; then
+              (cd base && cargo bench -p wolfssl --bench crypto -- $BENCH_ARGS --save-baseline "base-$i")
+            fi
+            (cd pr && cargo bench -p wolfssl --bench crypto -- $BENCH_ARGS --save-baseline "pr-$i")
+          done
+      - name: Record CPU
+        run: |
+          case "$RUNNER_OS" in
+            Linux) lscpu | sed -n 's/^Model name:[[:space:]]*//p' ;;
+            macOS) sysctl -n machdep.cpu.brand_string ;;
+            Windows) powershell -NoProfile -Command '(Get-CimInstance Win32_Processor).Name' ;;
+          esac > criterion/cpu.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bench-${{ runner.os }}
+          path: criterion
+          if-no-files-found: error
+
+  report:
+    needs: bench
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: bench-*
+          path: results
+      - name: Render table
+        run: |
+          python3 .github/scripts/bench-table.py results > table.md
+          cat table.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Find benchmark comment
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e # v3.1.0
+        id: bench-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '<!-- wolfssl-rs-bench -->'
+      - name: Create or update comment
+        if: github.event_name == 'pull_request'
+        # PRs from forks get a read-only token; the step summary still has the table
+        continue-on-error: true
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        with:
+          comment-id: ${{ steps.bench-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: table.md
+          edit-mode: replace
