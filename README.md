@@ -45,6 +45,43 @@ cargo test
 cargo clippy
 ```
 
+## Benchmarking
+
+The `wolfssl` crate has [Criterion] benchmarks for its crypto wrappers (AES-256-GCM, ChaCha20-Poly1305 and `Random`):
+
+```
+cargo bench -p wolfssl --bench crypto
+cargo bench -p wolfssl --bench crypto -- chacha20   # filter by name
+```
+
+Criterion compares each run against the previous one and writes an HTML report to `target/criterion/report/index.html`. To compare two branches, save a named baseline first:
+
+```
+cargo bench -p wolfssl --bench crypto -- --save-baseline main
+# switch branch
+cargo bench -p wolfssl --bench crypto -- --baseline main
+```
+
+wolfSSL's own wolfCrypt benchmark, which covers every algorithm in the build, is available behind the `benchmark` feature of `wolfssl-sys` (not on Windows). Arguments after `--` are passed to it; `-- -?` lists them:
+
+```
+cargo bench -p wolfssl-sys --features benchmark --bench wolfcrypt -- -aes-gcm
+```
+
+For steadier numbers on Linux, pin the benchmark to one performance core. Cargo's runner applies only to the benchmark binary, so compilation still uses all cores:
+
+```
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="taskset -c 2" cargo bench -p wolfssl --bench crypto
+```
+
+### Benchmarks in CI
+
+Pull requests that change `wolfssl`, `wolfssl-sys` or `Cargo.lock` run the Criterion benchmarks for the base branch and the PR on Linux, macOS and Windows, and post a comparison table as a PR comment. To reduce noise from the shared runners, base and PR are measured on the same runner in alternating rounds, and a change is only flagged (🔴/🟢) when it is beyond 5% and consistent across all rounds. Smaller changes are usually noise.
+
+To compare against another reference, such as the last release, run the **Benchmark** workflow manually from the Actions tab and choose the branch, tag or SHA to use as the base.
+
+[Criterion]: https://github.com/bheisler/criterion.rs
+
 ## Building with Earthly
 There is also an `Earthfile` provided.  For example, here's how you can build the crate in [Earthly](https://earthly.dev):
 
