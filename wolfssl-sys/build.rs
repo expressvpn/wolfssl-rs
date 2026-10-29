@@ -762,6 +762,18 @@ fn main() -> std::io::Result<()> {
         }
     }
 
+    // Build wolfCrypt's own benchmark so `cargo bench --features benchmark` can run it
+    if cfg!(feature = "benchmark") && build_target::target_os() != build_target::Os::Windows {
+        cc::Build::new()
+            .file(wolfssl_src.join("wolfcrypt/benchmark/benchmark.c"))
+            .include(&wolfssl_include_dir)
+            .include(&wolfssl_src)
+            // Expose `wolfcrypt_benchmark_main` rather than defining `main`
+            .define("NO_MAIN_FUNCTION", None)
+            .warnings(false)
+            .compile("wolfcrypt_benchmark");
+    }
+
     // Invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=wrapper.h");
 
