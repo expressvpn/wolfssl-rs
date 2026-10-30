@@ -48,6 +48,8 @@ opensslall = []
 opensslextra = []
 psk = []
 singlethreaded = []
+# Build wolfCrypt's benchmark for `cargo bench`
+benchmark = []
 # Define feature flags
 ex_data = []
 alpn = []
@@ -55,3 +57,8 @@ alpn = []
 [[example]]
 name = "connect_pq"
 required-features = ["postquantum"]
+
+[[bench]]
+name = "wolfcrypt"
+harness = false
+required-features = ["benchmark"]
