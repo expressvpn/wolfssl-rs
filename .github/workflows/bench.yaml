@@ -46,6 +46,8 @@ jobs:
       # neighbours affect both sides and are visible as spread between rounds
       ROUNDS: 3
       BENCH_ARGS: --noplot --warm-up-time 1 --measurement-time 3
+      # wolfssl/benches/<name>.rs
+      BENCHES: crypto tls
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -77,20 +79,31 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
       - name: Build benchmarks
         run: |
-          (cd pr && cargo bench -p wolfssl --bench crypto --no-run)
-          if [[ -f base/wolfssl/benches/crypto.rs ]]; then
-            (cd base && cargo bench -p wolfssl --bench crypto --no-run)
+          # `--bench` arguments for the benchmarks that exist in a checkout,
+          # since the base branch may not have them all yet
+          bench_args() {
+            for b in $BENCHES; do
+              if [[ -f $1/wolfssl/benches/$b.rs ]]; then
+                printf -- '--bench %s ' "$b"
+              fi
+            done
+          }
+          echo "PR_BENCHES=$(bench_args pr)" >> "$GITHUB_ENV"
+          echo "BASE_BENCHES=$(bench_args base)" >> "$GITHUB_ENV"
+
+          (cd pr && cargo bench -p wolfssl $(bench_args pr) --no-run)
+          if [[ -n $(bench_args base) ]]; then
+            (cd base && cargo bench -p wolfssl $(bench_args base) --no-run)
           else
-            echo "::notice::Base has no wolfssl/benches/crypto.rs, reporting PR results only"
-            touch no-base
+            echo "::notice::Base has no benchmarks, reporting PR results only"
           fi
       - name: Run benchmarks
         run: |
           for i in $(seq "$ROUNDS"); do
-            if [[ ! -f no-base ]]; then
-              (cd base && cargo bench -p wolfssl --bench crypto -- $BENCH_ARGS --save-baseline "base-$i")
+            if [[ -n $BASE_BENCHES ]]; then
+              (cd base && cargo bench -p wolfssl $BASE_BENCHES -- $BENCH_ARGS --save-baseline "base-$i")
             fi
-            (cd pr && cargo bench -p wolfssl --bench crypto -- $BENCH_ARGS --save-baseline "pr-$i")
+            (cd pr && cargo bench -p wolfssl $PR_BENCHES -- $BENCH_ARGS --save-baseline "pr-$i")
           done
       - name: Record CPU
         run: |

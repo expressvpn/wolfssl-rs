@@ -42,3 +42,9 @@ tokio = { version = "1.31.0", features = ["rt", "net", "macros"] }
 [[bench]]
 name = "crypto"
 harness = false
+
+[[bench]]
+name = "tls"
+harness = false
+# Benchmarks the post-quantum key exchange groups
+required-features = ["postquantum"]
