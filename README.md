@@ -47,11 +47,14 @@ cargo clippy
 
 ## Benchmarking
 
-The `wolfssl` crate has [Criterion] benchmarks for its crypto wrappers (AES-256-GCM, ChaCha20-Poly1305 and `Random`):
+The `wolfssl` crate has [Criterion] benchmarks:
+
+- `crypto`: the crypto wrappers (AES-256-GCM, ChaCha20-Poly1305 and `Random`).
+- `tls`: TLS 1.3 and DTLS 1.3 sessions connected in memory. It covers a full handshake for each key exchange group (P-521 + ML-KEM-1024, X25519 + ML-KEM-768, secp256r1, X25519) and record encryption plus decryption for each cipher suite. It needs the default `postquantum` feature.
 
 ```
-cargo bench -p wolfssl --bench crypto
-cargo bench -p wolfssl --bench crypto -- chacha20   # filter by name
+cargo bench -p wolfssl --bench crypto --bench tls
+cargo bench -p wolfssl --bench tls -- handshake   # filter by name
 ```
 
 Criterion compares each run against the previous one and writes an HTML report to `target/criterion/report/index.html`. To compare two branches, save a named baseline first:
