@@ -150,6 +150,7 @@ const PATCHES: &[&str] = &[
     "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
     "Allow-single-label-hostname-in-IsValidFQDN.patch",
     "Fix-AVX512-Visual-Studio-assembly-build.patch",
+    "Fix-ChaCha20-Poly1305-small-asm-length-on-Windows.patch",
     "Disable-AVX512-AES-with-NO_VAES_SUPPORT.patch",
     "SHA-3-select-BMI2-ahead-of-AVX2.patch",
 ];

@@ -1,0 +1,37 @@
+From: Thomas Yau <thomas.yau@kape.com>
+Subject: [PATCH] chacha_asm.asm: zero-extend mLen in the small ChaCha20-Poly1305
+ kernels
+
+chacha20_poly1305_small_enc and chacha20_poly1305_small_dec take the message
+length as a word32 in the 5th argument. On Windows x64 that argument is passed
+on the stack, and the upper 32 bits of its 8-byte slot are undefined: MSVC only
+writes the low dword. The MASM prologue loaded it with a 64-bit
+`mov r10, QWORD PTR [rsp+104]`, so the length picked up stack garbage and the
+kernels read/wrote far past the buffers (STATUS_ACCESS_VIOLATION on records of
+64 bytes or less, depending on the caller's stack contents). The 7th argument
+(aadLen) is already loaded with DWORD PTR; do the same for mLen.
+
+Reported to wolfSSL; drop this patch once their fix is released.
+---
+diff --git a/wolfcrypt/src/chacha_asm.asm b/wolfcrypt/src/chacha_asm.asm
+index 5cb2ce3..0c566fe 100644
+--- a/wolfcrypt/src/chacha_asm.asm
++++ b/wolfcrypt/src/chacha_asm.asm
+@@ -10005,7 +10005,7 @@ chacha20_poly1305_small_enc PROC
+         push	rsi
+         push	rbx
+         push	rbp
+-        mov	r10, QWORD PTR [rsp+104]
++        mov	r10d, DWORD PTR [rsp+104]
+         mov	r11, QWORD PTR [rsp+112]
+         sub	rsp, 360
+         vmovdqu	OWORD PTR [rsp+200], xmm6
+@@ -10498,7 +10498,7 @@ chacha20_poly1305_small_dec PROC
+         push	rsi
+         push	rbx
+         push	rbp
+-        mov	r10, QWORD PTR [rsp+104]
++        mov	r10d, DWORD PTR [rsp+104]
+         mov	r11, QWORD PTR [rsp+112]
+         sub	rsp, 328
+         vmovdqu	OWORD PTR [rsp+168], xmm6
