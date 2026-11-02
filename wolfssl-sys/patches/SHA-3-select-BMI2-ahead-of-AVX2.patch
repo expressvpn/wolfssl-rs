@@ -1,0 +1,72 @@
+From: wolfSSL <support@wolfssl.com>
+Subject: [PATCH] sha3: select BMI2 ahead of AVX2
+
+Backport of the InitSha3 block-selection order from upstream commit
+311871cfa ("sha3: address review findings in block selection and
+SetFlags"), which lands after 5.9.4. With USE_INTEL_SPEEDUP, SHA-3 now
+tries BMI2, then AVX2, then the C block; WOLFSSL_SHA3_AVX2 still puts
+AVX2 first and WOLFSSL_SHA3_NO_AVX2 still disables it. Only the selection
+order is taken: the rest of that commit depends on the FIPS v7 SHA-3
+series that is not in 5.9.4.
+
+https://github.com/wolfSSL/wolfssl/commit/311871cfa625a823a316693f592a977492717646
+---
+diff --git a/wolfcrypt/src/sha3.c b/wolfcrypt/src/sha3.c
+index bc6d77c..d43fbe3 100644
+--- a/wolfcrypt/src/sha3.c
++++ b/wolfcrypt/src/sha3.c
+@@ -131,16 +131,16 @@
+ #endif
+ 
+ #ifdef USE_INTEL_SPEEDUP
+-    /* Block-function selection when USE_INTEL_SPEEDUP: AVX2 on Intel, else
+-     * BMI2, else the C block.  Measured single-instance Keccak-f[1600]
+-     * (Ethereum "Optimizing Keccak"; OpenSSL keccak1600-x86_64.pl): AVX2 is
+-     * ~13-17% faster than BMI2 on Intel Haswell..Skylake, tied on Ice Lake,
+-     * but ~2x SLOWER on AMD Zen, so AVX2 is Intel-only.  (Single-stream
++    /* Block-function selection when USE_INTEL_SPEEDUP: BMI2, then AVX2, then
++     * the C block.  BMI2 is preferred because its block uses general
++     * registers only and so needs no vector-register save; AVX2 goes first
++     * only when WOLFSSL_SHA3_AVX2 explicitly asks for it.  (Single-stream
+      * AVX-512 is vpermt2q-bound and slower than BMI2 everywhere measured, so
+      * it is not built - see scripts sha3_avx512.rb.)
+-     * Overrides: WOLFSSL_SHA3_AVX2 forces AVX2 on any vendor with it;
++     * Overrides: WOLFSSL_SHA3_AVX2 puts AVX2 ahead of BMI2;
+      *            WOLFSSL_SHA3_NO_AVX2 never uses AVX2. */
+-    /* SHA3_USE_AVX2() is defined in sha3.h - shared with ML-DSA. */
++    /* SHA3_USE_AVX2() is defined in sha3.h - shared with ML-DSA, which still
++     * selects AVX2 first; only SHA-3's own order changed here. */
+ 
+     /* True when the selected block function uses vector registers and so
+      * needs the caller to save/restore them.  BMI2 and the C block use only
+@@ -917,15 +917,28 @@ static int InitSha3(wc_Sha3* sha3)
+         }
+         else
+ #endif
+-        /* See the selection comment above: AVX2 on Intel, otherwise BMI2. */
++#if defined(WOLFSSL_SHA3_AVX2) && !defined(WOLFSSL_SHA3_NO_AVX2)
++        /* WOLFSSL_SHA3_AVX2 asks for AVX2 ahead of BMI2. */
+         if (SHA3_USE_AVX2(cpuid_flags)) {
+             SHA3_BLOCK = sha3_block_avx2;
+             SHA3_BLOCK_N = sha3_block_n_avx2;
+         }
+-        else if (IS_INTEL_BMI1(cpuid_flags) && IS_INTEL_BMI2(cpuid_flags)) {
++        else
++#endif
++        /* BMI2 before AVX2: sha3_block_bmi2 uses general registers only, so
++         * it needs no vector-register save. */
++        if (IS_INTEL_BMI1(cpuid_flags) && IS_INTEL_BMI2(cpuid_flags)) {
+             SHA3_BLOCK = sha3_block_bmi2;
+             SHA3_BLOCK_N = sha3_block_n_bmi2;
+         }
++#if !defined(WOLFSSL_SHA3_AVX2) && !defined(WOLFSSL_SHA3_NO_AVX2)
++        /* AVX2 without BMI2.  Only live in the plain build: the overrides
++         * either select AVX2 above or disable it outright. */
++        else if (SHA3_USE_AVX2(cpuid_flags)) {
++            SHA3_BLOCK = sha3_block_avx2;
++            SHA3_BLOCK_N = sha3_block_n_avx2;
++        }
++#endif
+         else {
+             SHA3_BLOCK = BlockSha3;
+             SHA3_BLOCK_N = NULL;

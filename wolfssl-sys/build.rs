@@ -41,6 +41,9 @@ fn copy_wolfssl(dest: &Path) -> std::io::Result<PathBuf> {
     copy_dir_recursive(src, &dest_dir)?;
 
     if build_target::target_os() == build_target::Os::Windows {
+        // user_settings.h is generated from these, so rebuild when they change
+        println!("cargo:rerun-if-changed=windows");
+
         // Determine architecture-specific user_settings file
         let arch_settings = match build_target::target_arch() {
             build_target::Arch::X86_64 => "windows/user_settings-x86_64.h",
@@ -146,7 +149,9 @@ const PATCH_DIR: &str = "patches";
 const PATCHES: &[&str] = &[
     "CVPN-1945-Lower-max-mtu-for-DTLS-1.3-handshake-message.patch",
     "Allow-single-label-hostname-in-IsValidFQDN.patch",
-    "Enable-Intel-AVX512-VAES-asm-on-Windows.patch",
+    "Fix-AVX512-Visual-Studio-assembly-build.patch",
+    "Disable-AVX512-AES-with-NO_VAES_SUPPORT.patch",
+    "SHA-3-select-BMI2-ahead-of-AVX2.patch",
 ];
 const OPTIONAL_FEATURES: &[&str] = &[
     "aesccm",

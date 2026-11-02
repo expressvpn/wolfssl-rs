@@ -1,0 +1,199 @@
+From: wolfSSL <support@wolfssl.com>
+Subject: [PATCH] Allow disabling ML-DSA AVX2/512 specifically with
+ WC_MLDSA_NO_AVX2. Disable AVX512 AES code with NO_VAES_SUPPORT, as it is
+ also VAES.
+
+NO_VAES_SUPPORT now also keeps the AVX-512 AES kernels out of aes.c and the
+AES assembly, and WC_MLDSA_NO_AVX2 turns off ML-DSA's AVX2/AVX-512 paths.
+The hunk for .wolfssl_known_macro_extras (upstream's macro lint list) is
+left out: it does not apply to 5.9.4 and does not affect the build.
+
+The upstream PR in wolfssl: https://github.com/wolfSSL/wolfssl/pull/11931
+---
+diff --git a/linuxkm/lkcapi_aes_glue.c b/linuxkm/lkcapi_aes_glue.c
+index ea908ecf822..bf8a9812e1e 100644
+--- a/linuxkm/lkcapi_aes_glue.c
++++ b/linuxkm/lkcapi_aes_glue.c
+@@ -108,7 +108,7 @@
+ #define WOLFKM_AESCMAC_NAME  "cmac(aes)"
+ 
+ #if defined(WOLFSSL_X86_64_BUILD) && (defined(USE_INTEL_SPEEDUP) || defined(USE_INTEL_SPEEDUP_FOR_AES))
+-    #if !defined(NO_AVX512_SUPPORT)
++    #if !defined(NO_AVX512_SUPPORT) && !defined(NO_VAES_SUPPORT)
+         #define WOLFKM_AES_DRIVER_ISA_EXT "-vaes-avx512"
+     #elif !defined(NO_VAES_SUPPORT)
+         #define WOLFKM_AES_DRIVER_ISA_EXT "-vaes-avx2"
+diff --git a/wolfcrypt/src/aes.c b/wolfcrypt/src/aes.c
+index 893d9871f06..d979ce128eb 100644
+--- a/wolfcrypt/src/aes.c
++++ b/wolfcrypt/src/aes.c
+@@ -968,7 +968,9 @@ static WC_INLINE void wc_Stm32_CrypAesBlock(const byte* in, byte* out)
+         #if !defined(NO_VAES_SUPPORT) && !defined(HAVE_INTEL_VAES)
+             #define HAVE_INTEL_VAES
+         #endif
+-        #if !defined(NO_AVX512_SUPPORT) && !defined(HAVE_INTEL_AVX512)
++        /* The AVX512 AES kernels are VAES code. */
++        #if !defined(NO_VAES_SUPPORT) && !defined(NO_AVX512_SUPPORT) && \
++            !defined(HAVE_INTEL_AVX512)
+             #define HAVE_INTEL_AVX512
+         #endif
+ 
+@@ -9138,9 +9140,9 @@ void GenerateM0(Gcm* gcm)
+     #ifdef WOLFSSL_X86_64_BUILD
+         #ifndef NO_VAES_SUPPORT
+             #define HAVE_INTEL_VAES
+-        #endif
+-        #ifndef NO_AVX512_SUPPORT
+-            #define HAVE_INTEL_AVX512
++            #ifndef NO_AVX512_SUPPORT
++                #define HAVE_INTEL_AVX512
++            #endif
+         #endif
+     #endif
+ #endif
+diff --git a/wolfcrypt/src/aes_gcm_asm.S b/wolfcrypt/src/aes_gcm_asm.S
+index 4f3af7c25ac..469f04cc882 100644
+--- a/wolfcrypt/src/aes_gcm_asm.S
++++ b/wolfcrypt/src/aes_gcm_asm.S
+@@ -26232,7 +26232,6 @@ L_AES_GCMSIV_ctr_vaes_done_enc:
+ .size	AES_GCMSIV_ctr_vaes,.-AES_GCMSIV_ctr_vaes
+ #endif /* __APPLE__ */
+ #endif /* WOLFSSL_AESGCM_SIV */
+-#endif /* HAVE_INTEL_VAES */
+ #ifdef HAVE_INTEL_AVX512
+ #ifndef __APPLE__
+ .data
+@@ -37240,6 +37239,7 @@ L_AES_GCMSIV_ctr_avx512_done_enc:
+ #endif /* __APPLE__ */
+ #endif /* WOLFSSL_AESGCM_SIV */
+ #endif /* HAVE_INTEL_AVX512 */
++#endif /* HAVE_INTEL_VAES */
+ #endif /* WOLFSSL_X86_64_BUILD */
+ 
+ #if defined(__linux__) && defined(__ELF__)
+diff --git a/wolfcrypt/src/aes_gcm_asm.asm b/wolfcrypt/src/aes_gcm_asm.asm
+index e70411a8a58..64b5438d52b 100644
+--- a/wolfcrypt/src/aes_gcm_asm.asm
++++ b/wolfcrypt/src/aes_gcm_asm.asm
+@@ -27054,7 +27054,6 @@ ELSE
+ _TEXT ENDS
+ ENDIF
+ ENDIF
+-ENDIF
+ IFDEF HAVE_INTEL_AVX512
+ IF fips_version GE 7
+ fipsBb SEGMENT READONLY ALIAS(".fipsB$b") 'CONST'
+@@ -38322,4 +38321,5 @@ _TEXT ENDS
+ ENDIF
+ ENDIF
+ ENDIF
++ENDIF
+ END
+diff --git a/wolfcrypt/src/aes_x86_64_asm.S b/wolfcrypt/src/aes_x86_64_asm.S
+index 650879988fd..2e1526c7eb1 100644
+--- a/wolfcrypt/src/aes_x86_64_asm.S
++++ b/wolfcrypt/src/aes_x86_64_asm.S
+@@ -3608,7 +3608,6 @@ L_AES_CTR_encrypt_vaes_done_enc:
+ #ifndef __APPLE__
+ .size	AES_CTR_encrypt_vaes,.-AES_CTR_encrypt_vaes
+ #endif /* __APPLE__ */
+-#endif /* HAVE_INTEL_VAES */
+ #ifdef HAVE_INTEL_AVX512
+ #ifndef __APPLE__
+ .text
+@@ -5099,6 +5098,7 @@ L_AES_CTR_encrypt_avx512_done_enc:
+ .size	AES_CTR_encrypt_avx512,.-AES_CTR_encrypt_avx512
+ #endif /* __APPLE__ */
+ #endif /* HAVE_INTEL_AVX512 */
++#endif /* HAVE_INTEL_VAES */
+ #endif /* WOLFSSL_X86_64_BUILD */
+ 
+ #if defined(__linux__) && defined(__ELF__)
+diff --git a/wolfcrypt/src/aes_x86_64_asm.asm b/wolfcrypt/src/aes_x86_64_asm.asm
+index cc95ce6c29f..4321d336063 100644
+--- a/wolfcrypt/src/aes_x86_64_asm.asm
++++ b/wolfcrypt/src/aes_x86_64_asm.asm
+@@ -3737,7 +3737,6 @@ fipsAb ENDS
+ ELSE
+ _TEXT ENDS
+ ENDIF
+-ENDIF
+ IFDEF HAVE_INTEL_AVX512
+ IF fips_version GE 7
+ fipsAb SEGMENT ALIAS(".fipsA$b") 'CODE'
+@@ -5325,4 +5324,5 @@ ELSE
+ _TEXT ENDS
+ ENDIF
+ ENDIF
++ENDIF
+ END
+diff --git a/wolfcrypt/src/aes_xts_asm.S b/wolfcrypt/src/aes_xts_asm.S
+index d4e48740539..92021fce5cf 100644
+--- a/wolfcrypt/src/aes_xts_asm.S
++++ b/wolfcrypt/src/aes_xts_asm.S
+@@ -4989,7 +4989,6 @@ L_AES_XTS_decrypt_update_vaes_done_dec:
+ #ifndef __APPLE__
+ .size	AES_XTS_decrypt_update_vaes,.-AES_XTS_decrypt_update_vaes
+ #endif /* __APPLE__ */
+-#endif /* HAVE_INTEL_VAES */
+ #ifdef HAVE_INTEL_AVX512
+ #ifndef __APPLE__
+ .text
+@@ -7231,6 +7230,7 @@ L_AES_XTS_decrypt_update_avx512_done_dec:
+ .size	AES_XTS_decrypt_update_avx512,.-AES_XTS_decrypt_update_avx512
+ #endif /* __APPLE__ */
+ #endif /* HAVE_INTEL_AVX512 */
++#endif /* HAVE_INTEL_VAES */
+ #endif /* WOLFSSL_X86_64_BUILD */
+ #endif /* WOLFSSL_AES_XTS */
+ 
+diff --git a/wolfcrypt/src/aes_xts_asm.asm b/wolfcrypt/src/aes_xts_asm.asm
+index 7886339f6bb..90bdda897ba 100644
+--- a/wolfcrypt/src/aes_xts_asm.asm
++++ b/wolfcrypt/src/aes_xts_asm.asm
+@@ -5224,7 +5224,6 @@ fipsAb ENDS
+ ELSE
+ _TEXT ENDS
+ ENDIF
+-ENDIF
+ IFDEF HAVE_INTEL_AVX512
+ IF fips_version GE 7
+ fipsAb SEGMENT ALIAS(".fipsA$b") 'CODE'
+@@ -7565,4 +7564,5 @@ ELSE
+ _TEXT ENDS
+ ENDIF
+ ENDIF
++ENDIF
+ END
+diff --git a/wolfcrypt/src/wc_mldsa.c b/wolfcrypt/src/wc_mldsa.c
+index 61513600cec..d3baf18b8a1 100644
+--- a/wolfcrypt/src/wc_mldsa.c
++++ b/wolfcrypt/src/wc_mldsa.c
+@@ -265,6 +265,14 @@
+ #if defined(USE_INTEL_SPEEDUP)
+ static cpuid_flags_t cpuid_flags = WC_CPUID_INITIALIZER;
+ 
++/* Keep the BMI2 Keccak and drop all AVX2/AVX512 code. */
++#ifdef WC_MLDSA_NO_AVX2
++    #undef  IS_INTEL_AVX2
++    #define IS_INTEL_AVX2(f)    0
++    #undef  SHA3_USE_AVX2
++    #define SHA3_USE_AVX2(f)    0
++#endif
++
+ /* AVX2 NTT/invNTT flavor selection: the non-full AVX2 NTT/invNTT keep the
+  * NTT-domain coefficients in a permuted (lane-interleaved) order that only
+  * the non-full AVX2 consumers understand, whereas the full variants and the
+diff --git a/wolfssl/wolfcrypt/wc_mldsa.h b/wolfssl/wolfcrypt/wc_mldsa.h
+index b54746e4c28..a265d1fa531 100644
+--- a/wolfssl/wolfcrypt/wc_mldsa.h
++++ b/wolfssl/wolfcrypt/wc_mldsa.h
+@@ -929,7 +929,7 @@ WOLFSSL_API int wc_MlDsaKey_PrivateKeyToDer(wc_MlDsaKey* key, byte* output,
+ /* AVX512 assembly for ML-DSA is built (and dispatched at runtime on capable
+  * CPUs) whenever the Intel speedups are enabled and AVX512 is not opted out.
+  * Matches the HAVE_INTEL_AVX512 guard around the generated assembly. */
+-#ifndef NO_AVX512_SUPPORT
++#if !defined(NO_AVX512_SUPPORT) && !defined(WC_MLDSA_NO_AVX2)
+     #define WOLFSSL_MLDSA_HAVE_INTEL_AVX512
+     /* AVX512VBMI (vpermb) functions are built (matching the auto-enabled
+      * HAVE_INTEL_AVX512_VBMI guard around the generated assembly) and
