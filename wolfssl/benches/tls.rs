@@ -256,6 +256,11 @@ fn record(c: &mut Criterion) {
             let mut buf = BytesMut::zeroed(2048);
 
             for size in SIZES {
+                // TEMPORARY: 64-byte ChaCha20-Poly1305 crashes in wolfSSL's
+                // Windows x64 assembly on the CI runners (see benches/crypto.rs)
+                if matches!(cipher, Cipher::Chacha20Poly1305) && size == 64 {
+                    continue;
+                }
                 let data = vec![0xa5; size];
                 group.throughput(Throughput::Bytes(size as u64));
                 let id = BenchmarkId::new(format!("{}/{}", transport.name(), cipher.name()), size);

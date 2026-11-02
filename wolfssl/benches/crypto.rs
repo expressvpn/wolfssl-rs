@@ -46,12 +46,19 @@ fn aes256_gcm(c: &mut Criterion) {
     group.finish();
 }
 
+/// TEMPORARY: 64-byte ChaCha20-Poly1305 crashes in wolfSSL's Windows x64
+/// assembly on the CI runners. Re-enable once the wolfSSL fix lands.
+const SKIP_CHACHA20_POLY1305_SIZE: usize = 64;
+
 fn chacha20_poly1305(c: &mut Criterion) {
     let mut group = c.benchmark_group("chacha20_poly1305");
     let cipher = Chacha20Poly1305Aead::new([0x42; Chacha20Poly1305Aead::KEY_SIZE]);
     let iv = [0x24; Chacha20Poly1305Aead::IV_SIZE];
 
     for size in SIZES {
+        if size == SKIP_CHACHA20_POLY1305_SIZE {
+            continue;
+        }
         let plain_text = vec![0xa5; size];
         group.throughput(Throughput::Bytes(size as u64));
 
