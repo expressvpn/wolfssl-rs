@@ -57,7 +57,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: base
-          ref: ${{ github.event.pull_request.base.sha || inputs.base }}
+          # TEMP: compare against the same code with VAES off (windows_intel_asm_vaes_off)
+          ref: 3eecec2ec493ce24f3ef1857ae8432678c32a742
           submodules: true
           persist-credentials: false
       - name: Install automake
