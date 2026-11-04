@@ -184,4 +184,27 @@ mod tests {
         assert_eq!(&plaint_text[..], &PLAIN_TEXT);
         Ok(())
     }
+
+    /// Leave non-zero bytes in the stack that the next wolfSSL call reuses
+    #[inline(never)]
+    fn dirty_stack() {
+        let buf = [0xff_u8; 16 * 1024];
+        std::hint::black_box(&buf);
+    }
+
+    #[test]
+    fn test_chacha20_round_trip_short_lengths() {
+        // Records of 64 bytes or less take wolfSSL's fused small-message
+        // kernel. On Windows x64 its 32-bit length arrives in an 8-byte stack
+        // slot whose upper half is undefined, so dirty the stack first.
+        let cipher = Chacha20::new(KEY);
+        for len in 0..=PLAIN_TEXT.len() {
+            dirty_stack();
+            let (cipher_text, auth_tag) = cipher.encrypt(IV, &PLAIN_TEXT[..len]).unwrap();
+            assert_eq!(&cipher_text[..], &CIPHER_TEXT[..len], "length {len}");
+            dirty_stack();
+            let plain_text = cipher.decrypt(IV, &cipher_text, auth_tag).unwrap();
+            assert_eq!(&plain_text[..], &PLAIN_TEXT[..len], "length {len}");
+        }
+    }
 }

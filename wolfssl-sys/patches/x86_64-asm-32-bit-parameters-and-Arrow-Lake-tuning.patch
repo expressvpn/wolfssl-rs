@@ -1,0 +1,3823 @@
+Backport of wolfSSL PR #11986 (https://github.com/wolfSSL/wolfssl/pull/11986,
+commit eb440a49b71c) onto v5.9.4-stable with our other patches applied.
+
+- Load 32-bit stack parameters as 32-bit in the Windows x64 assembly
+  (fixes the ChaCha20-Poly1305 <= 64-byte crash and the same bug in
+  ML-KEM, FrodoKEM, ML-DSA, SHA-2, X25519 and the AVX-512 kernels).
+- Regenerate chacha_encrypt_x64 in chacha_asm.asm, which used the Win64
+  argument registers r8/r9 for ChaCha state (wrong output and a bad tail
+  pointer on AVX-512VL CPUs).
+- chacha.c: only let AVX-512VL steer short input when that kernel is built.
+- Add CPUID_SLOW_VAES / CPUID_SLOW_AVX2_SHA3 tuning bits, set on Arrow
+  Lake and Lunar Lake, so AES skips VAES and SHA-3/ML-DSA skip the AVX2
+  Keccak block there.
+
+Dropped from the backport: the LMS/XMSS hunks in sha256_asm.S,
+sha3_asm.S and sha3_asm.asm (those functions are not in 5.9.4),
+tests/unit-mcdc and .wolfssl_known_macro_extras.
+
+diff --git a/wolfcrypt/benchmark/benchmark.c b/wolfcrypt/benchmark/benchmark.c
+index 124fec2..31e950f 100644
+--- a/wolfcrypt/benchmark/benchmark.c
++++ b/wolfcrypt/benchmark/benchmark.c
+@@ -5096,6 +5096,8 @@ static void print_cpu_features(void)
+     if (IS_INTEL_SHA(cpuid_flags))    printf(" sha");
+     if (IS_INTEL_VAES(cpuid_flags))   printf(" vaes");
+     if (IS_INTEL_AVX512(cpuid_flags)) printf(" avx512");
++    if (IS_CPU_SLOW_VAES(cpuid_flags)) printf(" (slow-vaes)");
++    if (IS_CPU_SLOW_AVX2_SHA3(cpuid_flags)) printf(" (slow-avx2-sha3)");
+ #endif
+ #ifdef __aarch64__
+     printf("Aarch64 -");
+diff --git a/wolfcrypt/src/aes.c b/wolfcrypt/src/aes.c
+index 2187253..c02f7a7 100644
+--- a/wolfcrypt/src/aes.c
++++ b/wolfcrypt/src/aes.c
+@@ -784,6 +784,13 @@ static WC_INLINE void wc_Stm32_CrypAesBlock(const byte* in, byte* out)
+             #define HAVE_INTEL_AVX512
+         #endif
+ 
++        /* VAES is available and worth using for AES on this CPU.  CPUs marked
++         * CPUID_SLOW_VAES (Intel Arrow Lake and Lunar Lake) run the VAES code
++         * no faster than the AVX2 / AES-NI code, so they use that instead.
++         * Also used for the GCM-SIV POLYVAL selection. */
++        #define AES_USE_VAES(f) \
++            (IS_INTEL_VAES(f) && !IS_CPU_SLOW_VAES(f))
++
+         /* Below this threshold the narrower path (AVX1 / AES-NI) is faster on
+          * Zen 4 than the wide VAES/AVX512 path.  Verify and tune
+          * per-microarchecture.
+@@ -870,14 +877,14 @@ static WC_INLINE void wc_Stm32_CrypAesBlock(const byte* in, byte* out)
+     {
+     #ifdef HAVE_INTEL_AVX512
+         if ((sz >= WC_AES_BLOCK_SIZE * WC_VAES_ECB_MIN_BLOCKS) &&
+-            IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_ECB_encrypt_avx512(in, out, sz, key, nr);
+         }
+         else
+     #endif
+     #ifdef HAVE_INTEL_VAES
+         if ((sz >= WC_AES_BLOCK_SIZE * WC_VAES_ECB_MIN_BLOCKS) &&
+-            IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_ECB_encrypt_vaes(in, out, sz, key, nr);
+         }
+         else
+@@ -900,14 +907,14 @@ static WC_INLINE void wc_Stm32_CrypAesBlock(const byte* in, byte* out)
+     {
+     #ifdef HAVE_INTEL_AVX512
+         if ((sz >= WC_AES_BLOCK_SIZE * WC_VAES_ECB_MIN_BLOCKS) &&
+-            IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_ECB_decrypt_avx512(in, out, sz, key, nr);
+         }
+         else
+     #endif
+     #ifdef HAVE_INTEL_VAES
+         if ((sz >= WC_AES_BLOCK_SIZE * WC_VAES_ECB_MIN_BLOCKS) &&
+-            IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_ECB_decrypt_vaes(in, out, sz, key, nr);
+         }
+         else
+@@ -931,14 +938,14 @@ static WC_INLINE void wc_Stm32_CrypAesBlock(const byte* in, byte* out)
+     {
+     #ifdef HAVE_INTEL_AVX512
+         if ((sz >= WC_AES_BLOCK_SIZE * WC_VAES_ECB_MIN_BLOCKS) &&
+-            IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_CBC_encrypt_avx512(in, out, iv, sz, key, nr);
+         }
+         else
+     #endif
+     #ifdef HAVE_INTEL_VAES
+         if ((sz >= WC_AES_BLOCK_SIZE * WC_VAES_ECB_MIN_BLOCKS) &&
+-            IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_CBC_encrypt_vaes(in, out, iv, sz, key, nr);
+         }
+         else
+@@ -962,14 +969,14 @@ static WC_INLINE void wc_Stm32_CrypAesBlock(const byte* in, byte* out)
+     {
+     #ifdef HAVE_INTEL_AVX512
+         if ((sz >= WC_AES_BLOCK_SIZE * WC_VAES_ECB_MIN_BLOCKS) &&
+-            IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_CBC_decrypt_avx512(in, out, iv, sz, key, nr);
+         }
+         else
+     #endif
+     #ifdef HAVE_INTEL_VAES
+         if ((sz >= WC_AES_BLOCK_SIZE * WC_VAES_ECB_MIN_BLOCKS) &&
+-            IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_CBC_decrypt_vaes(in, out, iv, sz, key, nr);
+         }
+         else
+@@ -993,14 +1000,14 @@ static WC_INLINE void wc_Stm32_CrypAesBlock(const byte* in, byte* out)
+     {
+     #ifdef HAVE_INTEL_AVX512
+         if ((sz >= WC_AES_BLOCK_SIZE * WC_VAES_ECB_MIN_BLOCKS) &&
+-            IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_CTR_encrypt_avx512(in, out, sz, key, nr, ctr);
+         }
+         else
+     #endif
+     #ifdef HAVE_INTEL_VAES
+         if ((sz >= WC_AES_BLOCK_SIZE * WC_VAES_ECB_MIN_BLOCKS) &&
+-            IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_CTR_encrypt_vaes(in, out, sz, key, nr, ctr);
+         }
+         else
+@@ -11676,7 +11683,7 @@ int wc_AesGcmEncrypt(Aes* aes, byte* out, const byte* in, word32 sz,
+     if (aes->use_aesni) {
+ #ifdef HAVE_INTEL_AVX512
+         if ((sz >= WC_AES_BLOCK_SIZE * WC_VAES_GCM_MIN_BLOCKS) &&
+-            IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_GCM_encrypt_avx512(in, out, authIn, iv, authTag, sz, authInSz, ivSz,
+                                  authTagSz, (const byte*)aes->key, (int)aes->rounds);
+             ret = 0;
+@@ -11685,7 +11692,7 @@ int wc_AesGcmEncrypt(Aes* aes, byte* out, const byte* in, word32 sz,
+ #endif
+ #ifdef HAVE_INTEL_VAES
+         if ((sz >= WC_AES_BLOCK_SIZE * WC_VAES_GCM_MIN_BLOCKS) &&
+-            IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_GCM_encrypt_vaes(in, out, authIn, iv, authTag, sz, authInSz, ivSz,
+                                  authTagSz, (const byte*)aes->key, (int)aes->rounds);
+             ret = 0;
+@@ -12535,7 +12542,7 @@ int wc_AesGcmDecrypt(Aes* aes, byte* out, const byte* in, word32 sz,
+     if (aes->use_aesni) {
+ #ifdef HAVE_INTEL_AVX512
+         if ((sz >= WC_AES_BLOCK_SIZE * WC_VAES_GCM_MIN_BLOCKS) &&
+-            IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_GCM_decrypt_avx512(in, out, authIn, iv, authTag, sz, authInSz, ivSz,
+                                  authTagSz, (byte*)aes->key, (int)aes->rounds, &res);
+             if (res == 0)
+@@ -12547,7 +12554,7 @@ int wc_AesGcmDecrypt(Aes* aes, byte* out, const byte* in, word32 sz,
+ #endif
+ #ifdef HAVE_INTEL_VAES
+         if ((sz >= WC_AES_BLOCK_SIZE * WC_VAES_GCM_MIN_BLOCKS) &&
+-            IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_GCM_decrypt_vaes(in, out, authIn, iv, authTag, sz, authInSz, ivSz,
+                                  authTagSz, (byte*)aes->key, (int)aes->rounds, &res);
+             if (res == 0)
+@@ -12910,14 +12917,14 @@ static WARN_UNUSED_RESULT int AesGcmInit_aesni(
+     aes->cOver = 0;
+ 
+ #ifdef HAVE_INTEL_AVX512
+-    if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++    if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+         AES_GCM_init_avx512((byte*)aes->key, (int)aes->rounds, iv, ivSz,
+             aes->gcm.H, AES_COUNTER(aes), AES_INITCTR(aes));
+     }
+     else
+ #endif
+ #ifdef HAVE_INTEL_VAES
+-    if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++    if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+         AES_GCM_init_vaes((byte*)aes->key, (int)aes->rounds, iv, ivSz,
+             aes->gcm.H, AES_COUNTER(aes), AES_INITCTR(aes));
+     }
+@@ -12978,14 +12985,14 @@ static WARN_UNUSED_RESULT int AesGcmAadUpdate_aesni(
+             if (aes->aOver == WC_AES_BLOCK_SIZE) {
+                 /* We have filled up the block and can process. */
+ #ifdef HAVE_INTEL_AVX512
+-                if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++                if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+                     AES_GCM_ghash_block_avx512(AES_LASTGBLOCK(aes), AES_TAG(aes),
+                                              aes->gcm.H);
+                 }
+                 else
+ #endif
+ #ifdef HAVE_INTEL_VAES
+-                if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++                if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+                     AES_GCM_ghash_block_vaes(AES_LASTGBLOCK(aes), AES_TAG(aes),
+                                              aes->gcm.H);
+                 }
+@@ -13024,7 +13031,7 @@ static WARN_UNUSED_RESULT int AesGcmAadUpdate_aesni(
+             /* GHASH full blocks now. */
+ #ifdef HAVE_INTEL_AVX512
+             if ((blocks >= WC_VAES_GCM_MIN_BLOCKS) &&
+-                IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++                IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_GCM_aad_update_avx512(a, blocks * WC_AES_BLOCK_SIZE,
+                                         AES_TAG(aes), aes->gcm.H);
+             }
+@@ -13032,7 +13039,7 @@ static WARN_UNUSED_RESULT int AesGcmAadUpdate_aesni(
+ #endif
+ #ifdef HAVE_INTEL_VAES
+             if ((blocks >= WC_VAES_GCM_MIN_BLOCKS) &&
+-                IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++                IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_GCM_aad_update_vaes(a, blocks * WC_AES_BLOCK_SIZE,
+                                         AES_TAG(aes), aes->gcm.H);
+             }
+@@ -13072,14 +13079,14 @@ static WARN_UNUSED_RESULT int AesGcmAadUpdate_aesni(
+                 (size_t)WC_AES_BLOCK_SIZE - aes->aOver);
+         /* GHASH last AAD block. */
+ #ifdef HAVE_INTEL_AVX512
+-        if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++        if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_GCM_ghash_block_avx512(AES_LASTGBLOCK(aes), AES_TAG(aes),
+                                      aes->gcm.H);
+         }
+         else
+ #endif
+ #ifdef HAVE_INTEL_VAES
+-        if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++        if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_GCM_ghash_block_vaes(AES_LASTGBLOCK(aes), AES_TAG(aes),
+                                      aes->gcm.H);
+         }
+@@ -13153,14 +13160,14 @@ static WARN_UNUSED_RESULT int AesGcmEncryptUpdate_aesni(
+             if (aes->cOver == WC_AES_BLOCK_SIZE) {
+                 /* We have filled up the block and can process. */
+ #ifdef HAVE_INTEL_AVX512
+-                if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++                if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+                     AES_GCM_ghash_block_avx512(AES_LASTGBLOCK(aes), AES_TAG(aes),
+                                              aes->gcm.H);
+                 }
+                 else
+ #endif
+ #ifdef HAVE_INTEL_VAES
+-                if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++                if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+                     AES_GCM_ghash_block_vaes(AES_LASTGBLOCK(aes), AES_TAG(aes),
+                                              aes->gcm.H);
+                 }
+@@ -13200,7 +13207,7 @@ static WARN_UNUSED_RESULT int AesGcmEncryptUpdate_aesni(
+             /* Encrypt and GHASH full blocks now. */
+ #ifdef HAVE_INTEL_AVX512
+             if ((blocks >= WC_VAES_GCM_MIN_BLOCKS) &&
+-                IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++                IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_GCM_encrypt_update_avx512((byte*)aes->key, (int)aes->rounds,
+                     c, p, blocks * WC_AES_BLOCK_SIZE, AES_TAG(aes), aes->gcm.H,
+                     AES_COUNTER(aes));
+@@ -13209,7 +13216,7 @@ static WARN_UNUSED_RESULT int AesGcmEncryptUpdate_aesni(
+ #endif
+ #ifdef HAVE_INTEL_VAES
+             if ((blocks >= WC_VAES_GCM_MIN_BLOCKS) &&
+-                IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++                IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_GCM_encrypt_update_vaes((byte*)aes->key, (int)aes->rounds,
+                     c, p, blocks * WC_AES_BLOCK_SIZE, AES_TAG(aes), aes->gcm.H,
+                     AES_COUNTER(aes));
+@@ -13245,14 +13252,14 @@ static WARN_UNUSED_RESULT int AesGcmEncryptUpdate_aesni(
+             /* Encrypt the counter - XOR in zeros as proxy for plaintext. */
+             XMEMSET(AES_LASTGBLOCK(aes), 0, WC_AES_BLOCK_SIZE);
+ #ifdef HAVE_INTEL_AVX512
+-            if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_GCM_encrypt_block_avx512((byte*)aes->key, (int)aes->rounds,
+                     AES_LASTGBLOCK(aes), AES_LASTGBLOCK(aes), AES_COUNTER(aes));
+             }
+             else
+ #endif
+ #ifdef HAVE_INTEL_VAES
+-            if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_GCM_encrypt_block_vaes((byte*)aes->key, (int)aes->rounds,
+                     AES_LASTGBLOCK(aes), AES_LASTGBLOCK(aes), AES_COUNTER(aes));
+             }
+@@ -13314,14 +13321,14 @@ static WARN_UNUSED_RESULT int AesGcmEncryptFinal_aesni(
+         XMEMSET(AES_LASTGBLOCK(aes) + over, 0, (size_t)WC_AES_BLOCK_SIZE - over);
+         /* GHASH last cipher block. */
+ #ifdef HAVE_INTEL_AVX512
+-        if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++        if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_GCM_ghash_block_avx512(AES_LASTGBLOCK(aes), AES_TAG(aes),
+                                      aes->gcm.H);
+         }
+         else
+ #endif
+ #ifdef HAVE_INTEL_VAES
+-        if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++        if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_GCM_ghash_block_vaes(AES_LASTGBLOCK(aes), AES_TAG(aes),
+                                      aes->gcm.H);
+         }
+@@ -13348,14 +13355,14 @@ static WARN_UNUSED_RESULT int AesGcmEncryptFinal_aesni(
+     }
+     /* Calculate the authentication tag. */
+ #ifdef HAVE_INTEL_AVX512
+-    if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++    if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+         AES_GCM_encrypt_final_avx512(AES_TAG(aes), authTag, authTagSz, aes->cSz,
+             aes->aSz, aes->gcm.H, AES_INITCTR(aes));
+     }
+     else
+ #endif
+ #ifdef HAVE_INTEL_VAES
+-    if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++    if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+         AES_GCM_encrypt_final_vaes(AES_TAG(aes), authTag, authTagSz, aes->cSz,
+             aes->aSz, aes->gcm.H, AES_INITCTR(aes));
+     }
+@@ -13480,14 +13487,14 @@ static WARN_UNUSED_RESULT int AesGcmDecryptUpdate_aesni(
+             if (aes->cOver == WC_AES_BLOCK_SIZE) {
+                 /* We have filled up the block and can process. */
+ #ifdef HAVE_INTEL_AVX512
+-                if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++                if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+                     AES_GCM_ghash_block_avx512(AES_LASTBLOCK(aes), AES_TAG(aes),
+                                              aes->gcm.H);
+                 }
+                 else
+ #endif
+ #ifdef HAVE_INTEL_VAES
+-                if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++                if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+                     AES_GCM_ghash_block_vaes(AES_LASTBLOCK(aes), AES_TAG(aes),
+                                              aes->gcm.H);
+                 }
+@@ -13527,7 +13534,7 @@ static WARN_UNUSED_RESULT int AesGcmDecryptUpdate_aesni(
+             /* Decrypt and GHASH full blocks now. */
+ #ifdef HAVE_INTEL_AVX512
+             if ((blocks >= WC_VAES_GCM_MIN_BLOCKS) &&
+-                IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++                IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_GCM_decrypt_update_avx512((byte*)aes->key, (int)aes->rounds,
+                     p, c, blocks * WC_AES_BLOCK_SIZE, AES_TAG(aes), aes->gcm.H,
+                     AES_COUNTER(aes));
+@@ -13536,7 +13543,7 @@ static WARN_UNUSED_RESULT int AesGcmDecryptUpdate_aesni(
+ #endif
+ #ifdef HAVE_INTEL_VAES
+             if ((blocks >= WC_VAES_GCM_MIN_BLOCKS) &&
+-                IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++                IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_GCM_decrypt_update_vaes((byte*)aes->key, (int)aes->rounds,
+                     p, c, blocks * WC_AES_BLOCK_SIZE, AES_TAG(aes), aes->gcm.H,
+                     AES_COUNTER(aes));
+@@ -13572,14 +13579,14 @@ static WARN_UNUSED_RESULT int AesGcmDecryptUpdate_aesni(
+             /* Encrypt the counter - XOR in zeros as proxy for cipher text. */
+             XMEMSET(AES_LASTGBLOCK(aes), 0, WC_AES_BLOCK_SIZE);
+ #ifdef HAVE_INTEL_AVX512
+-            if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_GCM_encrypt_block_avx512((byte*)aes->key, (int)aes->rounds,
+                     AES_LASTGBLOCK(aes), AES_LASTGBLOCK(aes), AES_COUNTER(aes));
+             }
+             else
+ #endif
+ #ifdef HAVE_INTEL_VAES
+-            if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_GCM_encrypt_block_vaes((byte*)aes->key, (int)aes->rounds,
+                     AES_LASTGBLOCK(aes), AES_LASTGBLOCK(aes), AES_COUNTER(aes));
+             }
+@@ -13648,13 +13655,13 @@ static WARN_UNUSED_RESULT int AesGcmDecryptFinal_aesni(
+         XMEMSET(lastBlock + over, 0, (size_t)WC_AES_BLOCK_SIZE - over);
+         /* Hash the last block of cipher text. */
+ #ifdef HAVE_INTEL_AVX512
+-        if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++        if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_GCM_ghash_block_avx512(lastBlock, AES_TAG(aes), aes->gcm.H);
+         }
+         else
+ #endif
+ #ifdef HAVE_INTEL_VAES
+-        if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++        if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_GCM_ghash_block_vaes(lastBlock, AES_TAG(aes), aes->gcm.H);
+         }
+         else
+@@ -13677,14 +13684,14 @@ static WARN_UNUSED_RESULT int AesGcmDecryptFinal_aesni(
+     }
+     /* Calculate and compare the authentication tag. */
+ #ifdef HAVE_INTEL_AVX512
+-    if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++    if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+         AES_GCM_decrypt_final_avx512(AES_TAG(aes), authTag, authTagSz, aes->cSz,
+             aes->aSz, aes->gcm.H, AES_INITCTR(aes), &res);
+     }
+     else
+ #endif
+ #ifdef HAVE_INTEL_VAES
+-    if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++    if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+         AES_GCM_decrypt_final_vaes(AES_TAG(aes), authTag, authTagSz, aes->cSz,
+             aes->aSz, aes->gcm.H, AES_INITCTR(aes), &res);
+     }
+@@ -18849,7 +18856,7 @@ int wc_AesXtsEncrypt(XtsAes* xaes, byte* out, const byte* in, word32 sz,
+     if (aes->use_aesni) {
+         SAVE_VECTOR_REGISTERS(return _svr_ret;);
+ #if defined(HAVE_INTEL_AVX512)
+-        if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++        if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_XTS_encrypt_avx512(in, out, sz, i,
+                                    (const byte*)aes->key,
+                                    (const byte*)xaes->tweak.key,
+@@ -18859,7 +18866,7 @@ int wc_AesXtsEncrypt(XtsAes* xaes, byte* out, const byte* in, word32 sz,
+         else
+ #endif
+ #if defined(HAVE_INTEL_VAES)
+-        if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++        if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_XTS_encrypt_vaes(in, out, sz, i,
+                                  (const byte*)aes->key,
+                                  (const byte*)xaes->tweak.key,
+@@ -18973,7 +18980,7 @@ int wc_AesXtsEncryptInit(XtsAes* xaes, const byte* i, word32 iSz,
+         if (aes->use_aesni) {
+             SAVE_VECTOR_REGISTERS(return _svr_ret;);
+ #if defined(HAVE_INTEL_AVX512)
+-            if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_XTS_init_avx512(stream->tweak_block,
+                                     (const byte*)xaes->tweak.key,
+                                     (int)xaes->tweak.rounds);
+@@ -18982,7 +18989,7 @@ int wc_AesXtsEncryptInit(XtsAes* xaes, const byte* i, word32 iSz,
+             else
+ #endif
+ #if defined(HAVE_INTEL_VAES)
+-            if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_XTS_init_vaes(stream->tweak_block,
+                                   (const byte*)xaes->tweak.key,
+                                   (int)xaes->tweak.rounds);
+@@ -19086,7 +19093,7 @@ static int AesXtsEncryptUpdate(XtsAes* xaes, byte* out, const byte* in, word32 s
+         if (aes->use_aesni) {
+             SAVE_VECTOR_REGISTERS(return _svr_ret;);
+ #if defined(HAVE_INTEL_AVX512)
+-            if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_XTS_encrypt_update_avx512(in, out, sz,
+                                               (const byte*)aes->key,
+                                               stream->tweak_block,
+@@ -19096,7 +19103,7 @@ static int AesXtsEncryptUpdate(XtsAes* xaes, byte* out, const byte* in, word32 s
+             else
+ #endif
+ #if defined(HAVE_INTEL_VAES)
+-            if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_XTS_encrypt_update_vaes(in, out, sz,
+                                             (const byte*)aes->key,
+                                             stream->tweak_block,
+@@ -19417,7 +19424,7 @@ int wc_AesXtsDecrypt(XtsAes* xaes, byte* out, const byte* in, word32 sz,
+     if (aes->use_aesni) {
+         SAVE_VECTOR_REGISTERS(return _svr_ret;);
+ #if defined(HAVE_INTEL_AVX512)
+-        if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++        if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_XTS_decrypt_avx512(in, out, sz, i,
+                                    (const byte*)aes->key,
+                                    (const byte*)xaes->tweak.key,
+@@ -19427,7 +19434,7 @@ int wc_AesXtsDecrypt(XtsAes* xaes, byte* out, const byte* in, word32 sz,
+         else
+ #endif
+ #if defined(HAVE_INTEL_VAES)
+-        if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++        if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+             AES_XTS_decrypt_vaes(in, out, sz, i,
+                                  (const byte*)aes->key,
+                                  (const byte*)xaes->tweak.key,
+@@ -19544,7 +19551,7 @@ int wc_AesXtsDecryptInit(XtsAes* xaes, const byte* i, word32 iSz,
+         if (aes->use_aesni) {
+             SAVE_VECTOR_REGISTERS(return _svr_ret;);
+ #if defined(HAVE_INTEL_AVX512)
+-            if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_XTS_init_avx512(stream->tweak_block,
+                                     (const byte*)xaes->tweak.key,
+                                     (int)xaes->tweak.rounds);
+@@ -19553,7 +19560,7 @@ int wc_AesXtsDecryptInit(XtsAes* xaes, const byte* i, word32 iSz,
+             else
+ #endif
+ #if defined(HAVE_INTEL_VAES)
+-            if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_XTS_init_vaes(stream->tweak_block,
+                                   (const byte*)xaes->tweak.key,
+                                   (int)xaes->tweak.rounds);
+@@ -19649,7 +19656,7 @@ static int AesXtsDecryptUpdate(XtsAes* xaes, byte* out, const byte* in, word32 s
+         if (aes->use_aesni) {
+             SAVE_VECTOR_REGISTERS(return _svr_ret;);
+ #if defined(HAVE_INTEL_AVX512)
+-            if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_XTS_decrypt_update_avx512(in, out, sz,
+                                               (const byte*)aes->key,
+                                               stream->tweak_block,
+@@ -19659,7 +19666,7 @@ static int AesXtsDecryptUpdate(XtsAes* xaes, byte* out, const byte* in, word32 s
+             else
+ #endif
+ #if defined(HAVE_INTEL_VAES)
+-            if (IS_INTEL_AVX2(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++            if (IS_INTEL_AVX2(intel_flags) && AES_USE_VAES(intel_flags)) {
+                 AES_XTS_decrypt_update_vaes(in, out, sz,
+                                             (const byte*)aes->key,
+                                             stream->tweak_block,
+@@ -20848,12 +20855,12 @@ static AesGcmSivPolyvalFn AesGcmSivPolyvalAsm(void)
+         return NULL;
+     }
+ #ifdef HAVE_INTEL_AVX512
+-    if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++    if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+         return &AES_GCMSIV_polyval_avx512;
+     }
+ #endif
+ #ifdef HAVE_INTEL_VAES
+-    if (IS_INTEL_VAES(intel_flags) && IS_INTEL_AVX2(intel_flags)) {
++    if (AES_USE_VAES(intel_flags) && IS_INTEL_AVX2(intel_flags)) {
+         return &AES_GCMSIV_polyval_vaes;
+     }
+ #endif
+@@ -20920,12 +20927,12 @@ static AesGcmSivCtrFn AesGcmSivCtrAsm(void)
+         return NULL;
+     }
+ #ifdef HAVE_INTEL_AVX512
+-    if (IS_INTEL_AVX512(intel_flags) && IS_INTEL_VAES(intel_flags)) {
++    if (IS_INTEL_AVX512(intel_flags) && AES_USE_VAES(intel_flags)) {
+         return &AES_GCMSIV_ctr_avx512;
+     }
+ #endif
+ #ifdef HAVE_INTEL_VAES
+-    if (IS_INTEL_VAES(intel_flags) && IS_INTEL_AVX2(intel_flags)) {
++    if (AES_USE_VAES(intel_flags) && IS_INTEL_AVX2(intel_flags)) {
+         return &AES_GCMSIV_ctr_vaes;
+     }
+ #endif
+diff --git a/wolfcrypt/src/aes_gcm_asm.S b/wolfcrypt/src/aes_gcm_asm.S
+index 469f04c..986f56b 100644
+--- a/wolfcrypt/src/aes_gcm_asm.S
++++ b/wolfcrypt/src/aes_gcm_asm.S
+@@ -465,6 +465,7 @@ _AES_GCM_encrypt_aesni:
+         pushq	%r15
+         movq	%rdx, %r12
+         movq	%rcx, %rax
++        movl	%r9d, %r9d
+         movl	48(%rsp), %r11d
+         movl	56(%rsp), %ebx
+         movl	64(%rsp), %r14d
+@@ -2322,6 +2323,7 @@ _AES_GCM_decrypt_aesni:
+         pushq	%rbp
+         movq	%rdx, %r12
+         movq	%rcx, %rax
++        movl	%r9d, %r9d
+         movl	56(%rsp), %r11d
+         movl	64(%rsp), %ebx
+         movl	72(%rsp), %r14d
+@@ -3725,6 +3727,7 @@ _AES_GCM_init_aesni:
+         pushq	%r12
+         pushq	%r13
+         pushq	%r14
++        movl	%esi, %esi
+         movq	%rdx, %r10
+         movl	%ecx, %r11d
+         movq	32(%rsp), %rax
+@@ -4077,6 +4080,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCM_aad_update_aesni)
+ .p2align	4
+ _AES_GCM_aad_update_aesni:
+ #endif /* __APPLE__ */
++        movl	%esi, %esi
+         movq	%rcx, %rax
+         movdqa	(%rdx), %xmm5
+         movdqa	(%rax), %xmm6
+@@ -4161,6 +4165,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCM_encrypt_block_aesni)
+ .p2align	4
+ _AES_GCM_encrypt_block_aesni:
+ #endif /* __APPLE__ */
++        movl	%esi, %esi
+         movq	%rdx, %r10
+         movq	%rcx, %r11
+         movdqu	(%r8), %xmm0
+@@ -4295,7 +4300,9 @@ _AES_GCM_encrypt_update_aesni:
+         pushq	%r12
+         pushq	%r14
+         movq	%rdx, %r10
++        movl	%esi, %esi
+         movq	%rcx, %r11
++        movl	%r8d, %r8d
+         movq	32(%rsp), %rax
+         movq	40(%rsp), %r12
+         subq	$0xa0, %rsp
+@@ -5623,7 +5630,9 @@ _AES_GCM_decrypt_update_aesni:
+         pushq	%r14
+         pushq	%r15
+         movq	%rdx, %r10
++        movl	%esi, %esi
+         movq	%rcx, %r11
++        movl	%r8d, %r8d
+         movq	40(%rsp), %rax
+         movq	48(%rsp), %r12
+         subq	$0xa8, %rsp
+@@ -6521,6 +6530,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCMSIV_polyval_aesni)
+ .p2align	4
+ _AES_GCMSIV_polyval_aesni:
+ #endif /* __APPLE__ */
++        movl	%ecx, %ecx
+         movdqu	(%rsi), %xmm1
+         movdqu	(%rdi), %xmm0
+         pshufb	L_aes_gcm_siv_bswap_mask(%rip), %xmm0
+@@ -6886,6 +6896,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCMSIV_ctr_aesni)
+ _AES_GCMSIV_ctr_aesni:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%r8d, %r8d
+         movdqu	L_aes_gcmsiv_ctr_aesni_one(%rip), %xmm8
+         movdqu	(%r9), %xmm7
+         xorl	%eax, %eax
+@@ -7450,6 +7461,7 @@ _AES_GCM_encrypt_avx1:
+         pushq	%r15
+         movq	%rdx, %r12
+         movq	%rcx, %rax
++        movl	%r9d, %r9d
+         movl	48(%rsp), %r11d
+         movl	56(%rsp), %ebx
+         movl	64(%rsp), %r14d
+@@ -9035,6 +9047,7 @@ _AES_GCM_decrypt_avx1:
+         pushq	%rbp
+         movq	%rdx, %r12
+         movq	%rcx, %rax
++        movl	%r9d, %r9d
+         movl	56(%rsp), %r11d
+         movl	64(%rsp), %ebx
+         movl	72(%rsp), %r14d
+@@ -10208,6 +10221,7 @@ _AES_GCM_init_avx1:
+ #endif /* __APPLE__ */
+         pushq	%r12
+         pushq	%r13
++        movl	%esi, %esi
+         movq	%rdx, %r10
+         movl	%ecx, %r11d
+         movq	24(%rsp), %rax
+@@ -10525,6 +10539,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCM_aad_update_avx1)
+ .p2align	4
+ _AES_GCM_aad_update_avx1:
+ #endif /* __APPLE__ */
++        movl	%esi, %esi
+         movq	%rcx, %rax
+         vmovdqa	(%rdx), %xmm5
+         vmovdqa	(%rax), %xmm6
+@@ -10598,6 +10613,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCM_encrypt_block_avx1)
+ .p2align	4
+ _AES_GCM_encrypt_block_avx1:
+ #endif /* __APPLE__ */
++        movl	%esi, %esi
+         movq	%rdx, %r10
+         movq	%rcx, %r11
+         vmovdqu	(%r8), %xmm1
+@@ -10722,7 +10738,9 @@ _AES_GCM_encrypt_update_avx1:
+         pushq	%r12
+         pushq	%r14
+         movq	%rdx, %r10
++        movl	%esi, %esi
+         movq	%rcx, %r11
++        movl	%r8d, %r8d
+         movq	32(%rsp), %rax
+         movq	40(%rsp), %r12
+         subq	$0xa0, %rsp
+@@ -11841,7 +11859,9 @@ _AES_GCM_decrypt_update_avx1:
+         pushq	%r12
+         pushq	%r14
+         movq	%rdx, %r10
++        movl	%esi, %esi
+         movq	%rcx, %r11
++        movl	%r8d, %r8d
+         movq	32(%rsp), %rax
+         movq	40(%rsp), %r12
+         subq	$0xb0, %rsp
+@@ -12573,6 +12593,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCMSIV_polyval_avx1)
+ .p2align	4
+ _AES_GCMSIV_polyval_avx1:
+ #endif /* __APPLE__ */
++        movl	%ecx, %ecx
+         vmovdqu	(%rsi), %xmm1
+         vmovdqu	(%rdi), %xmm0
+         vpshufb	L_aes_gcm_siv_bswap_mask_avx1(%rip), %xmm0, %xmm0
+@@ -12842,6 +12863,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCMSIV_ctr_avx1)
+ _AES_GCMSIV_ctr_avx1:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%r8d, %r8d
+         vmovdqu	L_aes_gcmsiv_ctr_avx1_one(%rip), %xmm8
+         vmovdqu	(%r9), %xmm7
+         xorl	%eax, %eax
+@@ -16047,6 +16069,7 @@ _AES_GCM_init_avx2:
+ #endif /* __APPLE__ */
+         pushq	%rbx
+         pushq	%r12
++        movl	%esi, %esi
+         movq	%rdx, %r10
+         movl	%ecx, %r11d
+         movq	24(%rsp), %rax
+@@ -16322,6 +16345,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCM_aad_update_avx2)
+ .p2align	4
+ _AES_GCM_aad_update_avx2:
+ #endif /* __APPLE__ */
++        movl	%esi, %esi
+         movq	%rcx, %rax
+         vmovdqu	(%rdx), %xmm4
+         vmovdqu	(%rax), %xmm5
+@@ -16383,6 +16407,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCM_encrypt_block_avx2)
+ .p2align	4
+ _AES_GCM_encrypt_block_avx2:
+ #endif /* __APPLE__ */
++        movl	%esi, %esi
+         movq	%rdx, %r10
+         movq	%rcx, %r11
+         subq	$0x98, %rsp
+@@ -16509,7 +16534,9 @@ _AES_GCM_encrypt_update_avx2:
+         pushq	%r13
+         pushq	%r14
+         movq	%rdx, %r10
++        movl	%esi, %esi
+         movq	%rcx, %r11
++        movl	%r8d, %r8d
+         movq	32(%rsp), %rax
+         movq	40(%rsp), %r12
+         subq	$0xa0, %rsp
+@@ -17365,6 +17392,9 @@ WC_ASM_ATT_HIDDEN(_AES_GCM_encrypt_final_avx2)
+ .p2align	4
+ _AES_GCM_encrypt_final_avx2:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
++        movl	%ecx, %ecx
++        movl	%r8d, %r8d
+         movq	8(%rsp), %rax
+         subq	$24, %rsp
+         vmovdqu	(%rdi), %xmm4
+@@ -17443,7 +17473,9 @@ _AES_GCM_decrypt_update_avx2:
+         pushq	%r12
+         pushq	%r14
+         movq	%rdx, %r10
++        movl	%esi, %esi
+         movq	%rcx, %r11
++        movl	%r8d, %r8d
+         movq	32(%rsp), %rax
+         movq	40(%rsp), %r12
+         subq	$0xb0, %rsp
+@@ -17953,6 +17985,9 @@ WC_ASM_ATT_HIDDEN(_AES_GCM_decrypt_final_avx2)
+ _AES_GCM_decrypt_final_avx2:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%edx, %edx
++        movl	%ecx, %ecx
++        movl	%r8d, %r8d
+         movq	16(%rsp), %rax
+         movq	24(%rsp), %r10
+         subq	$16, %rsp
+@@ -18468,6 +18503,7 @@ _AES_GCM_encrypt_vaes:
+         pushq	%r15
+         movq	%rdx, %r12
+         movq	%rcx, %rax
++        movl	%r9d, %r9d
+         movl	48(%rsp), %r11d
+         movl	56(%rsp), %ebx
+         movl	64(%rsp), %r14d
+@@ -20474,6 +20510,7 @@ _AES_GCM_decrypt_vaes:
+         pushq	%rbp
+         movq	%rdx, %r12
+         movq	%rcx, %rax
++        movl	%r9d, %r9d
+         movl	56(%rsp), %r11d
+         movl	64(%rsp), %ebx
+         movl	72(%rsp), %r14d
+@@ -22429,6 +22466,7 @@ _AES_GCM_init_vaes:
+ #endif /* __APPLE__ */
+         pushq	%r12
+         pushq	%r13
++        movl	%esi, %esi
+         movq	%rdx, %r10
+         movl	%ecx, %r11d
+         movq	24(%rsp), %rax
+@@ -22746,6 +22784,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCM_aad_update_vaes)
+ .p2align	4
+ _AES_GCM_aad_update_vaes:
+ #endif /* __APPLE__ */
++        movl	%esi, %esi
+         movq	%rdx, %r8
+         movq	%rcx, %r9
+         subq	$0x208, %rsp
+@@ -23281,6 +23320,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCM_encrypt_block_vaes)
+ .p2align	4
+ _AES_GCM_encrypt_block_vaes:
+ #endif /* __APPLE__ */
++        movl	%esi, %esi
+         movq	%rdx, %r10
+         movq	%rcx, %r11
+         vmovdqu	(%r8), %xmm1
+@@ -23407,7 +23447,9 @@ _AES_GCM_encrypt_update_vaes:
+         pushq	%r15
+         pushq	%rbx
+         movq	%rdx, %r10
++        movl	%esi, %esi
+         movq	%rcx, %r11
++        movl	%r8d, %r8d
+         movq	48(%rsp), %rax
+         movq	56(%rsp), %r12
+         subq	$0x210, %rsp
+@@ -24442,7 +24484,9 @@ _AES_GCM_decrypt_update_vaes:
+         pushq	%r15
+         pushq	%rbx
+         movq	%rdx, %r10
++        movl	%esi, %esi
+         movq	%rcx, %r11
++        movl	%r8d, %r8d
+         movq	48(%rsp), %rax
+         movq	56(%rsp), %r12
+         subq	$0x210, %rsp
+@@ -25453,6 +25497,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCMSIV_polyval_vaes)
+ .p2align	4
+ _AES_GCMSIV_polyval_vaes:
+ #endif /* __APPLE__ */
++        movl	%ecx, %ecx
+         vmovdqu	(%rsi), %xmm1
+         vmovdqu	(%rdi), %xmm0
+         vpshufb	L_aes_gcm_siv_bswap_mask_vaes(%rip), %xmm0, %xmm0
+@@ -26002,6 +26047,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCMSIV_ctr_vaes)
+ _AES_GCMSIV_ctr_vaes:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%r8d, %r8d
+         vbroadcasti128	(%r9), %ymm7
+         vbroadcasti128	128+L_aes_gcmsiv_ctr_inc_vaes(%rip), %ymm8
+         vbroadcasti128	32+L_aes_gcmsiv_ctr_inc_vaes(%rip), %ymm9
+@@ -26692,6 +26738,7 @@ _AES_GCM_encrypt_avx512:
+         pushq	%r15
+         movq	%rdx, %r12
+         movq	%rcx, %rax
++        movl	%r9d, %r9d
+         movl	48(%rsp), %r11d
+         movl	56(%rsp), %ebx
+         movl	64(%rsp), %r14d
+@@ -29397,6 +29444,7 @@ _AES_GCM_decrypt_avx512:
+         pushq	%rbp
+         movq	%rdx, %r12
+         movq	%rcx, %rax
++        movl	%r9d, %r9d
+         movl	56(%rsp), %r11d
+         movl	64(%rsp), %ebx
+         movl	72(%rsp), %r14d
+@@ -31896,6 +31944,7 @@ _AES_GCM_init_avx512:
+ #endif /* __APPLE__ */
+         pushq	%r12
+         pushq	%r13
++        movl	%esi, %esi
+         movq	%rdx, %r10
+         movl	%ecx, %r11d
+         movq	24(%rsp), %rax
+@@ -32213,6 +32262,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCM_aad_update_avx512)
+ .p2align	4
+ _AES_GCM_aad_update_avx512:
+ #endif /* __APPLE__ */
++        movl	%esi, %esi
+         movq	%rdx, %r8
+         movq	%rcx, %r9
+         subq	$0x108, %rsp
+@@ -32647,6 +32697,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCM_encrypt_block_avx512)
+ .p2align	4
+ _AES_GCM_encrypt_block_avx512:
+ #endif /* __APPLE__ */
++        movl	%esi, %esi
+         movq	%rdx, %r10
+         movq	%rcx, %r11
+         vmovdqu	(%r8), %xmm1
+@@ -32774,7 +32825,9 @@ _AES_GCM_encrypt_update_avx512:
+         pushq	%rbx
+         pushq	%rbp
+         movq	%rdx, %r10
++        movl	%esi, %esi
+         movq	%rcx, %r11
++        movl	%r8d, %r8d
+         movq	56(%rsp), %rax
+         movq	64(%rsp), %r12
+         subq	$0x418, %rsp
+@@ -34607,7 +34660,9 @@ _AES_GCM_decrypt_update_avx512:
+         pushq	%r15
+         pushq	%rbx
+         movq	%rdx, %r10
++        movl	%esi, %esi
+         movq	%rcx, %r11
++        movl	%r8d, %r8d
+         movq	48(%rsp), %rax
+         movq	56(%rsp), %r12
+         subq	$0x410, %rsp
+@@ -36262,6 +36317,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCMSIV_polyval_avx512)
+ .p2align	4
+ _AES_GCMSIV_polyval_avx512:
+ #endif /* __APPLE__ */
++        movl	%ecx, %ecx
+         vmovdqu	(%rsi), %xmm1
+         vmovdqu	(%rdi), %xmm0
+         vpshufb	L_aes_gcm_siv_bswap_mask_avx512(%rip), %xmm0, %xmm0
+@@ -37010,6 +37066,7 @@ WC_ASM_ATT_HIDDEN(_AES_GCMSIV_ctr_avx512)
+ _AES_GCMSIV_ctr_avx512:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%r8d, %r8d
+         vbroadcasti32x4	(%r9), %zmm7
+         vbroadcasti32x4	256+L_aes_gcmsiv_ctr_inc_avx512(%rip), %zmm8
+         vbroadcasti32x4	64+L_aes_gcmsiv_ctr_inc_avx512(%rip), %zmm9
+diff --git a/wolfcrypt/src/aes_gcm_asm.asm b/wolfcrypt/src/aes_gcm_asm.asm
+index 64b5438..6efdea7 100644
+--- a/wolfcrypt/src/aes_gcm_asm.asm
++++ b/wolfcrypt/src/aes_gcm_asm.asm
+@@ -3817,7 +3817,7 @@ AES_GCM_init_aesni PROC
+         push	r13
+         push	r14
+         mov	rdi, rcx
+-        mov	rsi, rdx
++        mov	esi, edx
+         mov	r10, r8
+         mov	r11d, r9d
+         mov	rax, QWORD PTR [rsp+80]
+@@ -4177,6 +4177,7 @@ ELSE
+ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_GCM_aad_update_aesni PROC
++        mov	edx, edx
+         mov	rax, rcx
+         sub	rsp, 40
+         movdqu	OWORD PTR [rsp+8], xmm6
+@@ -4262,6 +4263,7 @@ ELSE
+ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_GCM_encrypt_block_aesni PROC
++        mov	edx, edx
+         mov	r10, r8
+         mov	r11, r9
+         mov	rax, QWORD PTR [rsp+40]
+@@ -5640,6 +5642,7 @@ AES_GCM_encrypt_final_aesni PROC
+         push	r12
+         push	r14
+         mov	rax, rcx
++        mov	r8d, r8d
+         mov	r10d, r9d
+         mov	r9, rdx
+         mov	r11d, DWORD PTR [rsp+64]
+@@ -6553,6 +6556,7 @@ AES_GCM_decrypt_final_aesni PROC
+         push	rbp
+         push	r15
+         mov	rax, rcx
++        mov	r8d, r8d
+         mov	r10d, r9d
+         mov	r9, rdx
+         mov	r11d, DWORD PTR [rsp+80]
+@@ -6705,6 +6709,7 @@ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_GCMSIV_polyval_aesni PROC
+         push	r12
++        mov	r9d, r9d
+         sub	rsp, 144
+         movdqu	OWORD PTR [rsp], xmm6
+         movdqu	OWORD PTR [rsp+16], xmm7
+@@ -10514,7 +10519,7 @@ AES_GCM_init_avx1 PROC
+         push	r12
+         push	r13
+         mov	rdi, rcx
+-        mov	rsi, rdx
++        mov	esi, edx
+         mov	r10, r8
+         mov	r11d, r9d
+         mov	rax, QWORD PTR [rsp+72]
+@@ -10839,6 +10844,7 @@ ELSE
+ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_GCM_aad_update_avx1 PROC
++        mov	edx, edx
+         mov	rax, rcx
+         sub	rsp, 40
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+@@ -10913,6 +10919,7 @@ ELSE
+ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_GCM_encrypt_block_avx1 PROC
++        mov	edx, edx
+         mov	r10, r8
+         mov	r11, r9
+         mov	rax, QWORD PTR [rsp+40]
+@@ -12084,6 +12091,7 @@ AES_GCM_encrypt_final_avx1 PROC
+         push	r12
+         push	r14
+         mov	rax, rcx
++        mov	r8d, r8d
+         mov	r10d, r9d
+         mov	r9, rdx
+         mov	r11d, DWORD PTR [rsp+64]
+@@ -12829,6 +12837,7 @@ AES_GCM_decrypt_final_avx1 PROC
+         push	rbp
+         push	r15
+         mov	rax, rcx
++        mov	r8d, r8d
+         mov	r10d, r9d
+         mov	r9, rdx
+         mov	r11d, DWORD PTR [rsp+80]
+@@ -12970,6 +12979,7 @@ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_GCMSIV_polyval_avx1 PROC
+         push	r12
++        mov	r9d, r9d
+         sub	rsp, 112
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -16559,7 +16569,7 @@ AES_GCM_init_avx2 PROC
+         push	rsi
+         push	r12
+         mov	rdi, rcx
+-        mov	rsi, rdx
++        mov	esi, edx
+         mov	r10, r8
+         mov	r11d, r9d
+         mov	rax, QWORD PTR [rsp+72]
+@@ -16838,6 +16848,7 @@ ELSE
+ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_GCM_aad_update_avx2 PROC
++        mov	edx, edx
+         mov	rax, rcx
+         sub	rsp, 24
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+@@ -16898,6 +16909,7 @@ ELSE
+ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_GCM_encrypt_block_avx2 PROC
++        mov	edx, edx
+         mov	r10, r8
+         mov	r11, r9
+         mov	rax, QWORD PTR [rsp+40]
+@@ -17900,6 +17912,8 @@ ENDIF
+ AES_GCM_encrypt_final_avx2 PROC
+         push	r12
+         push	r13
++        mov	r8d, r8d
++        mov	r9d, r9d
+         mov	eax, DWORD PTR [rsp+56]
+         mov	r10, QWORD PTR [rsp+64]
+         mov	r11, QWORD PTR [rsp+72]
+@@ -18516,6 +18530,8 @@ AES_GCM_decrypt_final_avx2 PROC
+         push	r12
+         push	r13
+         push	r14
++        mov	r8d, r8d
++        mov	r9d, r9d
+         mov	eax, DWORD PTR [rsp+64]
+         mov	r10, QWORD PTR [rsp+72]
+         mov	r11, QWORD PTR [rsp+80]
+@@ -23100,7 +23116,7 @@ AES_GCM_init_vaes PROC
+         push	r12
+         push	r13
+         mov	rdi, rcx
+-        mov	rsi, rdx
++        mov	esi, edx
+         mov	r10, r8
+         mov	r11d, r9d
+         mov	rax, QWORD PTR [rsp+72]
+@@ -23977,6 +23993,7 @@ ELSE
+ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_GCM_encrypt_block_vaes PROC
++        mov	edx, edx
+         mov	r10, r8
+         mov	r11, r9
+         mov	rax, QWORD PTR [rsp+40]
+@@ -25078,6 +25095,7 @@ AES_GCM_encrypt_final_vaes PROC
+         push	r12
+         push	r14
+         mov	rax, rcx
++        mov	r8d, r8d
+         mov	r10d, r9d
+         mov	r9, rdx
+         mov	r11d, DWORD PTR [rsp+64]
+@@ -26104,6 +26122,7 @@ AES_GCM_decrypt_final_vaes PROC
+         push	rbp
+         push	r15
+         mov	rax, rcx
++        mov	r8d, r8d
+         mov	r10d, r9d
+         mov	r9, rdx
+         mov	r11d, DWORD PTR [rsp+80]
+@@ -26231,6 +26250,7 @@ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_GCMSIV_polyval_vaes PROC
+         push	r12
++        mov	r9d, r9d
+         sub	rsp, 160
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -32819,7 +32839,7 @@ AES_GCM_init_avx512 PROC
+         push	r12
+         push	r13
+         mov	rdi, rcx
+-        mov	rsi, rdx
++        mov	esi, edx
+         mov	r10, r8
+         mov	r11d, r9d
+         mov	rax, QWORD PTR [rsp+72]
+@@ -33595,6 +33615,7 @@ ELSE
+ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_GCM_encrypt_block_avx512 PROC
++        mov	edx, edx
+         mov	r10, r8
+         mov	r11, r9
+         mov	rax, QWORD PTR [rsp+40]
+@@ -35494,6 +35515,7 @@ AES_GCM_encrypt_final_avx512 PROC
+         push	r12
+         push	r14
+         mov	rax, rcx
++        mov	r8d, r8d
+         mov	r10d, r9d
+         mov	r9, rdx
+         mov	r11d, DWORD PTR [rsp+64]
+@@ -37164,6 +37186,7 @@ AES_GCM_decrypt_final_avx512 PROC
+         push	rbp
+         push	r15
+         mov	rax, rcx
++        mov	r8d, r8d
+         mov	r10d, r9d
+         mov	r9, rdx
+         mov	r11d, DWORD PTR [rsp+80]
+@@ -37292,6 +37315,7 @@ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_GCMSIV_polyval_avx512 PROC
+         push	r12
++        mov	r9d, r9d
+         sub	rsp, 160
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+diff --git a/wolfcrypt/src/aes_x86_64_asm.S b/wolfcrypt/src/aes_x86_64_asm.S
+index 2e1526c..7ab11c4 100644
+--- a/wolfcrypt/src/aes_x86_64_asm.S
++++ b/wolfcrypt/src/aes_x86_64_asm.S
+@@ -524,6 +524,7 @@ WC_ASM_ATT_HIDDEN(_AES_ECB_encrypt_AESNI)
+ .p2align	4
+ _AES_ECB_encrypt_AESNI:
+ #endif /* __APPLE__ */
++        movl	%r8d, %r8d
+         xorl	%eax, %eax
+         cmpl	$0x40, %edx
+         movl	%edx, %r9d
+@@ -694,6 +695,7 @@ WC_ASM_ATT_HIDDEN(_AES_ECB_decrypt_AESNI)
+ .p2align	4
+ _AES_ECB_decrypt_AESNI:
+ #endif /* __APPLE__ */
++        movl	%r8d, %r8d
+         xorl	%eax, %eax
+         cmpl	$0x40, %edx
+         movl	%edx, %r9d
+@@ -864,6 +866,7 @@ WC_ASM_ATT_HIDDEN(_AES_CBC_encrypt_AESNI)
+ .p2align	4
+ _AES_CBC_encrypt_AESNI:
+ #endif /* __APPLE__ */
++        movl	%r9d, %r9d
+         movdqu	(%rdx), %xmm0
+         xorl	%eax, %eax
+         cmpl	%ecx, %eax
+@@ -935,6 +938,7 @@ WC_ASM_ATT_HIDDEN(_AES_CBC_decrypt_AESNI)
+ _AES_CBC_decrypt_AESNI:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%r9d, %r9d
+         movdqu	(%rdx), %xmm4
+         xorl	%eax, %eax
+         cmpl	$0x40, %ecx
+@@ -1144,6 +1148,7 @@ WC_ASM_ATT_HIDDEN(_AES_CTR_encrypt_AESNI)
+ _AES_CTR_encrypt_AESNI:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%r8d, %r8d
+         movdqu	L_aes_ctr_aesni_bswap(%rip), %xmm8
+         movdqu	L_aes_ctr_aesni_one(%rip), %xmm9
+         pxor	%xmm10, %xmm10
+@@ -1368,6 +1373,7 @@ WC_ASM_ATT_HIDDEN(_AES_ECB_encrypt_avx1)
+ .p2align	4
+ _AES_ECB_encrypt_avx1:
+ #endif /* __APPLE__ */
++        movl	%r8d, %r8d
+         xorl	%eax, %eax
+         cmpl	$0x40, %edx
+         movl	%edx, %r9d
+@@ -1538,6 +1544,7 @@ WC_ASM_ATT_HIDDEN(_AES_ECB_decrypt_avx1)
+ .p2align	4
+ _AES_ECB_decrypt_avx1:
+ #endif /* __APPLE__ */
++        movl	%r8d, %r8d
+         xorl	%eax, %eax
+         cmpl	$0x40, %edx
+         movl	%edx, %r9d
+@@ -1708,6 +1715,7 @@ WC_ASM_ATT_HIDDEN(_AES_CBC_encrypt_avx1)
+ .p2align	4
+ _AES_CBC_encrypt_avx1:
+ #endif /* __APPLE__ */
++        movl	%r9d, %r9d
+         vmovdqu	(%rdx), %xmm0
+         xorl	%eax, %eax
+         cmpl	%ecx, %eax
+@@ -1779,6 +1787,7 @@ WC_ASM_ATT_HIDDEN(_AES_CBC_decrypt_avx1)
+ _AES_CBC_decrypt_avx1:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%r9d, %r9d
+         vmovdqu	(%rdx), %xmm4
+         xorl	%eax, %eax
+         cmpl	$0x40, %ecx
+@@ -1985,6 +1994,7 @@ WC_ASM_ATT_HIDDEN(_AES_CTR_encrypt_avx1)
+ _AES_CTR_encrypt_avx1:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%r8d, %r8d
+         vmovdqu	L_aes_ctr_avx1_bswap(%rip), %xmm8
+         vmovdqu	L_aes_ctr_avx1_one(%rip), %xmm9
+         vpxor	%xmm10, %xmm10, %xmm10
+@@ -2195,6 +2205,7 @@ WC_ASM_ATT_HIDDEN(_AES_ECB_encrypt_vaes)
+ .p2align	4
+ _AES_ECB_encrypt_vaes:
+ #endif /* __APPLE__ */
++        movl	%r8d, %r8d
+         xorl	%eax, %eax
+         cmpl	$0x80, %edx
+         movl	%edx, %r9d
+@@ -2482,6 +2493,7 @@ WC_ASM_ATT_HIDDEN(_AES_ECB_decrypt_vaes)
+ .p2align	4
+ _AES_ECB_decrypt_vaes:
+ #endif /* __APPLE__ */
++        movl	%r8d, %r8d
+         xorl	%eax, %eax
+         cmpl	$0x80, %edx
+         movl	%edx, %r9d
+@@ -2769,6 +2781,7 @@ WC_ASM_ATT_HIDDEN(_AES_CBC_encrypt_vaes)
+ .p2align	4
+ _AES_CBC_encrypt_vaes:
+ #endif /* __APPLE__ */
++        movl	%r9d, %r9d
+         vmovdqu	(%rdx), %xmm0
+         xorl	%eax, %eax
+         cmpl	%ecx, %eax
+@@ -2840,6 +2853,7 @@ WC_ASM_ATT_HIDDEN(_AES_CBC_decrypt_vaes)
+ _AES_CBC_decrypt_vaes:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%r9d, %r9d
+         vmovdqu	(%rdx), %xmm8
+         xorl	%eax, %eax
+         cmpl	$0x80, %ecx
+@@ -3191,6 +3205,7 @@ WC_ASM_ATT_HIDDEN(_AES_CTR_encrypt_vaes)
+ _AES_CTR_encrypt_vaes:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%r8d, %r8d
+         vbroadcasti128	L_aes_ctr_bswap_vaes(%rip), %ymm8
+         vbroadcasti128	(%r9), %ymm7
+         vpshufb	%ymm8, %ymm7, %ymm7
+@@ -3623,6 +3638,7 @@ WC_ASM_ATT_HIDDEN(_AES_ECB_encrypt_avx512)
+ .p2align	4
+ _AES_ECB_encrypt_avx512:
+ #endif /* __APPLE__ */
++        movl	%r8d, %r8d
+         xorl	%eax, %eax
+         cmpl	$32, %edx
+         jb	L_AES_ECB_encrypt_avx512_done_32
+@@ -3931,6 +3947,7 @@ WC_ASM_ATT_HIDDEN(_AES_ECB_decrypt_avx512)
+ .p2align	4
+ _AES_ECB_decrypt_avx512:
+ #endif /* __APPLE__ */
++        movl	%r8d, %r8d
+         xorl	%eax, %eax
+         cmpl	$32, %edx
+         jb	L_AES_ECB_decrypt_avx512_done_32
+@@ -4239,6 +4256,7 @@ WC_ASM_ATT_HIDDEN(_AES_CBC_encrypt_avx512)
+ .p2align	4
+ _AES_CBC_encrypt_avx512:
+ #endif /* __APPLE__ */
++        movl	%r9d, %r9d
+         vmovdqu	(%rdx), %xmm0
+         xorl	%eax, %eax
+         cmpl	%ecx, %eax
+@@ -4309,6 +4327,7 @@ WC_ASM_ATT_HIDDEN(_AES_CBC_decrypt_avx512)
+ _AES_CBC_decrypt_avx512:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%r9d, %r9d
+         vmovdqu	(%rdx), %xmm8
+         xorl	%eax, %eax
+         cmpl	$32, %ecx
+@@ -4687,6 +4706,7 @@ WC_ASM_ATT_HIDDEN(_AES_CTR_encrypt_avx512)
+ _AES_CTR_encrypt_avx512:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%r8d, %r8d
+         vbroadcasti32x4	L_aes_ctr_bswap_avx512(%rip), %zmm8
+         vbroadcasti32x4	(%r9), %zmm7
+         vpshufb	%zmm8, %zmm7, %zmm7
+diff --git a/wolfcrypt/src/aes_xts_asm.S b/wolfcrypt/src/aes_xts_asm.S
+index 92021fc..2f041d4 100644
+--- a/wolfcrypt/src/aes_xts_asm.S
++++ b/wolfcrypt/src/aes_xts_asm.S
+@@ -59,6 +59,7 @@ WC_ASM_ATT_HIDDEN(_AES_XTS_init_aesni)
+ .p2align	4
+ _AES_XTS_init_aesni:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         movdqu	(%rdi), %xmm0
+         # aes_enc_block
+         pxor	(%rsi), %xmm0
+@@ -128,7 +129,7 @@ _AES_XTS_encrypt_aesni:
+ #endif /* __APPLE__ */
+         pushq	%r12
+         pushq	%r13
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r12
+         movl	24(%rsp), %r10d
+         subq	$0x48, %rsp
+@@ -451,8 +452,9 @@ WC_ASM_ATT_HIDDEN(_AES_XTS_encrypt_update_aesni)
+ _AES_XTS_encrypt_update_aesni:
+ #endif /* __APPLE__ */
+         pushq	%r12
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r10
++        movl	%r9d, %r9d
+         subq	$0x40, %rsp
+         movdqu	L_aes_xts_gc_xts(%rip), %xmm12
+         movdqu	(%r8), %xmm0
+@@ -739,7 +741,7 @@ _AES_XTS_decrypt_aesni:
+ #endif /* __APPLE__ */
+         pushq	%r12
+         pushq	%r13
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r12
+         movl	24(%rsp), %r10d
+         subq	$24, %rsp
+@@ -1116,8 +1118,9 @@ WC_ASM_ATT_HIDDEN(_AES_XTS_decrypt_update_aesni)
+ _AES_XTS_decrypt_update_aesni:
+ #endif /* __APPLE__ */
+         pushq	%r12
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r10
++        movl	%r9d, %r9d
+         subq	$16, %rsp
+         movdqu	L_aes_xts_gc_xts(%rip), %xmm12
+         movdqu	(%r8), %xmm0
+@@ -1457,6 +1460,7 @@ WC_ASM_ATT_HIDDEN(_AES_XTS_init_avx1)
+ .p2align	4
+ _AES_XTS_init_avx1:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vmovdqu	(%rdi), %xmm0
+         # aes_enc_block
+         vpxor	(%rsi), %xmm0, %xmm0
+@@ -1526,7 +1530,7 @@ _AES_XTS_encrypt_avx1:
+ #endif /* __APPLE__ */
+         pushq	%r12
+         pushq	%r13
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r12
+         movl	24(%rsp), %r10d
+         subq	$0x48, %rsp
+@@ -1840,8 +1844,9 @@ WC_ASM_ATT_HIDDEN(_AES_XTS_encrypt_update_avx1)
+ _AES_XTS_encrypt_update_avx1:
+ #endif /* __APPLE__ */
+         pushq	%r12
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r10
++        movl	%r9d, %r9d
+         subq	$0x40, %rsp
+         vmovdqu	L_avx1_aes_xts_gc_xts(%rip), %xmm12
+         vmovdqu	(%r8), %xmm0
+@@ -2119,7 +2124,7 @@ _AES_XTS_decrypt_avx1:
+ #endif /* __APPLE__ */
+         pushq	%r12
+         pushq	%r13
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r12
+         movl	24(%rsp), %r10d
+         subq	$24, %rsp
+@@ -2485,8 +2490,9 @@ WC_ASM_ATT_HIDDEN(_AES_XTS_decrypt_update_avx1)
+ _AES_XTS_decrypt_update_avx1:
+ #endif /* __APPLE__ */
+         pushq	%r12
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r10
++        movl	%r9d, %r9d
+         subq	$16, %rsp
+         vmovdqu	L_avx1_aes_xts_gc_xts(%rip), %xmm12
+         vmovdqu	(%r8), %xmm0
+@@ -2816,6 +2822,7 @@ WC_ASM_ATT_HIDDEN(_AES_XTS_init_vaes)
+ .p2align	4
+ _AES_XTS_init_vaes:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vmovdqu	(%rdi), %xmm0
+         # aes_enc_block
+         vpxor	(%rsi), %xmm0, %xmm0
+@@ -2923,7 +2930,7 @@ _AES_XTS_encrypt_vaes:
+ #endif /* __APPLE__ */
+         pushq	%r12
+         pushq	%r13
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r12
+         movl	24(%rsp), %r10d
+         subq	$0x48, %rsp
+@@ -3424,8 +3431,9 @@ WC_ASM_ATT_HIDDEN(_AES_XTS_encrypt_update_vaes)
+ _AES_XTS_encrypt_update_vaes:
+ #endif /* __APPLE__ */
+         pushq	%r12
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r10
++        movl	%r9d, %r9d
+         subq	$0x40, %rsp
+         vmovdqu	L_vaes_aes_xts_gc_xts(%rip), %xmm12
+         vbroadcasti128	L_vaes_aes_xts_poly(%rip), %ymm13
+@@ -3890,7 +3898,7 @@ _AES_XTS_decrypt_vaes:
+ #endif /* __APPLE__ */
+         pushq	%r12
+         pushq	%r13
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r12
+         movl	24(%rsp), %r10d
+         subq	$0x48, %rsp
+@@ -4465,8 +4473,9 @@ WC_ASM_ATT_HIDDEN(_AES_XTS_decrypt_update_vaes)
+ _AES_XTS_decrypt_update_vaes:
+ #endif /* __APPLE__ */
+         pushq	%r12
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r10
++        movl	%r9d, %r9d
+         subq	$0x40, %rsp
+         vmovdqu	L_vaes_aes_xts_gc_xts(%rip), %xmm12
+         vbroadcasti128	L_vaes_aes_xts_poly(%rip), %ymm13
+@@ -5004,6 +5013,7 @@ WC_ASM_ATT_HIDDEN(_AES_XTS_init_avx512)
+ .p2align	4
+ _AES_XTS_init_avx512:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vmovdqu	(%rdi), %xmm0
+         # aes_enc_block
+         vpxor	(%rsi), %xmm0, %xmm0
+@@ -5115,7 +5125,7 @@ _AES_XTS_encrypt_avx512:
+ #endif /* __APPLE__ */
+         pushq	%r12
+         pushq	%r13
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r12
+         movl	24(%rsp), %r10d
+         subq	$0x48, %rsp
+@@ -5623,8 +5633,9 @@ WC_ASM_ATT_HIDDEN(_AES_XTS_encrypt_update_avx512)
+ _AES_XTS_encrypt_update_avx512:
+ #endif /* __APPLE__ */
+         pushq	%r12
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r10
++        movl	%r9d, %r9d
+         subq	$0x40, %rsp
+         vmovdqu	L_avx512_aes_xts_gc_xts(%rip), %xmm12
+         vbroadcasti32x4	L_avx512_aes_xts_poly(%rip), %zmm13
+@@ -6096,7 +6107,7 @@ _AES_XTS_decrypt_avx512:
+ #endif /* __APPLE__ */
+         pushq	%r12
+         pushq	%r13
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r12
+         movl	24(%rsp), %r10d
+         subq	$0x48, %rsp
+@@ -6688,8 +6699,9 @@ WC_ASM_ATT_HIDDEN(_AES_XTS_decrypt_update_avx512)
+ _AES_XTS_decrypt_update_avx512:
+ #endif /* __APPLE__ */
+         pushq	%r12
+-        movq	%rdx, %rax
++        movl	%edx, %eax
+         movq	%rcx, %r10
++        movl	%r9d, %r9d
+         subq	$0x40, %rsp
+         vmovdqu	L_avx512_aes_xts_gc_xts(%rip), %xmm12
+         vbroadcasti32x4	L_avx512_aes_xts_poly(%rip), %zmm13
+diff --git a/wolfcrypt/src/aes_xts_asm.asm b/wolfcrypt/src/aes_xts_asm.asm
+index 90bdda8..6cb0693 100644
+--- a/wolfcrypt/src/aes_xts_asm.asm
++++ b/wolfcrypt/src/aes_xts_asm.asm
+@@ -55,6 +55,7 @@ ELSE
+ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_XTS_init_aesni PROC
++        mov	r8d, r8d
+         movdqu	xmm0, OWORD PTR [rcx]
+         ; aes_enc_block
+         pxor	xmm0, [rdx]
+@@ -126,7 +127,7 @@ AES_XTS_encrypt_aesni PROC
+         push	r13
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r12, r9
+         mov	r8, QWORD PTR [rsp+72]
+         mov	r9, QWORD PTR [rsp+80]
+@@ -466,7 +467,7 @@ AES_XTS_encrypt_update_aesni PROC
+         push	r12
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r10, r9
+         mov	r8, QWORD PTR [rsp+64]
+         mov	r9d, DWORD PTR [rsp+72]
+@@ -771,7 +772,7 @@ AES_XTS_decrypt_aesni PROC
+         push	r13
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r12, r9
+         mov	r8, QWORD PTR [rsp+72]
+         mov	r9, QWORD PTR [rsp+80]
+@@ -1165,7 +1166,7 @@ AES_XTS_decrypt_update_aesni PROC
+         push	r12
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r10, r9
+         mov	r8, QWORD PTR [rsp+64]
+         mov	r9d, DWORD PTR [rsp+72]
+@@ -1519,6 +1520,7 @@ ELSE
+ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_XTS_init_avx1 PROC
++        mov	r8d, r8d
+         vmovdqu	xmm0, OWORD PTR [rcx]
+         ; aes_enc_block
+         vpxor	xmm0, xmm0, [rdx]
+@@ -1590,7 +1592,7 @@ AES_XTS_encrypt_avx1 PROC
+         push	r13
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r12, r9
+         mov	r8, QWORD PTR [rsp+72]
+         mov	r9, QWORD PTR [rsp+80]
+@@ -1921,7 +1923,7 @@ AES_XTS_encrypt_update_avx1 PROC
+         push	r12
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r10, r9
+         mov	r8, QWORD PTR [rsp+64]
+         mov	r9d, DWORD PTR [rsp+72]
+@@ -2217,7 +2219,7 @@ AES_XTS_decrypt_avx1 PROC
+         push	r13
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r12, r9
+         mov	r8, QWORD PTR [rsp+72]
+         mov	r9, QWORD PTR [rsp+80]
+@@ -2600,7 +2602,7 @@ AES_XTS_decrypt_update_avx1 PROC
+         push	r12
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r10, r9
+         mov	r8, QWORD PTR [rsp+64]
+         mov	r9d, DWORD PTR [rsp+72]
+@@ -2944,6 +2946,7 @@ ELSE
+ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_XTS_init_vaes PROC
++        mov	r8d, r8d
+         vmovdqu	xmm0, OWORD PTR [rcx]
+         ; aes_enc_block
+         vpxor	xmm0, xmm0, [rdx]
+@@ -3062,7 +3065,7 @@ AES_XTS_encrypt_vaes PROC
+         push	r13
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r12, r9
+         mov	r8, QWORD PTR [rsp+72]
+         mov	r9, QWORD PTR [rsp+80]
+@@ -3586,7 +3589,7 @@ AES_XTS_encrypt_update_vaes PROC
+         push	r12
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r10, r9
+         mov	r8, QWORD PTR [rsp+64]
+         mov	r9d, DWORD PTR [rsp+72]
+@@ -4075,7 +4078,7 @@ AES_XTS_decrypt_vaes PROC
+         push	r13
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r12, r9
+         mov	r8, QWORD PTR [rsp+72]
+         mov	r9, QWORD PTR [rsp+80]
+@@ -4673,7 +4676,7 @@ AES_XTS_decrypt_update_vaes PROC
+         push	r12
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r10, r9
+         mov	r8, QWORD PTR [rsp+64]
+         mov	r9d, DWORD PTR [rsp+72]
+@@ -5231,6 +5234,7 @@ ELSE
+ _TEXT SEGMENT READONLY PARA
+ ENDIF
+ AES_XTS_init_avx512 PROC
++        mov	r8d, r8d
+         vmovdqu	xmm0, OWORD PTR [rcx]
+         ; aes_enc_block
+         vpxor	xmm0, xmm0, [rdx]
+@@ -5353,7 +5357,7 @@ AES_XTS_encrypt_avx512 PROC
+         push	r13
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r12, r9
+         mov	r8, QWORD PTR [rsp+72]
+         mov	r9, QWORD PTR [rsp+80]
+@@ -5884,7 +5888,7 @@ AES_XTS_encrypt_update_avx512 PROC
+         push	r12
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r10, r9
+         mov	r8, QWORD PTR [rsp+64]
+         mov	r9d, DWORD PTR [rsp+72]
+@@ -6380,7 +6384,7 @@ AES_XTS_decrypt_avx512 PROC
+         push	r13
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r12, r9
+         mov	r8, QWORD PTR [rsp+72]
+         mov	r9, QWORD PTR [rsp+80]
+@@ -6995,7 +6999,7 @@ AES_XTS_decrypt_update_avx512 PROC
+         push	r12
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rax, r8
++        mov	eax, r8d
+         mov	r10, r9
+         mov	r8, QWORD PTR [rsp+64]
+         mov	r9d, DWORD PTR [rsp+72]
+diff --git a/wolfcrypt/src/chacha.c b/wolfcrypt/src/chacha.c
+index 67214e5..c384a78 100644
+--- a/wolfcrypt/src/chacha.c
++++ b/wolfcrypt/src/chacha.c
+@@ -370,6 +370,18 @@ static WC_INLINE int chacha_avx512_beneficial(cpuid_flags_t flags)
+ }
+ #endif /* USE_INTEL_CHACHA_SPEEDUP && HAVE_INTEL_AVX512 */
+ 
++#ifdef USE_INTEL_CHACHA_SPEEDUP
++/* Whether the AVX-512VL kernel handles short input on this CPU.  It is only
++ * built with HAVE_INTEL_AVX512: without it (e.g. NO_AVX512_SUPPORT on MSVC) the
++ * CPUID bit must not steer short input away from the AVX1/SSSE3 paths, as
++ * nothing would pick it up but the scalar code. */
++#ifdef HAVE_INTEL_AVX512
++    #define CHACHA_USE_AVX512_VL(f) (IS_INTEL_AVX512_VL(f) != 0)
++#else
++    #define CHACHA_USE_AVX512_VL(f) 0
++#endif
++#endif /* USE_INTEL_CHACHA_SPEEDUP */
++
+ 
+ #if (!defined(USE_INTEL_CHACHA_SPEEDUP) && !defined(USE_ARM_CHACHA_SPEEDUP) && \
+     !defined(USE_RISCV_CHACHA_SPEEDUP)) || defined(WOLFSSL_ARM_CHACHA_NEED_C)
+@@ -478,7 +490,7 @@ int wc_Chacha_Process(ChaCha* ctx, byte* output, const byte* input,
+      * cyc) beats the scalar block (~435) - e.g. the per-record Poly1305 key
+      * derivation (a 32-byte ChaCha) in the ChaCha20-Poly1305 two-pass path.
+      * The AVX-512VL path already uses SIMD for one block; match that here. */
+-    if (msglen <= CHACHA_CHUNK_BYTES && IS_INTEL_AVX512_VL(cpuidFlags) == 0 &&
++    if (msglen <= CHACHA_CHUNK_BYTES && !CHACHA_USE_AVX512_VL(cpuidFlags) &&
+             IS_INTEL_AVX1(cpuidFlags)) {
+         SAVE_VECTOR_REGISTERS(return _svr_ret;);
+         chacha_encrypt_avx1(ctx, input, output, msglen);
+@@ -502,7 +514,7 @@ int wc_Chacha_Process(ChaCha* ctx, byte* output, const byte* input,
+      * key + <=2 data blocks).  At >=256 bytes the four-block AVX2/AVX1 kernels
+      * take over below. */
+ #ifdef HAVE_INTEL_SSSE3
+-    if (IS_INTEL_AVX512_VL(cpuidFlags) == 0 &&
++    if (!CHACHA_USE_AVX512_VL(cpuidFlags) &&
+             msglen < 4 * CHACHA_CHUNK_BYTES &&
+             IS_INTEL_SSSE3(cpuidFlags)) {
+         SAVE_VECTOR_REGISTERS(return _svr_ret;);
+@@ -511,7 +523,7 @@ int wc_Chacha_Process(ChaCha* ctx, byte* output, const byte* input,
+         return 0;
+     }
+ #endif
+-    if (IS_INTEL_AVX512_VL(cpuidFlags) == 0 &&
++    if (!CHACHA_USE_AVX512_VL(cpuidFlags) &&
+             msglen < 4 * CHACHA_CHUNK_BYTES) {
+         chacha_encrypt_x64(ctx, input, output, msglen);
+         return 0;
+@@ -532,7 +544,7 @@ int wc_Chacha_Process(ChaCha* ctx, byte* output, const byte* input,
+      * partial four-block tail - using single-instruction vprold rotations on
+      * 128-bit registers (no AVX-512 frequency penalty).  It does not fall back
+      * to any other implementation. */
+-    if (IS_INTEL_AVX512_VL(cpuidFlags) && msglen < 8 * CHACHA_CHUNK_BYTES) {
++    if (CHACHA_USE_AVX512_VL(cpuidFlags) && msglen < 8 * CHACHA_CHUNK_BYTES) {
+         SAVE_VECTOR_REGISTERS(return _svr_ret;);
+         chacha_encrypt_avx512vl(ctx, input, output, msglen);
+         RESTORE_VECTOR_REGISTERS();
+diff --git a/wolfcrypt/src/chacha_asm.S b/wolfcrypt/src/chacha_asm.S
+index fe56bbb..692d84a 100644
+--- a/wolfcrypt/src/chacha_asm.S
++++ b/wolfcrypt/src/chacha_asm.S
+@@ -63,6 +63,7 @@ _chacha_encrypt_x64:
+         pushq	%r13
+         pushq	%r14
+         pushq	%r15
++        movl	%ecx, %ecx
+         subq	$0x48, %rsp
+         cmpl	$0x40, %ecx
+         jb	L_chacha_x64_small
+@@ -506,6 +507,7 @@ _chacha_encrypt_sse3:
+ #endif /* __APPLE__ */
+         pushq	%r12
+         pushq	%r13
++        movl	%ecx, %ecx
+         leaq	L_chacha20_sse3_rotl8(%rip), %r11
+         leaq	L_chacha20_sse3_rotl16(%rip), %r12
+         leaq	L_chacha20_sse3_one(%rip), %r13
+@@ -892,6 +894,7 @@ _chacha_encrypt_avx1:
+         pushq	%r13
+         pushq	%r14
+         pushq	%r15
++        movl	%ecx, %ecx
+         subq	$0x198, %rsp
+         movq	%rsp, %r9
+         leaq	256(%rsp), %r10
+@@ -1465,6 +1468,7 @@ _chacha_encrypt_avx2:
+         pushq	%r12
+         pushq	%r13
+         pushq	%r14
++        movl	%ecx, %ecx
+         subq	$0x320, %rsp
+         movq	%rsp, %r9
+         leaq	L_chacha20_avx2_rotl8(%rip), %r11
+@@ -1868,6 +1872,7 @@ _chacha_encrypt_avx512vl:
+ #endif /* __APPLE__ */
+         pushq	%r12
+         pushq	%r13
++        movl	%ecx, %ecx
+         subq	$0x198, %rsp
+         movq	%rsp, %r9
+         leaq	256(%rsp), %r10
+@@ -2467,6 +2472,7 @@ WC_ASM_ATT_HIDDEN(_chacha_encrypt_avx512)
+ .p2align	4
+ _chacha_encrypt_avx512:
+ #endif /* __APPLE__ */
++        movl	%ecx, %ecx
+         subq	$8, %rsp
+         leaq	L_chacha20_avx512_add(%rip), %r8
+         cmpl	$0x400, %ecx
+@@ -2793,6 +2799,7 @@ _chacha20_poly1305_avx512:
+         pushq	%r15
+         pushq	%rbx
+         pushq	%rbp
++        movl	%r8d, %r8d
+         subq	$0x2d8, %rsp
+         leaq	L_chacha20_poly1305_add(%rip), %r10
+         leaq	L_chacha20_poly1305_four(%rip), %r11
+@@ -5009,6 +5016,7 @@ _chacha20_poly1305_ifma:
+         pushq	%r12
+         pushq	%r13
+         pushq	%r14
++        movl	%r8d, %r8d
+         subq	$0x4b0, %rsp
+         leaq	L_cp512_pc(%rip), %rax
+         leaq	L_cp512_rx(%rip), %r10
+@@ -8310,6 +8318,7 @@ _chacha20_poly1305_ifma_decrypt:
+         pushq	%r12
+         pushq	%r13
+         pushq	%r14
++        movl	%r8d, %r8d
+         subq	$0x4b0, %rsp
+         leaq	L_cp512_pc(%rip), %rax
+         leaq	L_cp512_rx(%rip), %r10
+@@ -10101,6 +10110,7 @@ _chacha20_poly1305_small_enc:
+         pushq	%r15
+         pushq	%rbx
+         pushq	%rbp
++        movl	%r8d, %r8d
+         subq	$0xc8, %rsp
+         movl	256(%rsp), %eax
+         movq	%rax, 128(%rsp)
+@@ -10581,6 +10591,7 @@ _chacha20_poly1305_small_dec:
+         pushq	%r15
+         pushq	%rbx
+         pushq	%rbp
++        movl	%r8d, %r8d
+         subq	$0xa8, %rsp
+         movl	224(%rsp), %eax
+         movq	%rax, 128(%rsp)
+diff --git a/wolfcrypt/src/chacha_asm.asm b/wolfcrypt/src/chacha_asm.asm
+index 5cb2ce3..6d59eca 100644
+--- a/wolfcrypt/src/chacha_asm.asm
++++ b/wolfcrypt/src/chacha_asm.asm
+@@ -49,6 +49,9 @@ chacha_encrypt_x64 PROC
+         push	r13
+         push	r14
+         push	r15
++        push	rdi
++        push	rsi
++        mov	r9d, r9d
+         sub	rsp, 72
+         cmp	r9d, 64
+         jb	L_chacha_x64_small
+@@ -65,8 +68,8 @@ L_chacha_x64_start:
+         mov	ebx, DWORD PTR [rcx+4]
+         mov	r9d, DWORD PTR [rcx+8]
+         mov	r8d, DWORD PTR [rcx+12]
+-        mov	r8d, DWORD PTR [rcx+16]
+-        mov	r9d, DWORD PTR [rcx+20]
++        mov	edi, DWORD PTR [rcx+16]
++        mov	esi, DWORD PTR [rcx+20]
+         mov	r10d, DWORD PTR [rcx+24]
+         mov	r11d, DWORD PTR [rcx+28]
+         mov	r12d, DWORD PTR [rcx+48]
+@@ -75,8 +78,8 @@ L_chacha_x64_start:
+         mov	r15d, DWORD PTR [rcx+60]
+         mov	BYTE PTR [rsp], 10
+ L_chacha_x64_block_crypt_start:
+-        add	eax, r8d
+-        add	ebx, r9d
++        add	eax, edi
++        add	ebx, esi
+         add	r9d, r10d
+         add	r8d, r11d
+         xor	r12d, eax
+@@ -91,16 +94,16 @@ L_chacha_x64_block_crypt_start:
+         add	DWORD PTR [rsp+12], r13d
+         add	DWORD PTR [rsp+16], r14d
+         add	DWORD PTR [rsp+20], r15d
+-        xor	r8d, DWORD PTR [rsp+8]
+-        xor	r9d, DWORD PTR [rsp+12]
++        xor	edi, DWORD PTR [rsp+8]
++        xor	esi, DWORD PTR [rsp+12]
+         xor	r10d, DWORD PTR [rsp+16]
+         xor	r11d, DWORD PTR [rsp+20]
+-        rol	r8d, 12
+-        rol	r9d, 12
++        rol	edi, 12
++        rol	esi, 12
+         rol	r10d, 12
+         rol	r11d, 12
+-        add	eax, r8d
+-        add	ebx, r9d
++        add	eax, edi
++        add	ebx, esi
+         add	r9d, r10d
+         add	r8d, r11d
+         xor	r12d, eax
+@@ -115,18 +118,18 @@ L_chacha_x64_block_crypt_start:
+         add	DWORD PTR [rsp+12], r13d
+         add	DWORD PTR [rsp+16], r14d
+         add	DWORD PTR [rsp+20], r15d
+-        xor	r8d, DWORD PTR [rsp+8]
+-        xor	r9d, DWORD PTR [rsp+12]
++        xor	edi, DWORD PTR [rsp+8]
++        xor	esi, DWORD PTR [rsp+12]
+         xor	r10d, DWORD PTR [rsp+16]
+         xor	r11d, DWORD PTR [rsp+20]
+-        rol	r8d, 7
+-        rol	r9d, 7
++        rol	edi, 7
++        rol	esi, 7
+         rol	r10d, 7
+         rol	r11d, 7
+-        add	eax, r9d
++        add	eax, esi
+         add	ebx, r10d
+         add	r9d, r11d
+-        add	r8d, r8d
++        add	r8d, edi
+         xor	r15d, eax
+         xor	r12d, ebx
+         xor	r13d, r9d
+@@ -139,18 +142,18 @@ L_chacha_x64_block_crypt_start:
+         add	DWORD PTR [rsp+20], r12d
+         add	DWORD PTR [rsp+8], r13d
+         add	DWORD PTR [rsp+12], r14d
+-        xor	r9d, DWORD PTR [rsp+16]
++        xor	esi, DWORD PTR [rsp+16]
+         xor	r10d, DWORD PTR [rsp+20]
+         xor	r11d, DWORD PTR [rsp+8]
+-        xor	r8d, DWORD PTR [rsp+12]
+-        rol	r9d, 12
++        xor	edi, DWORD PTR [rsp+12]
++        rol	esi, 12
+         rol	r10d, 12
+         rol	r11d, 12
+-        rol	r8d, 12
+-        add	eax, r9d
++        rol	edi, 12
++        add	eax, esi
+         add	ebx, r10d
+         add	r9d, r11d
+-        add	r8d, r8d
++        add	r8d, edi
+         xor	r15d, eax
+         xor	r12d, ebx
+         xor	r13d, r9d
+@@ -163,14 +166,14 @@ L_chacha_x64_block_crypt_start:
+         add	DWORD PTR [rsp+20], r12d
+         add	DWORD PTR [rsp+8], r13d
+         add	DWORD PTR [rsp+12], r14d
+-        xor	r9d, DWORD PTR [rsp+16]
++        xor	esi, DWORD PTR [rsp+16]
+         xor	r10d, DWORD PTR [rsp+20]
+         xor	r11d, DWORD PTR [rsp+8]
+-        xor	r8d, DWORD PTR [rsp+12]
+-        rol	r9d, 7
++        xor	edi, DWORD PTR [rsp+12]
++        rol	esi, 7
+         rol	r10d, 7
+         rol	r11d, 7
+-        rol	r8d, 7
++        rol	edi, 7
+         dec	BYTE PTR [rsp]
+         jnz	L_chacha_x64_block_crypt_start
+         mov	rdx, QWORD PTR [rsp+32]
+@@ -179,8 +182,8 @@ L_chacha_x64_block_crypt_start:
+         add	ebx, DWORD PTR [rcx+4]
+         add	r9d, DWORD PTR [rcx+8]
+         add	r8d, DWORD PTR [rcx+12]
+-        add	r8d, DWORD PTR [rcx+16]
+-        add	r9d, DWORD PTR [rcx+20]
++        add	edi, DWORD PTR [rcx+16]
++        add	esi, DWORD PTR [rcx+20]
+         add	r10d, DWORD PTR [rcx+24]
+         add	r11d, DWORD PTR [rcx+28]
+         add	r12d, DWORD PTR [rcx+48]
+@@ -191,8 +194,8 @@ L_chacha_x64_block_crypt_start:
+         xor	ebx, DWORD PTR [rdx+4]
+         xor	r9d, DWORD PTR [rdx+8]
+         xor	r8d, DWORD PTR [rdx+12]
+-        xor	r8d, DWORD PTR [rdx+16]
+-        xor	r9d, DWORD PTR [rdx+20]
++        xor	edi, DWORD PTR [rdx+16]
++        xor	esi, DWORD PTR [rdx+20]
+         xor	r10d, DWORD PTR [rdx+24]
+         xor	r11d, DWORD PTR [rdx+28]
+         xor	r12d, DWORD PTR [rdx+48]
+@@ -203,8 +206,8 @@ L_chacha_x64_block_crypt_start:
+         mov	DWORD PTR [rbp+4], ebx
+         mov	DWORD PTR [rbp+8], r9d
+         mov	DWORD PTR [rbp+12], r8d
+-        mov	DWORD PTR [rbp+16], r8d
+-        mov	DWORD PTR [rbp+20], r9d
++        mov	DWORD PTR [rbp+16], edi
++        mov	DWORD PTR [rbp+20], esi
+         mov	DWORD PTR [rbp+24], r10d
+         mov	DWORD PTR [rbp+28], r11d
+         mov	DWORD PTR [rbp+48], r12d
+@@ -251,8 +254,8 @@ L_chacha_x64_small:
+         mov	ebx, DWORD PTR [rcx+4]
+         mov	r9d, DWORD PTR [rcx+8]
+         mov	r8d, DWORD PTR [rcx+12]
+-        mov	r8d, DWORD PTR [rcx+16]
+-        mov	r9d, DWORD PTR [rcx+20]
++        mov	edi, DWORD PTR [rcx+16]
++        mov	esi, DWORD PTR [rcx+20]
+         mov	r10d, DWORD PTR [rcx+24]
+         mov	r11d, DWORD PTR [rcx+28]
+         mov	r12d, DWORD PTR [rcx+48]
+@@ -261,8 +264,8 @@ L_chacha_x64_small:
+         mov	r15d, DWORD PTR [rcx+60]
+         mov	BYTE PTR [rsp], 10
+ L_chacha_x64_partial_crypt_start:
+-        add	eax, r8d
+-        add	ebx, r9d
++        add	eax, edi
++        add	ebx, esi
+         add	r9d, r10d
+         add	r8d, r11d
+         xor	r12d, eax
+@@ -277,16 +280,16 @@ L_chacha_x64_partial_crypt_start:
+         add	DWORD PTR [rsp+12], r13d
+         add	DWORD PTR [rsp+16], r14d
+         add	DWORD PTR [rsp+20], r15d
+-        xor	r8d, DWORD PTR [rsp+8]
+-        xor	r9d, DWORD PTR [rsp+12]
++        xor	edi, DWORD PTR [rsp+8]
++        xor	esi, DWORD PTR [rsp+12]
+         xor	r10d, DWORD PTR [rsp+16]
+         xor	r11d, DWORD PTR [rsp+20]
+-        rol	r8d, 12
+-        rol	r9d, 12
++        rol	edi, 12
++        rol	esi, 12
+         rol	r10d, 12
+         rol	r11d, 12
+-        add	eax, r8d
+-        add	ebx, r9d
++        add	eax, edi
++        add	ebx, esi
+         add	r9d, r10d
+         add	r8d, r11d
+         xor	r12d, eax
+@@ -301,18 +304,18 @@ L_chacha_x64_partial_crypt_start:
+         add	DWORD PTR [rsp+12], r13d
+         add	DWORD PTR [rsp+16], r14d
+         add	DWORD PTR [rsp+20], r15d
+-        xor	r8d, DWORD PTR [rsp+8]
+-        xor	r9d, DWORD PTR [rsp+12]
++        xor	edi, DWORD PTR [rsp+8]
++        xor	esi, DWORD PTR [rsp+12]
+         xor	r10d, DWORD PTR [rsp+16]
+         xor	r11d, DWORD PTR [rsp+20]
+-        rol	r8d, 7
+-        rol	r9d, 7
++        rol	edi, 7
++        rol	esi, 7
+         rol	r10d, 7
+         rol	r11d, 7
+-        add	eax, r9d
++        add	eax, esi
+         add	ebx, r10d
+         add	r9d, r11d
+-        add	r8d, r8d
++        add	r8d, edi
+         xor	r15d, eax
+         xor	r12d, ebx
+         xor	r13d, r9d
+@@ -325,18 +328,18 @@ L_chacha_x64_partial_crypt_start:
+         add	DWORD PTR [rsp+20], r12d
+         add	DWORD PTR [rsp+8], r13d
+         add	DWORD PTR [rsp+12], r14d
+-        xor	r9d, DWORD PTR [rsp+16]
++        xor	esi, DWORD PTR [rsp+16]
+         xor	r10d, DWORD PTR [rsp+20]
+         xor	r11d, DWORD PTR [rsp+8]
+-        xor	r8d, DWORD PTR [rsp+12]
+-        rol	r9d, 12
++        xor	edi, DWORD PTR [rsp+12]
++        rol	esi, 12
+         rol	r10d, 12
+         rol	r11d, 12
+-        rol	r8d, 12
+-        add	eax, r9d
++        rol	edi, 12
++        add	eax, esi
+         add	ebx, r10d
+         add	r9d, r11d
+-        add	r8d, r8d
++        add	r8d, edi
+         xor	r15d, eax
+         xor	r12d, ebx
+         xor	r13d, r9d
+@@ -349,14 +352,14 @@ L_chacha_x64_partial_crypt_start:
+         add	DWORD PTR [rsp+20], r12d
+         add	DWORD PTR [rsp+8], r13d
+         add	DWORD PTR [rsp+12], r14d
+-        xor	r9d, DWORD PTR [rsp+16]
++        xor	esi, DWORD PTR [rsp+16]
+         xor	r10d, DWORD PTR [rsp+20]
+         xor	r11d, DWORD PTR [rsp+8]
+-        xor	r8d, DWORD PTR [rsp+12]
+-        rol	r9d, 7
++        xor	edi, DWORD PTR [rsp+12]
++        rol	esi, 7
+         rol	r10d, 7
+         rol	r11d, 7
+-        rol	r8d, 7
++        rol	edi, 7
+         dec	BYTE PTR [rsp]
+         jnz	L_chacha_x64_partial_crypt_start
+         mov	rdx, QWORD PTR [rsp+32]
+@@ -364,8 +367,8 @@ L_chacha_x64_partial_crypt_start:
+         add	ebx, DWORD PTR [rcx+4]
+         add	r9d, DWORD PTR [rcx+8]
+         add	r8d, DWORD PTR [rcx+12]
+-        add	r8d, DWORD PTR [rcx+16]
+-        add	r9d, DWORD PTR [rcx+20]
++        add	edi, DWORD PTR [rcx+16]
++        add	esi, DWORD PTR [rcx+20]
+         add	r10d, DWORD PTR [rcx+24]
+         add	r11d, DWORD PTR [rcx+28]
+         add	r12d, DWORD PTR [rcx+48]
+@@ -377,8 +380,8 @@ L_chacha_x64_partial_crypt_start:
+         mov	DWORD PTR [rbp+4], ebx
+         mov	DWORD PTR [rbp+8], r9d
+         mov	DWORD PTR [rbp+12], r8d
+-        mov	DWORD PTR [rbp+16], r8d
+-        mov	DWORD PTR [rbp+20], r9d
++        mov	DWORD PTR [rbp+16], edi
++        mov	DWORD PTR [rbp+20], esi
+         mov	DWORD PTR [rbp+24], r10d
+         mov	DWORD PTR [rbp+28], r11d
+         mov	DWORD PTR [rbp+48], r12d
+@@ -401,16 +404,16 @@ L_chacha_x64_partial_crypt_start:
+         mov	r9, QWORD PTR [rsp+40]
+         add	DWORD PTR [rcx+48], 1
+         add	rsp, 48
+-        mov	r8d, r9d
++        mov	edi, r9d
+         xor	rbx, rbx
+-        and	r8d, 7
++        and	edi, 7
+         jz	L_chacha_x64_partial_start64
+ L_chacha_x64_partial_start8:
+         movzx	eax, BYTE PTR [rbp+rbx]
+         xor	al, BYTE PTR [rdx+rbx]
+         mov	BYTE PTR [r8+rbx], al
+         inc	ebx
+-        cmp	ebx, r8d
++        cmp	ebx, edi
+         jne	L_chacha_x64_partial_start8
+         je	L_chacha_x64_partial_end64
+ L_chacha_x64_partial_start64:
+@@ -426,6 +429,8 @@ L_chacha_x64_partial_end64:
+         mov	DWORD PTR [rcx+76], r9d
+ L_chacha_x64_done:
+         add	rsp, 72
++        pop	rsi
++        pop	rdi
+         pop	r15
+         pop	r14
+         pop	r13
+@@ -460,6 +465,7 @@ chacha_encrypt_sse3 PROC
+         push	r13
+         push	r14
+         push	r15
++        mov	r9d, r9d
+         sub	rsp, 168
+         movdqu	OWORD PTR [rsp+8], xmm6
+         movdqu	OWORD PTR [rsp+24], xmm7
+@@ -831,6 +837,7 @@ chacha_encrypt_avx1 PROC
+         push	r15
+         push	rdi
+         push	rsi
++        mov	r9d, r9d
+         sub	rsp, 568
+         vmovdqu	OWORD PTR [rsp+408], xmm6
+         vmovdqu	OWORD PTR [rsp+424], xmm7
+@@ -1387,6 +1394,7 @@ chacha_encrypt_avx2 PROC
+         push	r14
+         push	r15
+         push	rdi
++        mov	r9d, r9d
+         sub	rsp, 960
+         vmovdqu	OWORD PTR [rsp+800], xmm6
+         vmovdqu	OWORD PTR [rsp+816], xmm7
+@@ -1785,6 +1793,7 @@ chacha_encrypt_avx512vl PROC
+         push	r13
+         push	r14
+         push	r15
++        mov	r9d, r9d
+         sub	rsp, 568
+         vmovdqu	OWORD PTR [rsp+408], xmm6
+         vmovdqu	OWORD PTR [rsp+424], xmm7
+@@ -2386,6 +2395,7 @@ ptr_L_chacha20_avx512_add QWORD L_chacha20_avx512_add
+ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ chacha_encrypt_avx512 PROC
++        mov	r9d, r9d
+         sub	rsp, 168
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -2695,7 +2705,7 @@ chacha20_poly1305_avx512 PROC
+         mov	rsi, rdx
+         mov	rdx, r8
+         mov	rcx, r9
+-        mov	rax, QWORD PTR [rsp+104]
++        mov	eax, DWORD PTR [rsp+104]
+         sub	rsp, 888
+         vmovdqu	OWORD PTR [rsp+728], xmm6
+         vmovdqu	OWORD PTR [rsp+744], xmm7
+@@ -4906,7 +4916,7 @@ chacha20_poly1305_ifma PROC
+         mov	rsi, rdx
+         mov	rdx, r8
+         mov	rcx, r9
+-        mov	rax, QWORD PTR [rsp+80]
++        mov	eax, DWORD PTR [rsp+80]
+         sub	rsp, 1360
+         vmovdqu	OWORD PTR [rsp+1200], xmm6
+         vmovdqu	OWORD PTR [rsp+1216], xmm7
+@@ -8223,7 +8233,7 @@ chacha20_poly1305_ifma_decrypt PROC
+         mov	rsi, rdx
+         mov	rdx, r8
+         mov	rcx, r9
+-        mov	rax, QWORD PTR [rsp+80]
++        mov	eax, DWORD PTR [rsp+80]
+         sub	rsp, 1360
+         vmovdqu	OWORD PTR [rsp+1200], xmm6
+         vmovdqu	OWORD PTR [rsp+1216], xmm7
+@@ -10005,7 +10015,7 @@ chacha20_poly1305_small_enc PROC
+         push	rsi
+         push	rbx
+         push	rbp
+-        mov	r10, QWORD PTR [rsp+104]
++        mov	r10d, DWORD PTR [rsp+104]
+         mov	r11, QWORD PTR [rsp+112]
+         sub	rsp, 360
+         vmovdqu	OWORD PTR [rsp+200], xmm6
+@@ -10498,7 +10508,7 @@ chacha20_poly1305_small_dec PROC
+         push	rsi
+         push	rbx
+         push	rbp
+-        mov	r10, QWORD PTR [rsp+104]
++        mov	r10d, DWORD PTR [rsp+104]
+         mov	r11, QWORD PTR [rsp+112]
+         sub	rsp, 328
+         vmovdqu	OWORD PTR [rsp+168], xmm6
+diff --git a/wolfcrypt/src/cpuid.c b/wolfcrypt/src/cpuid.c
+index 39b4581..43bc924 100644
+--- a/wolfcrypt/src/cpuid.c
++++ b/wolfcrypt/src/cpuid.c
+@@ -169,6 +169,45 @@
+     }
+ 
+ 
++#ifndef WC_CPUID_NO_TUNING
++    /* Return the tuning bits (CPUID_SLOW_*) for an Intel CPU, chosen from the
++     * family and display model in CPUID.1:EAX. */
++    static cpuid_flags_t cpuid_intel_tuning(void)
++    {
++        unsigned int reg[5];
++        word32 family;
++        word32 model;
++
++        XMEMSET(reg, '\0', sizeof(reg));
++        cpuid(reg, 1, 0);
++
++        family = (reg[EAX] >> 8) & 0xf;
++        model  = (reg[EAX] >> 4) & 0xf;
++        if ((family == 0x6) || (family == 0xf)) {
++            model |= ((reg[EAX] >> 16) & 0xf) << 4;
++        }
++        if (family == 0xf) {
++            family += (reg[EAX] >> 20) & 0xff;
++        }
++
++        if (family == 0x6) {
++            switch (model) {
++                /* Arrow Lake and Lunar Lake (Lion Cove / Skymont): VAES AES
++                 * is no faster than AVX2, and the AVX2 Keccak block is slower
++                 * than BMI2 and C. */
++                case 0xB5: /* Arrow Lake U */
++                case 0xC5: /* Arrow Lake H */
++                case 0xC6: /* Arrow Lake S */
++                case 0xBD: /* Lunar Lake M */
++                    return CPUID_SLOW_VAES | CPUID_SLOW_AVX2_SHA3;
++                default:
++                    break;
++            }
++        }
++        return 0;
++    }
++#endif
++
+     static WC_INLINE void cpuid_set_flags(void)
+     {
+         if (WOLFSSL_ATOMIC_LOAD(cpuid_flags) == WC_CPUID_INITIALIZER) {
+@@ -217,6 +256,11 @@
+             if (cpuid_is_intel())          { new_cpuid_flags |= CPUID_INTEL ; }
+             if (cpuid_is_amd())            { new_cpuid_flags |= CPUID_AMD   ; }
+             if (cpuid_flag(1, 0, ECX,  9)) { new_cpuid_flags |= CPUID_SSSE3 ; }
++        #ifndef WC_CPUID_NO_TUNING
++            if (cpuid_is_intel()) {
++                new_cpuid_flags |= cpuid_intel_tuning();
++            }
++        #endif
+             (void)wolfSSL_Atomic_Uint_CompareExchange
+                 (&cpuid_flags, &old_cpuid_flags, new_cpuid_flags);
+         }
+diff --git a/wolfcrypt/src/fe_x25519_asm.S b/wolfcrypt/src/fe_x25519_asm.S
+index f789086..59e4270 100644
+--- a/wolfcrypt/src/fe_x25519_asm.S
++++ b/wolfcrypt/src/fe_x25519_asm.S
+@@ -668,6 +668,7 @@ WC_ASM_ATT_HIDDEN(_fe_cmov)
+ .p2align	4
+ _fe_cmov:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         cmpl	$0x01, %edx
+         movq	(%rdi), %rcx
+         movq	8(%rdi), %r8
+diff --git a/wolfcrypt/src/fe_x25519_asm.asm b/wolfcrypt/src/fe_x25519_asm.asm
+index 219ae16..ae55167 100644
+--- a/wolfcrypt/src/fe_x25519_asm.asm
++++ b/wolfcrypt/src/fe_x25519_asm.asm
+@@ -309,6 +309,7 @@ _TEXT ENDS
+ _TEXT SEGMENT READONLY PARA
+ fe_cmov PROC
+         push	r12
++        mov	r8d, r8d
+         cmp	r8d, 1
+         mov	r9, QWORD PTR [rcx]
+         mov	r10, QWORD PTR [rcx+8]
+diff --git a/wolfcrypt/src/sha256_asm.S b/wolfcrypt/src/sha256_asm.S
+index 85fab76..51fd220 100644
+--- a/wolfcrypt/src/sha256_asm.S
++++ b/wolfcrypt/src/sha256_asm.S
+@@ -296,6 +296,7 @@ WC_ASM_ATT_HIDDEN(_Transform_Sha256_SSE2_Sha_Len)
+ .p2align	4
+ _Transform_Sha256_SSE2_Sha_Len:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         leaq	L_sse2_sha256_sha_k(%rip), %rax
+         movdqa	L_sse2_sha256_shuf_mask(%rip), %xmm10
+         movq	(%rdi), %xmm1
+@@ -2963,7 +2964,7 @@ _Transform_Sha256_AVX1_Len:
+         pushq	%r14
+         pushq	%r15
+         pushq	%rbp
+-        movq	%rdx, %rbp
++        movl	%edx, %ebp
+         subq	$0x48, %rsp
+         movl	%ebp, 64(%rsp)
+         leaq	L_avx1_sha256_k(%rip), %rbp
+@@ -7785,7 +7786,7 @@ _Transform_Sha256_AVX1_RORX_Len:
+         pushq	%r14
+         pushq	%r15
+         pushq	%rbp
+-        movq	%rdx, %rbp
++        movl	%edx, %ebp
+         subq	$0x48, %rsp
+         movl	%ebp, 64(%rsp)
+         leaq	L_avx1_rorx_sha256_k(%rip), %rbp
+@@ -10356,6 +10357,7 @@ WC_ASM_ATT_HIDDEN(_Transform_Sha256_AVX1_Sha_Len)
+ .p2align	4
+ _Transform_Sha256_AVX1_Sha_Len:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         leaq	L_avx1_sha256_sha_k(%rip), %rax
+         vmovdqa	L_avx1_sha256_shuf_mask(%rip), %xmm10
+         vmovq	(%rdi), %xmm1
+@@ -13016,7 +13018,7 @@ _Transform_Sha256_AVX2_Len:
+         pushq	%r14
+         pushq	%r15
+         pushq	%rbp
+-        movq	%rdx, %rbp
++        movl	%edx, %ebp
+         subq	$0x208, %rsp
+         testb	$0x40, %bpl
+         movl	%ebp, 512(%rsp)
+@@ -19599,7 +19601,7 @@ _Transform_Sha256_AVX2_RORX_Len:
+         pushq	%r14
+         pushq	%r15
+         pushq	%rbp
+-        movq	%rdx, %rbp
++        movl	%edx, %ebp
+         subq	$0x208, %rsp
+         testb	$0x40, %bpl
+         movl	%ebp, 512(%rsp)
+diff --git a/wolfcrypt/src/sha256_asm.asm b/wolfcrypt/src/sha256_asm.asm
+index be9750a..2e7be7e 100644
+--- a/wolfcrypt/src/sha256_asm.asm
++++ b/wolfcrypt/src/sha256_asm.asm
+@@ -267,6 +267,7 @@ Transform_Sha256_SSE2_Sha ENDP
+ _TEXT ENDS
+ _TEXT SEGMENT READONLY PARA
+ Transform_Sha256_SSE2_Sha_Len PROC
++        mov	r8d, r8d
+         sub	rsp, 88
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -2918,7 +2919,7 @@ Transform_Sha256_AVX1_Len PROC
+         push	rbp
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rbp, r8
++        mov	ebp, r8d
+         sub	rsp, 200
+         vmovdqu	OWORD PTR [rsp+72], xmm6
+         vmovdqu	OWORD PTR [rsp+88], xmm7
+@@ -7730,7 +7731,7 @@ Transform_Sha256_AVX1_RORX_Len PROC
+         push	rbp
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rbp, r8
++        mov	ebp, r8d
+         sub	rsp, 200
+         vmovdqu	OWORD PTR [rsp+72], xmm6
+         vmovdqu	OWORD PTR [rsp+88], xmm7
+@@ -10291,6 +10292,7 @@ Transform_Sha256_AVX1_Sha ENDP
+ _TEXT ENDS
+ _TEXT SEGMENT READONLY PARA
+ Transform_Sha256_AVX1_Sha_Len PROC
++        mov	r8d, r8d
+         sub	rsp, 88
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -12935,7 +12937,7 @@ Transform_Sha256_AVX2_Len PROC
+         push	rbp
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rbp, r8
++        mov	ebp, r8d
+         sub	rsp, 648
+         vmovdqu	OWORD PTR [rsp+520], xmm6
+         vmovdqu	OWORD PTR [rsp+536], xmm7
+@@ -19506,7 +19508,7 @@ Transform_Sha256_AVX2_RORX_Len PROC
+         push	rbp
+         mov	rdi, rcx
+         mov	rsi, rdx
+-        mov	rbp, r8
++        mov	ebp, r8d
+         sub	rsp, 648
+         vmovdqu	OWORD PTR [rsp+520], xmm6
+         vmovdqu	OWORD PTR [rsp+536], xmm7
+diff --git a/wolfcrypt/src/sha3_asm.S b/wolfcrypt/src/sha3_asm.S
+index 8eb7480..f486fb7 100644
+--- a/wolfcrypt/src/sha3_asm.S
++++ b/wolfcrypt/src/sha3_asm.S
+@@ -4626,6 +4626,7 @@ _sha3_block_n_bmi2:
+         pushq	%r15
+         pushq	%rbx
+         pushq	%rbp
++        movl	%edx, %edx
+         pushq	%rcx
+         movq	%rcx, %rbp
+         movq	(%rdi), %rcx
+@@ -9589,6 +9590,7 @@ WC_ASM_ATT_HIDDEN(_sha3_block_n_avx2)
+ .p2align	4
+ _sha3_block_n_avx2:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         leaq	L_sha3_avx2_r(%rip), %rax
+         leaq	L_sha3_block_n_avx2_rotl(%rip), %r8
+         addq	$0x40, %r8
+@@ -20694,6 +20696,7 @@ _sha3_blocksx4_out_avx2:
+         pushq	%r13
+         pushq	%r14
+         pushq	%r15
++        movl	%edx, %edx
+         leaq	L_sha3_x4_avx2_r(%rip), %rax
+         movl	%edx, %r12d
+         movq	%rsi, %r9
+@@ -37000,6 +37003,7 @@ _sha3_blocksx8_out_avx512:
+         pushq	%r15
+         pushq	%rbx
+         pushq	%rbp
++        movl	%edx, %edx
+         leaq	L_sha3_x8_avx512_r(%rip), %rax
+         movl	%edx, %r14d
+         movq	%rsi, %rcx
+diff --git a/wolfcrypt/src/sha3_asm.asm b/wolfcrypt/src/sha3_asm.asm
+index 1f023db..257a1bf 100644
+--- a/wolfcrypt/src/sha3_asm.asm
++++ b/wolfcrypt/src/sha3_asm.asm
+@@ -4591,6 +4591,7 @@ sha3_block_n_bmi2 PROC
+         push	rsi
+         push	rbx
+         push	rbp
++        mov	r8d, r8d
+         push	r9
+         mov	rbp, r9
+         mov	r9, QWORD PTR [rcx]
+@@ -9525,6 +9526,7 @@ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ sha3_block_n_avx2 PROC
+         push	r12
++        mov	r8d, r8d
+         sub	rsp, 160
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -20676,6 +20678,7 @@ sha3_blocksx4_out_avx2 PROC
+         push	r15
+         push	rdi
+         push	rsi
++        mov	r8d, r8d
+         sub	rsp, 168
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -37002,6 +37005,7 @@ sha3_blocksx8_out_avx512 PROC
+         push	rsi
+         push	rbx
+         push	rbp
++        mov	r8d, r8d
+         sub	rsp, 168
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+diff --git a/wolfcrypt/src/sha512_asm.S b/wolfcrypt/src/sha512_asm.S
+index 4aed31d..8c4fea4 100644
+--- a/wolfcrypt/src/sha512_asm.S
++++ b/wolfcrypt/src/sha512_asm.S
+@@ -1402,7 +1402,7 @@ _Transform_Sha512_AVX1_Len:
+         pushq	%r14
+         pushq	%r15
+         pushq	%rbp
+-        movq	%rsi, %rbp
++        movl	%esi, %ebp
+         subq	$0x98, %rsp
+         movq	224(%rdi), %rsi
+         leaq	L_avx1_sha512_k(%rip), %rdx
+@@ -3963,7 +3963,7 @@ _Transform_Sha512_AVX1_RORX_Len:
+         pushq	%r14
+         pushq	%r15
+         pushq	%rbp
+-        movq	%rsi, %rbp
++        movl	%esi, %ebp
+         subq	$0x98, %rsp
+         movq	224(%rdi), %rsi
+         leaq	L_avx1_rorx_sha512_k(%rip), %rcx
+@@ -6435,7 +6435,7 @@ _Transform_Sha512_AVX2_Len:
+         pushq	%r14
+         pushq	%r15
+         pushq	%rbp
+-        movq	%rsi, %rbp
++        movl	%esi, %ebp
+         testb	$0x80, %bpl
+         je	L_sha512_len_avx2_block
+         movq	224(%rdi), %rbx
+@@ -9240,6 +9240,7 @@ _Transform_Sha512_AVX2_RORX_Len:
+         pushq	%r14
+         pushq	%r15
+         pushq	%rbp
++        movl	%esi, %esi
+         testb	$0x80, %sil
+         je	L_sha512_len_avx2_rorx_block
+         movq	224(%rdi), %rax
+diff --git a/wolfcrypt/src/sha512_asm.asm b/wolfcrypt/src/sha512_asm.asm
+index b7cdf46..b918b8e 100644
+--- a/wolfcrypt/src/sha512_asm.asm
++++ b/wolfcrypt/src/sha512_asm.asm
+@@ -1387,7 +1387,7 @@ Transform_Sha512_AVX1_Len PROC
+         push	rsi
+         push	rbp
+         mov	rdi, rcx
+-        mov	rbp, rdx
++        mov	ebp, edx
+         sub	rsp, 296
+         vmovdqu	OWORD PTR [rsp+152], xmm6
+         vmovdqu	OWORD PTR [rsp+168], xmm7
+@@ -3954,7 +3954,7 @@ Transform_Sha512_AVX1_RORX_Len PROC
+         push	rsi
+         push	rbp
+         mov	rdi, rcx
+-        mov	rbp, rdx
++        mov	ebp, edx
+         sub	rsp, 296
+         vmovdqu	OWORD PTR [rsp+152], xmm6
+         vmovdqu	OWORD PTR [rsp+168], xmm7
+@@ -6420,7 +6420,7 @@ Transform_Sha512_AVX2_Len PROC
+         push	rdi
+         push	rbp
+         mov	rdi, rcx
+-        mov	rbp, rdx
++        mov	ebp, edx
+         sub	rsp, 168
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -9219,7 +9219,7 @@ Transform_Sha512_AVX2_RORX_Len PROC
+         push	rsi
+         push	rbp
+         mov	rdi, rcx
+-        mov	rsi, rdx
++        mov	esi, edx
+         sub	rsp, 168
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+diff --git a/wolfcrypt/src/wc_frodokem_asm.S b/wolfcrypt/src/wc_frodokem_asm.S
+index 80b956b..bfd07bd 100644
+--- a/wolfcrypt/src/wc_frodokem_asm.S
++++ b/wolfcrypt/src/wc_frodokem_asm.S
+@@ -60,6 +60,8 @@ _frodokem_sa_accum_avx2:
+ #endif /* __APPLE__ */
+         pushq	%r12
+         pushq	%r13
++        movl	%ecx, %ecx
++        movl	%r8d, %r8d
+         movslq	%ecx, %rcx
+         shlq	$1, %rcx
+         addq	%rcx, %rsi
+@@ -123,6 +125,8 @@ _frodokem_as_accum_avx2:
+         pushq	%r15
+         pushq	%rbx
+         pushq	%rbp
++        movl	%ecx, %ecx
++        movl	%r8d, %r8d
+         movslq	%ecx, %rcx
+         shlq	$4, %rcx
+         addq	%rcx, %rdi
+@@ -238,6 +242,8 @@ _frodokem_mul_bs_avx2:
+         pushq	%r15
+         pushq	%rbx
+         pushq	%rbp
++        movl	%ecx, %ecx
++        movl	%r8d, %r8d
+         movslq	%ecx, %rax
+         shlq	$1, %rax
+         movq	%rdx, %r9
+@@ -348,6 +354,8 @@ _frodokem_mul_add_sb_plus_e_avx2:
+         pushq	%r14
+         pushq	%r15
+         pushq	%rbx
++        movl	%ecx, %ecx
++        movl	%r8d, %r8d
+         movslq	%ecx, %rax
+         shlq	$1, %rax
+         movq	%rdx, %r9
+@@ -429,6 +437,7 @@ WC_ASM_ATT_HIDDEN(_frodokem_add_avx2)
+ .p2align	4
+ _frodokem_add_avx2:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vmovd	%rdx, %xmm0
+         vpbroadcastw	%xmm0, %ymm0
+         vmovdqu	(%rdi), %ymm1
+@@ -466,6 +475,8 @@ WC_ASM_ATT_HIDDEN(_frodokem_a_rows_reduce_avx2)
+ .p2align	4
+ _frodokem_a_rows_reduce_avx2:
+ #endif /* __APPLE__ */
++        movl	%esi, %esi
++        movl	%edx, %edx
+         vmovd	%rdx, %xmm0
+         vpbroadcastw	%xmm0, %ymm0
+         movl	%esi, %eax
+@@ -507,6 +518,8 @@ WC_ASM_ATT_HIDDEN(_frodokem_sample_avx2)
+ .p2align	4
+ _frodokem_sample_avx2:
+ #endif /* __APPLE__ */
++        movl	%esi, %esi
++        movl	%ecx, %ecx
+         movslq	%esi, %rax
+         shlq	$1, %rax
+         vpcmpeqw	%ymm0, %ymm0, %ymm0
+@@ -558,7 +571,10 @@ _frodokem_gen_a_rows_aes_avx2:
+         pushq	%r13
+         pushq	%r14
+         pushq	%r15
+-        movq	40(%rsp), %rax
++        movl	%ecx, %ecx
++        movl	%r8d, %r8d
++        movl	%r9d, %r9d
++        movl	40(%rsp), %eax
+         vbroadcasti128	(%rdx), %ymm0
+         vbroadcasti128	16(%rdx), %ymm1
+         vbroadcasti128	32(%rdx), %ymm2
+@@ -713,7 +729,10 @@ _frodokem_gen_a_rows_aes_aesni:
+         pushq	%r13
+         pushq	%r14
+         pushq	%r15
+-        movq	40(%rsp), %rax
++        movl	%ecx, %ecx
++        movl	%r8d, %r8d
++        movl	%r9d, %r9d
++        movl	40(%rsp), %eax
+         vmovd	%rax, %xmm8
+         vpbroadcastw	%xmm8, %xmm8
+         movslq	%r9d, %r10
+@@ -910,6 +929,8 @@ _frodokem_sa_accum_avx512:
+         pushq	%r15
+         pushq	%rbx
+         pushq	%rbp
++        movl	%ecx, %ecx
++        movl	%r8d, %r8d
+         movslq	%ecx, %rcx
+         shlq	$1, %rcx
+         addq	%rcx, %rsi
+@@ -1020,6 +1041,8 @@ _frodokem_as_accum_avx512:
+         pushq	%r15
+         pushq	%rbx
+         pushq	%rbp
++        movl	%ecx, %ecx
++        movl	%r8d, %r8d
+         movslq	%ecx, %rcx
+         shlq	$4, %rcx
+         addq	%rcx, %rdi
+@@ -1181,6 +1204,8 @@ _frodokem_mul_bs_avx512:
+         pushq	%r15
+         pushq	%rbx
+         pushq	%rbp
++        movl	%ecx, %ecx
++        movl	%r8d, %r8d
+         movslq	%ecx, %rax
+         shlq	$1, %rax
+         movq	%rax, %rcx
+@@ -1337,6 +1362,8 @@ _frodokem_mul_add_sb_plus_e_avx512:
+         pushq	%r14
+         pushq	%r15
+         pushq	%rbx
++        movl	%ecx, %ecx
++        movl	%r8d, %r8d
+         movslq	%ecx, %rax
+         shlq	$1, %rax
+         movq	%rdx, %r9
+@@ -1410,6 +1437,7 @@ WC_ASM_ATT_HIDDEN(_frodokem_add_avx512)
+ .p2align	4
+ _frodokem_add_avx512:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vmovd	%rdx, %xmm0
+         vpbroadcastw	%xmm0, %zmm0
+         vmovdqu64	(%rdi), %zmm1
+@@ -1439,6 +1467,8 @@ WC_ASM_ATT_HIDDEN(_frodokem_sample_avx512)
+ .p2align	4
+ _frodokem_sample_avx512:
+ #endif /* __APPLE__ */
++        movl	%esi, %esi
++        movl	%ecx, %ecx
+         movslq	%esi, %rax
+         shlq	$1, %rax
+         vpternlogd	$0xff, %zmm0, %zmm0, %zmm0
+@@ -1490,7 +1520,10 @@ _frodokem_gen_a_rows_aes_avx512:
+         pushq	%r13
+         pushq	%r14
+         pushq	%r15
+-        movq	40(%rsp), %rax
++        movl	%ecx, %ecx
++        movl	%r8d, %r8d
++        movl	%r9d, %r9d
++        movl	40(%rsp), %eax
+         vbroadcasti32x4	(%rdx), %zmm0
+         vbroadcasti32x4	16(%rdx), %zmm1
+         vbroadcasti32x4	32(%rdx), %zmm2
+diff --git a/wolfcrypt/src/wc_frodokem_asm.asm b/wolfcrypt/src/wc_frodokem_asm.asm
+index 47eb73f..3948e31 100644
+--- a/wolfcrypt/src/wc_frodokem_asm.asm
++++ b/wolfcrypt/src/wc_frodokem_asm.asm
+@@ -49,7 +49,8 @@ frodokem_sa_accum_avx2 PROC
+         push	r13
+         push	r14
+         push	r15
+-        mov	rax, QWORD PTR [rsp+72]
++        mov	r9d, r9d
++        mov	eax, DWORD PTR [rsp+72]
+         movsxd	r9, r9d
+         shl	r9, 1
+         add	rdx, r9
+@@ -104,7 +105,8 @@ frodokem_as_accum_avx2 PROC
+         push	rsi
+         push	rbx
+         push	rbp
+-        mov	rax, QWORD PTR [rsp+104]
++        mov	r9d, r9d
++        mov	eax, DWORD PTR [rsp+104]
+         sub	rsp, 120
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -227,7 +229,8 @@ frodokem_mul_bs_avx2 PROC
+         push	rsi
+         push	rbx
+         push	rbp
+-        mov	rax, QWORD PTR [rsp+104]
++        mov	r9d, r9d
++        mov	eax, DWORD PTR [rsp+104]
+         sub	rsp, 120
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -345,7 +348,8 @@ frodokem_mul_add_sb_plus_e_avx2 PROC
+         push	rdi
+         push	rsi
+         push	rbx
+-        mov	rax, QWORD PTR [rsp+96]
++        mov	r9d, r9d
++        mov	eax, DWORD PTR [rsp+96]
+         sub	rsp, 32
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -422,6 +426,7 @@ frodokem_mul_add_sb_plus_e_avx2 ENDP
+ _TEXT ENDS
+ _TEXT SEGMENT READONLY PARA
+ frodokem_add_avx2 PROC
++        mov	r8d, r8d
+         vmovd	xmm0, r8
+         vpbroadcastw	ymm0, xmm0
+         vmovdqu	ymm1, YMMWORD PTR [rcx]
+@@ -446,6 +451,8 @@ frodokem_add_avx2 ENDP
+ _TEXT ENDS
+ _TEXT SEGMENT READONLY PARA
+ frodokem_a_rows_reduce_avx2 PROC
++        mov	edx, edx
++        mov	r8d, r8d
+         vmovd	xmm0, r8
+         vpbroadcastw	ymm0, xmm0
+         mov	eax, edx
+@@ -475,6 +482,8 @@ _TEXT ENDS
+ _TEXT SEGMENT READONLY PARA
+ frodokem_sample_avx2 PROC
+         push	r12
++        mov	edx, edx
++        mov	r9d, r9d
+         sub	rsp, 32
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -522,9 +531,10 @@ frodokem_gen_a_rows_aes_avx2 PROC
+         push	r15
+         push	rdi
+         push	rsi
+-        mov	rax, QWORD PTR [rsp+88]
+-        mov	r10, QWORD PTR [rsp+96]
+-        mov	r11, QWORD PTR [rsp+104]
++        mov	r9d, r9d
++        mov	eax, DWORD PTR [rsp+88]
++        mov	r10d, DWORD PTR [rsp+96]
++        mov	r11d, DWORD PTR [rsp+104]
+         sub	rsp, 168
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -692,9 +702,10 @@ frodokem_gen_a_rows_aes_aesni PROC
+         push	r15
+         push	rdi
+         push	rsi
+-        mov	rax, QWORD PTR [rsp+88]
+-        mov	r10, QWORD PTR [rsp+96]
+-        mov	r11, QWORD PTR [rsp+104]
++        mov	r9d, r9d
++        mov	eax, DWORD PTR [rsp+88]
++        mov	r10d, DWORD PTR [rsp+96]
++        mov	r11d, DWORD PTR [rsp+104]
+         sub	rsp, 56
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -890,7 +901,8 @@ frodokem_sa_accum_avx512 PROC
+         push	rsi
+         push	rbx
+         push	rbp
+-        mov	rax, QWORD PTR [rsp+104]
++        mov	r9d, r9d
++        mov	eax, DWORD PTR [rsp+104]
+         sub	rsp, 72
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -1002,7 +1014,8 @@ frodokem_as_accum_avx512 PROC
+         push	rsi
+         push	rbx
+         push	rbp
+-        mov	rax, QWORD PTR [rsp+104]
++        mov	r9d, r9d
++        mov	eax, DWORD PTR [rsp+104]
+         sub	rsp, 168
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -1177,7 +1190,8 @@ frodokem_mul_bs_avx512 PROC
+         push	rsi
+         push	rbx
+         push	rbp
+-        mov	rax, QWORD PTR [rsp+104]
++        mov	r9d, r9d
++        mov	eax, DWORD PTR [rsp+104]
+         sub	rsp, 168
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -1347,7 +1361,8 @@ frodokem_mul_add_sb_plus_e_avx512 PROC
+         push	rdi
+         push	rsi
+         push	rbx
+-        mov	rax, QWORD PTR [rsp+96]
++        mov	r9d, r9d
++        mov	eax, DWORD PTR [rsp+96]
+         movsxd	r10, r9d
+         shl	r10, 1
+         mov	r11, r8
+@@ -1410,6 +1425,7 @@ frodokem_mul_add_sb_plus_e_avx512 ENDP
+ _TEXT ENDS
+ _TEXT SEGMENT READONLY PARA
+ frodokem_add_avx512 PROC
++        mov	r8d, r8d
+         vmovd	xmm0, r8
+         vpbroadcastw	zmm0, xmm0
+         vmovdqu64	zmm1, [rcx]
+@@ -1427,6 +1443,8 @@ _TEXT ENDS
+ _TEXT SEGMENT READONLY PARA
+ frodokem_sample_avx512 PROC
+         push	r12
++        mov	edx, edx
++        mov	r9d, r9d
+         sub	rsp, 32
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -1474,9 +1492,10 @@ frodokem_gen_a_rows_aes_avx512 PROC
+         push	r15
+         push	rdi
+         push	rsi
+-        mov	rax, QWORD PTR [rsp+88]
+-        mov	r10, QWORD PTR [rsp+96]
+-        mov	r11, QWORD PTR [rsp+104]
++        mov	r9d, r9d
++        mov	eax, DWORD PTR [rsp+88]
++        mov	r10d, DWORD PTR [rsp+96]
++        mov	r11d, DWORD PTR [rsp+104]
+         sub	rsp, 168
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+diff --git a/wolfcrypt/src/wc_mldsa_asm.S b/wolfcrypt/src/wc_mldsa_asm.S
+index 2666994..ca0c001 100644
+--- a/wolfcrypt/src/wc_mldsa_asm.S
++++ b/wolfcrypt/src/wc_mldsa_asm.S
+@@ -21023,7 +21023,8 @@ _wc_mldsa_rej_uniform_n_avx2:
+         pushq	%r12
+         pushq	%r13
+         pushq	%r14
+-        movq	%rcx, %r8
++        movl	%esi, %esi
++        movl	%ecx, %r8d
+         movl	%esi, %eax
+         vmovdqu	L_mldsa_rej_q(%rip), %ymm6
+         vmovdqu	L_mldsa_rej_mask(%rip), %ymm7
+@@ -21563,7 +21564,8 @@ _wc_mldsa_rej_uniform_avx2:
+         pushq	%r12
+         pushq	%r13
+         pushq	%r14
+-        movq	%rcx, %r8
++        movl	%esi, %esi
++        movl	%ecx, %r8d
+         movl	%esi, %eax
+         cmpl	$0x00, %esi
+         je	L_mldsa_rej_uniform_avx2_done_64
+@@ -21956,6 +21958,7 @@ _wc_mldsa_extract_coeffs_eta2_avx2:
+         pushq	%rbx
+         pushq	%r12
+         pushq	%r13
++        movl	%esi, %esi
+         vmovdqu	L_mldsa_extract_coeffs_eta2_mask_nibbles(%rip), %ymm6
+         vmovdqu	L_mldsa_extract_coeffs_eta2_mul(%rip), %ymm7
+         vmovdqu	L_mldsa_extract_coeffs_eta2_five(%rip), %ymm8
+@@ -22596,6 +22599,7 @@ _wc_mldsa_extract_coeffs_eta4_avx2:
+         pushq	%rbx
+         pushq	%r12
+         pushq	%r13
++        movl	%esi, %esi
+         vmovdqu	L_mldsa_extract_coeffs_eta4_mask_nibbles(%rip), %ymm6
+         vmovdqu	L_mldsa_extract_coeffs_eta4_nine(%rip), %ymm7
+         vmovdqu	L_mldsa_extract_coeffs_eta4_four(%rip), %ymm8
+@@ -39059,6 +39063,7 @@ WC_ASM_ATT_HIDDEN(_wc_mldsa_vec_check_low_avx2)
+ .p2align	4
+ _wc_mldsa_vec_check_low_avx2:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         subl	$0x01, %edx
+         movd	%edx, %xmm2
+         negl	%edx
+@@ -39849,7 +39854,8 @@ WC_ASM_ATT_HIDDEN(_wc_mldsa_rej_uniform_n_avx512)
+ _wc_mldsa_rej_uniform_n_avx512:
+ #endif /* __APPLE__ */
+         pushq	%rbx
+-        movq	%rcx, %r8
++        movl	%esi, %esi
++        movl	%ecx, %r8d
+         movl	%esi, %eax
+         vbroadcasti64x4	L_mldsa_rej_q_avx512(%rip), %zmm1
+         vbroadcasti64x4	L_mldsa_rej_mask_avx512(%rip), %zmm2
+@@ -39927,7 +39933,8 @@ WC_ASM_ATT_HIDDEN(_wc_mldsa_rej_uniform_avx512)
+ _wc_mldsa_rej_uniform_avx512:
+ #endif /* __APPLE__ */
+         pushq	%rbx
+-        movq	%rcx, %r8
++        movl	%esi, %esi
++        movl	%ecx, %r8d
+         movl	%esi, %eax
+         vbroadcasti64x4	L_mldsa_rej_q_avx512(%rip), %zmm1
+         vbroadcasti64x4	L_mldsa_rej_mask_avx512(%rip), %zmm2
+@@ -40080,6 +40087,7 @@ WC_ASM_ATT_HIDDEN(_wc_mldsa_extract_coeffs_eta2_avx512)
+ _wc_mldsa_extract_coeffs_eta2_avx512:
+ #endif /* __APPLE__ */
+         pushq	%rbx
++        movl	%esi, %esi
+         vmovdqu64	L_mldsa_extract_coeffs_eta2_avx512_dup(%rip), %zmm2
+         vmovdqu64	L_mldsa_extract_coeffs_eta2_avx512_shift(%rip), %zmm3
+         vmovdqu64	L_mldsa_extract_coeffs_eta2_avx512_mask_nibbles(%rip), %zmm4
+@@ -40419,6 +40427,7 @@ WC_ASM_ATT_HIDDEN(_wc_mldsa_extract_coeffs_eta4_avx512)
+ _wc_mldsa_extract_coeffs_eta4_avx512:
+ #endif /* __APPLE__ */
+         pushq	%rbx
++        movl	%esi, %esi
+         vmovdqu64	L_mldsa_extract_coeffs_eta4_avx512_dup(%rip), %zmm2
+         vmovdqu64	L_mldsa_extract_coeffs_eta4_avx512_shift(%rip), %zmm3
+         vmovdqu64	L_mldsa_extract_coeffs_eta4_avx512_mask_nibbles(%rip), %zmm4
+@@ -40743,6 +40752,7 @@ WC_ASM_ATT_HIDDEN(_wc_mldsa_make_hint_88_avx512)
+ _wc_mldsa_make_hint_88_avx512:
+ #endif /* __APPLE__ */
+         pushq	%rbx
++        movl	%edx, %edx
+         vmovdqu64	L_mldsa_make_hint_88_avx512_low(%rip), %zmm3
+         vmovdqu64	L_mldsa_make_hint_88_avx512_neg_low(%rip), %zmm4
+         vmovdqu64	L_mldsa_make_hint_88_avx512_seq(%rip), %zmm1
+@@ -41173,6 +41183,7 @@ WC_ASM_ATT_HIDDEN(_wc_mldsa_make_hint_32_avx512)
+ _wc_mldsa_make_hint_32_avx512:
+ #endif /* __APPLE__ */
+         pushq	%rbx
++        movl	%edx, %edx
+         vmovdqu64	L_mldsa_make_hint_32_avx512_low(%rip), %zmm3
+         vmovdqu64	L_mldsa_make_hint_32_avx512_neg_low(%rip), %zmm4
+         vmovdqu64	L_mldsa_make_hint_32_avx512_seq(%rip), %zmm1
+@@ -45306,6 +45317,7 @@ _wc_mldsa_redistribute_21_rand_x8_avx512:
+         pushq	%r12
+         pushq	%r13
+         pushq	%r14
++        movl	%edx, %edx
+         movl	%edx, %r13d
+         movq	%rsi, %rax
+         addq	%r13, %rax
+@@ -45506,6 +45518,7 @@ _wc_mldsa_redistribute_17_rand_x8_avx512:
+         pushq	%r12
+         pushq	%r13
+         pushq	%r14
++        movl	%edx, %edx
+         movl	%edx, %r13d
+         movq	%rsi, %rax
+         addq	%r13, %rax
+@@ -63450,6 +63463,7 @@ WC_ASM_ATT_HIDDEN(_wc_mldsa_vec_check_low_avx512)
+ .p2align	4
+ _wc_mldsa_vec_check_low_avx512:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         subl	$0x01, %edx
+         movd	%edx, %xmm2
+         negl	%edx
+diff --git a/wolfcrypt/src/wc_mldsa_asm.asm b/wolfcrypt/src/wc_mldsa_asm.asm
+index d8b6d24..99ffcba 100644
+--- a/wolfcrypt/src/wc_mldsa_asm.asm
++++ b/wolfcrypt/src/wc_mldsa_asm.asm
+@@ -20980,9 +20980,9 @@ wc_mldsa_rej_uniform_n_avx2 PROC
+         push	r14
+         push	r15
+         push	rdi
+-        mov	r10, r9
++        mov	r10d, r9d
+         mov	r9, r8
+-        mov	r8, rdx
++        mov	r8d, edx
+         mov	rdx, rcx
+         sub	rsp, 72
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+@@ -21524,9 +21524,9 @@ wc_mldsa_rej_uniform_avx2 PROC
+         push	r14
+         push	r15
+         push	rdi
+-        mov	r10, r9
++        mov	r10d, r9d
+         mov	r9, r8
+-        mov	r8, rdx
++        mov	r8d, edx
+         mov	rdx, rcx
+         mov	eax, r8d
+         cmp	r8d, 0
+@@ -21869,6 +21869,7 @@ wc_mldsa_extract_coeffs_eta2_avx2 PROC
+         push	r13
+         push	r14
+         push	r15
++        mov	edx, edx
+         sub	rsp, 64
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -22489,6 +22490,7 @@ wc_mldsa_extract_coeffs_eta4_avx2 PROC
+         push	r13
+         push	r14
+         push	r15
++        mov	edx, edx
+         sub	rsp, 48
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -38305,6 +38307,7 @@ wc_mldsa_use_hint_32_avx2 ENDP
+ _TEXT ENDS
+ _TEXT SEGMENT READONLY PARA
+ wc_mldsa_vec_check_low_avx2 PROC
++        mov	r8d, r8d
+         sub	rsp, 56
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -39050,9 +39053,9 @@ _TEXT SEGMENT READONLY PARA
+ wc_mldsa_rej_uniform_n_avx512 PROC
+         push	rbx
+         push	r12
+-        mov	r10, r9
++        mov	r10d, r9d
+         mov	r9, r8
+-        mov	r8, rdx
++        mov	r8d, edx
+         mov	rdx, rcx
+         mov	eax, r8d
+         vbroadcasti64x4	zmm1, YMMWORD PTR L_mldsa_rej_q_avx512
+@@ -39120,9 +39123,9 @@ _TEXT SEGMENT READONLY PARA
+ wc_mldsa_rej_uniform_avx512 PROC
+         push	rbx
+         push	r12
+-        mov	r10, r9
++        mov	r10d, r9d
+         mov	r9, r8
+-        mov	r8, rdx
++        mov	r8d, edx
+         mov	rdx, rcx
+         mov	eax, r8d
+         vbroadcasti64x4	zmm1, YMMWORD PTR L_mldsa_rej_q_avx512
+@@ -39231,6 +39234,7 @@ wc_mldsa_extract_coeffs_eta2_avx512 PROC
+         push	rbx
+         push	r12
+         push	r13
++        mov	edx, edx
+         sub	rsp, 16
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu64	zmm2, ZMMWORD PTR L_mldsa_extract_coeffs_eta2_avx512_dup
+@@ -39530,6 +39534,7 @@ wc_mldsa_extract_coeffs_eta4_avx512 PROC
+         push	rbx
+         push	r12
+         push	r13
++        mov	edx, edx
+         sub	rsp, 16
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu64	zmm2, ZMMWORD PTR L_mldsa_extract_coeffs_eta4_avx512_dup
+@@ -39819,6 +39824,7 @@ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ wc_mldsa_make_hint_88_avx512 PROC
+         push	rbx
++        mov	r8d, r8d
+         mov	r10, QWORD PTR [rsp+48]
+         sub	rsp, 16
+         vmovdqu	OWORD PTR [rsp], xmm6
+@@ -40213,6 +40219,7 @@ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ wc_mldsa_make_hint_32_avx512 PROC
+         push	rbx
++        mov	r8d, r8d
+         mov	r10, QWORD PTR [rsp+48]
+         sub	rsp, 16
+         vmovdqu	OWORD PTR [rsp], xmm6
+@@ -44342,6 +44349,7 @@ wc_mldsa_redistribute_21_rand_x8_avx512 PROC
+         push	r14
+         push	r15
+         push	rdi
++        mov	r8d, r8d
+         sub	rsp, 160
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -44555,6 +44563,7 @@ wc_mldsa_redistribute_17_rand_x8_avx512 PROC
+         push	r14
+         push	r15
+         push	rdi
++        mov	r8d, r8d
+         sub	rsp, 160
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -62035,6 +62044,7 @@ wc_mldsa_decompose_q32_avx512 ENDP
+ _TEXT ENDS
+ _TEXT SEGMENT READONLY PARA
+ wc_mldsa_vec_check_low_avx512 PROC
++        mov	r8d, r8d
+         sub	r8d, 1
+         movd	xmm2, r8d
+         neg	r8d
+diff --git a/wolfcrypt/src/wc_mlkem_asm.S b/wolfcrypt/src/wc_mlkem_asm.S
+index fa0e883..52f5271 100644
+--- a/wolfcrypt/src/wc_mlkem_asm.S
++++ b/wolfcrypt/src/wc_mlkem_asm.S
+@@ -506,6 +506,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_keygen_avx2)
+ _mlkem_keygen_avx2:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%r8d, %r8d
+         vmovdqu	mlkem_q(%rip), %ymm14
+         vmovdqu	mlkem_v(%rip), %ymm15
+         movq	%rdi, %r11
+@@ -3173,7 +3174,7 @@ _mlkem_encapsulate_avx2:
+         pushq	%rbx
+         movq	48(%rsp), %rax
+         movq	56(%rsp), %r10
+-        movq	64(%rsp), %r11
++        movl	64(%rsp), %r11d
+         subq	$48, %rsp
+         vmovdqu	mlkem_q(%rip), %ymm14
+         vmovdqu	mlkem_v(%rip), %ymm15
+@@ -7978,6 +7979,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_decapsulate_avx2)
+ .p2align	4
+ _mlkem_decapsulate_avx2:
+ #endif /* __APPLE__ */
++        movl	%r8d, %r8d
+         vmovdqu	mlkem_q(%rip), %ymm14
+         vmovdqu	mlkem_v(%rip), %ymm15
+         movslq	%r8d, %rax
+@@ -11042,7 +11044,8 @@ _mlkem_rej_uniform_n_avx2:
+         pushq	%r14
+         pushq	%r15
+         pushq	%rbp
+-        movq	%rcx, %r8
++        movl	%esi, %esi
++        movl	%ecx, %r8d
+         movl	%esi, %eax
+         vmovdqu	L_mlkem_rej_q(%rip), %ymm6
+         vmovdqu	L_mlkem_rej_ones(%rip), %ymm7
+@@ -11659,7 +11662,8 @@ _mlkem_rej_uniform_avx2:
+         pushq	%r14
+         pushq	%r15
+         pushq	%rbp
+-        movq	%rcx, %r8
++        movl	%esi, %esi
++        movl	%ecx, %r8d
+         movl	%esi, %eax
+         cmpl	$0x00, %esi
+         je	L_mlkem_rej_uniform_avx2_done_64
+@@ -12596,6 +12600,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_compress_10_avx2)
+ .p2align	4
+ _mlkem_compress_10_avx2:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vmovdqu	(%rsi), %ymm0
+         vmovdqu	L_mlkem_compress_10_avx2_mask(%rip), %ymm9
+         vmovdqu	L_mlkem_compress_10_avx2_shift(%rip), %ymm8
+@@ -12987,6 +12992,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_decompress_10_avx2)
+ .p2align	4
+ _mlkem_decompress_10_avx2:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vmovdqu	L_mlkem_decompress_10_avx2_mask(%rip), %ymm4
+         vmovdqu	L_mlkem_decompress_10_avx2_q(%rip), %ymm5
+         vmovdqu	L_mlkem_decompress_10_avx2_shuf(%rip), %ymm6
+@@ -13233,6 +13239,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_compress_11_avx2)
+ .p2align	4
+ _mlkem_compress_11_avx2:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vmovdqu	(%rsi), %ymm0
+         vmovdqu	L_mlkem_compress_11_avx2_v(%rip), %ymm7
+         vmovdqu	L_mlkem_compress_11_avx2_off(%rip), %ymm8
+@@ -13699,6 +13706,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_decompress_11_avx2)
+ .p2align	4
+ _mlkem_decompress_11_avx2:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vmovdqu	L_mlkem_decompress_11_avx2_q(%rip), %ymm4
+         vmovdqu	L_mlkem_decompress_11_avx2_shuf(%rip), %ymm5
+         vmovdqu	L_mlkem_decompress_11_avx2_sllv(%rip), %ymm6
+@@ -15420,6 +15428,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_cmp_avx2)
+ .p2align	4
+ _mlkem_cmp_avx2:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vpxor	%ymm2, %ymm2, %ymm2
+         vpxor	%ymm3, %ymm3, %ymm3
+         movl	$0x00, %ecx
+@@ -16359,6 +16368,7 @@ _mlkem_keygen_avx512:
+         pushq	%r12
+         pushq	%r13
+         pushq	%r14
++        movl	%r8d, %r8d
+         subq	$0x400, %rsp
+         movq	$0xd01, %r14
+         vmovd	%r14d, %xmm14
+@@ -20019,7 +20029,7 @@ _mlkem_encapsulate_avx512:
+         pushq	%rbp
+         movq	56(%rsp), %rax
+         movq	64(%rsp), %r10
+-        movq	72(%rsp), %r11
++        movl	72(%rsp), %r11d
+         subq	$56, %rsp
+         movq	$0xd01, %r13
+         vmovd	%r13d, %xmm14
+@@ -26784,6 +26794,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_decapsulate_avx512)
+ _mlkem_decapsulate_avx512:
+ #endif /* __APPLE__ */
+         pushq	%r12
++        movl	%r8d, %r8d
+         movq	$0xd01, %r12
+         vmovd	%r12d, %xmm14
+         vpbroadcastw	%xmm14, %zmm14
+@@ -30232,6 +30243,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_ptacc_x2_avx512)
+ .p2align	4
+ _mlkem_ptacc_x2_avx512:
+ #endif /* __APPLE__ */
++        movl	%ecx, %ecx
+         movq	$0xd01, %r9
+         vmovd	%r9d, %xmm12
+         vpbroadcastw	%xmm12, %zmm12
+@@ -31427,6 +31439,8 @@ WC_ASM_ATT_HIDDEN(_mlkem_rej_uniform_avx512)
+ _mlkem_rej_uniform_avx512:
+ #endif /* __APPLE__ */
+         pushq	%rbx
++        movl	%esi, %esi
++        movl	%ecx, %ecx
+         movl	%esi, %eax
+         movq	$0xd01, %r10
+         vmovd	%r10d, %xmm0
+@@ -31564,6 +31578,8 @@ WC_ASM_ATT_HIDDEN(_mlkem_rej_uniform_n_avx512)
+ _mlkem_rej_uniform_n_avx512:
+ #endif /* __APPLE__ */
+         pushq	%rbx
++        movl	%esi, %esi
++        movl	%ecx, %ecx
+         movl	%esi, %eax
+         movq	$0xd01, %r10
+         vmovd	%r10d, %xmm0
+@@ -32196,6 +32212,7 @@ _mlkem_redistribute_8_rand_x8_avx512:
+         pushq	%r12
+         pushq	%r13
+         pushq	%r14
++        movl	%edx, %edx
+         movl	%edx, %r13d
+         movq	%rsi, %rax
+         addq	%r13, %rax
+@@ -32276,6 +32293,7 @@ _mlkem_redistribute_16_rand_x8_avx512:
+         pushq	%r12
+         pushq	%r13
+         pushq	%r14
++        movl	%edx, %edx
+         movl	%edx, %r13d
+         movq	%rsi, %rax
+         addq	%r13, %rax
+@@ -32396,6 +32414,7 @@ _mlkem_redistribute_17_rand_x8_avx512:
+         pushq	%r12
+         pushq	%r13
+         pushq	%r14
++        movl	%edx, %edx
+         movl	%edx, %r13d
+         movq	%rsi, %rax
+         addq	%r13, %rax
+@@ -32532,6 +32551,7 @@ _mlkem_redistribute_21_rand_x8_avx512:
+         pushq	%r12
+         pushq	%r13
+         pushq	%r14
++        movl	%edx, %edx
+         movl	%edx, %r13d
+         movq	%rsi, %rax
+         addq	%r13, %rax
+@@ -32799,6 +32819,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_cmp_avx512)
+ .p2align	4
+ _mlkem_cmp_avx512:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vpxorq	%zmm0, %zmm0, %zmm0
+         vpxor	%ymm2, %ymm2, %ymm2
+         movl	$0x00, %ecx
+@@ -33853,6 +33874,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_decompress_10_avx512)
+ .p2align	4
+ _mlkem_decompress_10_avx512:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vmovdqu64	L_mlkem_decompress_10_avx512_mask(%rip), %zmm0
+         vmovdqu64	L_mlkem_decompress_10_avx512_q(%rip), %zmm1
+         vmovdqu64	L_mlkem_decompress_10_avx512_shuf(%rip), %zmm2
+@@ -34047,6 +34069,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_decompress_11_avx512)
+ .p2align	4
+ _mlkem_decompress_11_avx512:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vmovdqu64	L_mlkem_decompress_11_avx512_q(%rip), %zmm0
+         vmovdqu64	L_mlkem_decompress_11_avx512_shuf(%rip), %zmm1
+         vmovdqu64	L_mlkem_decompress_11_avx512_srlvd(%rip), %zmm2
+@@ -34404,6 +34427,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_compress_10_avx512)
+ .p2align	4
+ _mlkem_compress_10_avx512:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         movq	$0x4ebf, %rax
+         vmovd	%eax, %xmm0
+         vpbroadcastw	%xmm0, %zmm0
+@@ -34722,6 +34746,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_compress_11_avx512)
+ .p2align	4
+ _mlkem_compress_11_avx512:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         movq	$0x4ebf, %rax
+         vmovd	%eax, %xmm0
+         vpbroadcastw	%xmm0, %zmm0
+@@ -35087,6 +35112,8 @@ WC_ASM_ATT_HIDDEN(_mlkem_rej_uniform_avx512_vbmi2)
+ _mlkem_rej_uniform_avx512_vbmi2:
+ #endif /* __APPLE__ */
+         pushq	%rbx
++        movl	%esi, %esi
++        movl	%ecx, %ecx
+         movl	%esi, %eax
+         movq	$0xd01, %r10
+         vmovd	%r10d, %xmm0
+@@ -35212,6 +35239,8 @@ WC_ASM_ATT_HIDDEN(_mlkem_rej_uniform_n_avx512_vbmi2)
+ _mlkem_rej_uniform_n_avx512_vbmi2:
+ #endif /* __APPLE__ */
+         pushq	%rbx
++        movl	%esi, %esi
++        movl	%ecx, %ecx
+         movl	%esi, %eax
+         movq	$0xd01, %r10
+         vmovd	%r10d, %xmm0
+@@ -35619,6 +35648,8 @@ WC_ASM_ATT_HIDDEN(_mlkem_rej_uniform_avx512_vbmi)
+ _mlkem_rej_uniform_avx512_vbmi:
+ #endif /* __APPLE__ */
+         pushq	%rbx
++        movl	%esi, %esi
++        movl	%ecx, %ecx
+         movl	%esi, %eax
+         movq	$0xd01, %r10
+         vmovd	%r10d, %xmm0
+@@ -35755,6 +35786,8 @@ WC_ASM_ATT_HIDDEN(_mlkem_rej_uniform_n_avx512_vbmi)
+ _mlkem_rej_uniform_n_avx512_vbmi:
+ #endif /* __APPLE__ */
+         pushq	%rbx
++        movl	%esi, %esi
++        movl	%ecx, %ecx
+         movl	%esi, %eax
+         movq	$0xd01, %r10
+         vmovd	%r10d, %xmm0
+@@ -36180,6 +36213,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_compress_10_avx512_vbmi)
+ .p2align	4
+ _mlkem_compress_10_avx512_vbmi:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         movq	$0x4ebf, %rax
+         vmovd	%eax, %xmm0
+         vpbroadcastw	%xmm0, %zmm0
+@@ -36447,6 +36481,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_decompress_10_avx512_vbmi)
+ .p2align	4
+ _mlkem_decompress_10_avx512_vbmi:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vmovdqu64	L_mlkem_decompress_10_avx512_vbmi_mask(%rip), %zmm0
+         vmovdqu64	L_mlkem_decompress_10_avx512_vbmi_q(%rip), %zmm1
+         vmovdqu64	L_mlkem_decompress_10_avx512_vbmi_sllv(%rip), %zmm2
+@@ -36637,6 +36672,7 @@ WC_ASM_ATT_HIDDEN(_mlkem_decompress_11_avx512_vbmi)
+ .p2align	4
+ _mlkem_decompress_11_avx512_vbmi:
+ #endif /* __APPLE__ */
++        movl	%edx, %edx
+         vmovdqu64	L_mlkem_decompress_11_avx512_vbmi_q(%rip), %zmm0
+         vmovdqu64	L_mlkem_decompress_11_avx512_vbmi_srlvd(%rip), %zmm1
+         vmovdqu64	L_mlkem_decompress_11_avx512_vbmi_srlvq(%rip), %zmm2
+@@ -36783,6 +36819,8 @@ WC_ASM_ATT_HIDDEN(_mlkem_rej_uniform_avx512_vbmi_vbmi2)
+ _mlkem_rej_uniform_avx512_vbmi_vbmi2:
+ #endif /* __APPLE__ */
+         pushq	%rbx
++        movl	%esi, %esi
++        movl	%ecx, %ecx
+         movl	%esi, %eax
+         movq	$0xd01, %r10
+         vmovd	%r10d, %xmm0
+@@ -36907,6 +36945,8 @@ WC_ASM_ATT_HIDDEN(_mlkem_rej_uniform_n_avx512_vbmi_vbmi2)
+ _mlkem_rej_uniform_n_avx512_vbmi_vbmi2:
+ #endif /* __APPLE__ */
+         pushq	%rbx
++        movl	%esi, %esi
++        movl	%ecx, %ecx
+         movl	%esi, %eax
+         movq	$0xd01, %r10
+         vmovd	%r10d, %xmm0
+diff --git a/wolfcrypt/src/wc_mlkem_asm.asm b/wolfcrypt/src/wc_mlkem_asm.asm
+index 98d9560..a31aaf5 100644
+--- a/wolfcrypt/src/wc_mlkem_asm.asm
++++ b/wolfcrypt/src/wc_mlkem_asm.asm
+@@ -438,7 +438,7 @@ mlkem_keygen_avx2 PROC
+         push	r12
+         push	r13
+         push	r14
+-        mov	rax, QWORD PTR [rsp+64]
++        mov	eax, DWORD PTR [rsp+64]
+         sub	rsp, 160
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -3121,7 +3121,7 @@ mlkem_encapsulate_avx2 PROC
+         mov	r10, QWORD PTR [rsp+104]
+         mov	r11, QWORD PTR [rsp+112]
+         mov	r12, QWORD PTR [rsp+120]
+-        mov	r13, QWORD PTR [rsp+128]
++        mov	r13d, DWORD PTR [rsp+128]
+         sub	rsp, 208
+         vmovdqu	OWORD PTR [rsp+48], xmm6
+         vmovdqu	OWORD PTR [rsp+64], xmm7
+@@ -7936,7 +7936,7 @@ _TEXT ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_decapsulate_avx2 PROC
+         push	r12
+-        mov	rax, QWORD PTR [rsp+48]
++        mov	eax, DWORD PTR [rsp+48]
+         sub	rsp, 160
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -10981,6 +10981,8 @@ mlkem_rej_uniform_n_avx2 PROC
+         push	rdi
+         push	rsi
+         push	rbp
++        mov	edx, edx
++        mov	r9d, r9d
+         mov	r10, rcx
+         sub	rsp, 72
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+@@ -11599,6 +11601,8 @@ mlkem_rej_uniform_avx2 PROC
+         push	rdi
+         push	rsi
+         push	rbp
++        mov	edx, edx
++        mov	r9d, r9d
+         mov	r10, rcx
+         sub	rsp, 72
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+@@ -12422,6 +12426,7 @@ ptr_L_mlkem_compress_10_avx2_shift12 QWORD L_mlkem_compress_10_avx2_shift12
+ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_compress_10_avx2 PROC
++        mov	r8d, r8d
+         sub	rsp, 136
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -12790,6 +12795,7 @@ ptr_L_mlkem_decompress_10_avx2_shuf QWORD L_mlkem_decompress_10_avx2_shuf
+ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_decompress_10_avx2 PROC
++        mov	r8d, r8d
+         sub	rsp, 40
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -12973,6 +12979,7 @@ ptr_L_mlkem_compress_11_avx2_shuf QWORD L_mlkem_compress_11_avx2_shuf
+ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_compress_11_avx2 PROC
++        mov	r8d, r8d
+         sub	rsp, 152
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -13404,6 +13411,7 @@ ptr_L_mlkem_decompress_11_avx2_mask QWORD L_mlkem_decompress_11_avx2_mask
+ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_decompress_11_avx2 PROC
++        mov	r8d, r8d
+         sub	rsp, 72
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -14902,6 +14910,7 @@ mlkem_to_bytes_avx2 ENDP
+ _TEXT ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_cmp_avx2 PROC
++        mov	r8d, r8d
+         vpxor	ymm2, ymm2, ymm2
+         vpxor	ymm3, ymm3, ymm3
+         mov	r9d, 0
+@@ -15827,7 +15836,7 @@ mlkem_keygen_avx512 PROC
+         push	r14
+         push	r15
+         push	rdi
+-        mov	rax, QWORD PTR [rsp+80]
++        mov	eax, DWORD PTR [rsp+80]
+         sub	rsp, 1184
+         vmovdqu	OWORD PTR [rsp+1024], xmm6
+         vmovdqu	OWORD PTR [rsp+1040], xmm7
+@@ -19501,7 +19510,7 @@ mlkem_encapsulate_avx512 PROC
+         mov	r10, QWORD PTR [rsp+112]
+         mov	r11, QWORD PTR [rsp+120]
+         mov	r12, QWORD PTR [rsp+128]
+-        mov	r13, QWORD PTR [rsp+136]
++        mov	r13d, DWORD PTR [rsp+136]
+         sub	rsp, 216
+         vmovdqu	OWORD PTR [rsp+56], xmm6
+         vmovdqu	OWORD PTR [rsp+72], xmm7
+@@ -26277,7 +26286,7 @@ mlkem_decapsulate_avx512 PROC
+         push	r12
+         push	r13
+         push	r14
+-        mov	rax, QWORD PTR [rsp+64]
++        mov	eax, DWORD PTR [rsp+64]
+         sub	rsp, 160
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -29736,6 +29745,7 @@ _TEXT ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_ptacc_x2_avx512 PROC
+         push	r12
++        mov	r9d, r9d
+         sub	rsp, 128
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -30854,6 +30864,8 @@ mlkem_rej_uniform_avx512 PROC
+         push	rbx
+         push	r12
+         push	r13
++        mov	edx, edx
++        mov	r9d, r9d
+         sub	rsp, 48
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -30969,6 +30981,8 @@ mlkem_rej_uniform_n_avx512 PROC
+         push	rbx
+         push	r12
+         push	r13
++        mov	edx, edx
++        mov	r9d, r9d
+         sub	rsp, 48
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -31456,6 +31470,7 @@ mlkem_redistribute_8_rand_x8_avx512 PROC
+         push	r14
+         push	r15
+         push	rdi
++        mov	r8d, r8d
+         sub	rsp, 160
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -31549,6 +31564,7 @@ mlkem_redistribute_16_rand_x8_avx512 PROC
+         push	r14
+         push	r15
+         push	rdi
++        mov	r8d, r8d
+         sub	rsp, 160
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -31682,6 +31698,7 @@ mlkem_redistribute_17_rand_x8_avx512 PROC
+         push	r14
+         push	r15
+         push	rdi
++        mov	r8d, r8d
+         sub	rsp, 160
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -31831,6 +31848,7 @@ mlkem_redistribute_21_rand_x8_avx512 PROC
+         push	r14
+         push	r15
+         push	rdi
++        mov	r8d, r8d
+         sub	rsp, 160
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -32112,6 +32130,7 @@ mlkem_csubq_avx512 ENDP
+ _TEXT ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_cmp_avx512 PROC
++        mov	r8d, r8d
+         vpxorq	zmm0, zmm0, zmm0
+         vpxor	ymm2, ymm2, ymm2
+         mov	r9d, 0
+@@ -32918,6 +32937,7 @@ ptr_L_mlkem_decompress_10_avx512_shuf QWORD L_mlkem_decompress_10_avx512_shuf
+ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_decompress_10_avx512 PROC
++        mov	r8d, r8d
+         vmovdqu64	zmm0, ZMMWORD PTR L_mlkem_decompress_10_avx512_mask
+         vmovdqu64	zmm1, ZMMWORD PTR L_mlkem_decompress_10_avx512_q
+         vmovdqu64	zmm2, ZMMWORD PTR L_mlkem_decompress_10_avx512_shuf
+@@ -33057,6 +33077,7 @@ ptr_L_mlkem_decompress_11_avx512_mask QWORD L_mlkem_decompress_11_avx512_mask
+ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_decompress_11_avx512 PROC
++        mov	r8d, r8d
+         sub	rsp, 40
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -33355,6 +33376,7 @@ ptr_L_mlkem_compress_10_avx512_shuf QWORD L_mlkem_compress_10_avx512_shuf
+ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_compress_10_avx512 PROC
++        mov	r8d, r8d
+         sub	rsp, 120
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -33648,6 +33670,7 @@ ptr_L_mlkem_compress_11_avx512_shuf QWORD L_mlkem_compress_11_avx512_shuf
+ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_compress_11_avx512 PROC
++        mov	r8d, r8d
+         sub	rsp, 136
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -33998,6 +34021,8 @@ _TEXT SEGMENT READONLY PARA
+ mlkem_rej_uniform_avx512_vbmi2 PROC
+         push	rbx
+         push	r12
++        mov	edx, edx
++        mov	r9d, r9d
+         mov	eax, edx
+         mov	r12, 3329
+         vmovd	xmm0, r12d
+@@ -34091,6 +34116,8 @@ _TEXT SEGMENT READONLY PARA
+ mlkem_rej_uniform_n_avx512_vbmi2 PROC
+         push	rbx
+         push	r12
++        mov	edx, edx
++        mov	r9d, r9d
+         mov	eax, edx
+         mov	r12, 3329
+         vmovd	xmm0, r12d
+@@ -34403,6 +34430,8 @@ mlkem_rej_uniform_avx512_vbmi PROC
+         push	rbx
+         push	r12
+         push	r13
++        mov	edx, edx
++        mov	r9d, r9d
+         sub	rsp, 48
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -34517,6 +34546,8 @@ mlkem_rej_uniform_n_avx512_vbmi PROC
+         push	rbx
+         push	r12
+         push	r13
++        mov	edx, edx
++        mov	r9d, r9d
+         sub	rsp, 48
+         vmovdqu	OWORD PTR [rsp], xmm6
+         vmovdqu	OWORD PTR [rsp+16], xmm7
+@@ -34871,6 +34902,7 @@ ptr_L_mlkem_compress_10_avx512_vbmi_gather QWORD L_mlkem_compress_10_avx512_vbmi
+ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_compress_10_avx512_vbmi PROC
++        mov	r8d, r8d
+         sub	rsp, 120
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -35106,6 +35138,7 @@ ptr_L_mlkem_decompress_10_avx512_vbmi_hi QWORD L_mlkem_decompress_10_avx512_vbmi
+ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_decompress_10_avx512_vbmi PROC
++        mov	r8d, r8d
+         vmovdqu64	zmm0, ZMMWORD PTR L_mlkem_decompress_10_avx512_vbmi_mask
+         vmovdqu64	zmm1, ZMMWORD PTR L_mlkem_decompress_10_avx512_vbmi_q
+         vmovdqu64	zmm2, ZMMWORD PTR L_mlkem_decompress_10_avx512_vbmi_sllv
+@@ -35234,6 +35267,7 @@ ptr_L_mlkem_decompress_11_avx512_vbmi_hi QWORD L_mlkem_decompress_11_avx512_vbmi
+ _DATA ENDS
+ _TEXT SEGMENT READONLY PARA
+ mlkem_decompress_11_avx512_vbmi PROC
++        mov	r8d, r8d
+         sub	rsp, 40
+         vmovdqu	OWORD PTR [rsp+8], xmm6
+         vmovdqu	OWORD PTR [rsp+24], xmm7
+@@ -35353,6 +35387,8 @@ _TEXT SEGMENT READONLY PARA
+ mlkem_rej_uniform_avx512_vbmi_vbmi2 PROC
+         push	rbx
+         push	r12
++        mov	edx, edx
++        mov	r9d, r9d
+         mov	eax, edx
+         mov	r12, 3329
+         vmovd	xmm0, r12d
+@@ -35445,6 +35481,8 @@ _TEXT SEGMENT READONLY PARA
+ mlkem_rej_uniform_n_avx512_vbmi_vbmi2 PROC
+         push	rbx
+         push	r12
++        mov	edx, edx
++        mov	r9d, r9d
+         mov	eax, edx
+         mov	r12, 3329
+         vmovd	xmm0, r12d
+diff --git a/wolfssl/wolfcrypt/cpuid.h b/wolfssl/wolfcrypt/cpuid.h
+index a4ea339..e86165b 100644
+--- a/wolfssl/wolfcrypt/cpuid.h
++++ b/wolfssl/wolfcrypt/cpuid.h
+@@ -106,6 +106,19 @@ typedef word32 cpuid_flags_t;
+      * (vpshufb, vpaddw, vpmulhw, vpackusdw, ... on zmm). */
+     #define CPUID_AVX512_BW 0x80000
+     #define CPUID_SSSE3  0x100000     /* SSSE3 (pshufb etc.) */
++    /* Tuning bits.  These are not instruction-set features: they mark a CPU
++     * on which an implementation that the feature bits allow is measured to
++     * be slower than a narrower one.  Set from the family/model in cpuid.c
++     * (none are set when WC_CPUID_NO_TUNING is defined) and can be changed
++     * with cpuid_set_flag()/cpuid_clear_flag().
++     *   CPUID_SLOW_VAES:      AES using VAES (ymm) is no faster than the
++     *                         AVX2/AES-NI code, so AES (and AES-GCM-SIV's
++     *                         POLYVAL) does not pick it.
++     *   CPUID_SLOW_AVX2_SHA3: the single-stream AVX2 Keccak-f[1600] block is
++     *                         slower than BMI2 and C, so SHA-3 and ML-DSA do
++     *                         not pick it. */
++    #define CPUID_SLOW_VAES      0x200000
++    #define CPUID_SLOW_AVX2_SHA3 0x400000
+ 
+     #define IS_INTEL_AVX1(f)    (WOLFSSL_ATOMIC_COERCE_UINT(f) & CPUID_AVX1)
+     #define IS_INTEL_AVX2(f)    (WOLFSSL_ATOMIC_COERCE_UINT(f) & CPUID_AVX2)
+@@ -141,6 +154,10 @@ typedef word32 cpuid_flags_t;
+     #define IS_CPU_INTEL(f)     (WOLFSSL_ATOMIC_COERCE_UINT(f) & CPUID_INTEL)
+     #define IS_CPU_AMD(f)       (WOLFSSL_ATOMIC_COERCE_UINT(f) & CPUID_AMD)
+     #define IS_INTEL_SSSE3(f)   (WOLFSSL_ATOMIC_COERCE_UINT(f) & CPUID_SSSE3)
++    #define IS_CPU_SLOW_VAES(f) \
++        (WOLFSSL_ATOMIC_COERCE_UINT(f) & CPUID_SLOW_VAES)
++    #define IS_CPU_SLOW_AVX2_SHA3(f) \
++        (WOLFSSL_ATOMIC_COERCE_UINT(f) & CPUID_SLOW_AVX2_SHA3)
+ 
+ #elif defined(HAVE_CPUID_AARCH64)
+ 
+diff --git a/wolfssl/wolfcrypt/sha3.h b/wolfssl/wolfcrypt/sha3.h
+index ed196f3..3bd01c6 100644
+--- a/wolfssl/wolfcrypt/sha3.h
++++ b/wolfssl/wolfcrypt/sha3.h
+@@ -408,8 +408,11 @@ WOLFSSL_LOCAL void BlockSha3(word64 *s);
+      * functions.  Measured (Ethereum "Optimizing Keccak"; OpenSSL
+      * keccak1600-x86_64.pl): AVX2 is ~13-17% faster than BMI2 on Intel
+      * Haswell..Skylake, tied on Ice Lake, but ~2x SLOWER on AMD Zen, so AVX2
+-     * is Intel-only.  (Single-stream AVX-512 is vpermt2q-bound and slower
+-     * than BMI2 everywhere measured, so it is not built.)
++     * is Intel-only.  On Intel Arrow Lake and Lunar Lake AVX2 is slower
++     * than BMI2 and C, so it is also skipped on CPUs marked
++     * CPUID_SLOW_AVX2_SHA3.
++     * (Single-stream AVX-512 is vpermt2q-bound and slower than BMI2
++     * everywhere measured, so it is not built.)
+      * Every caller of sha3_block_avx2()/sha3_block_n_avx2() must select with
+      * this and not with IS_INTEL_AVX2() alone.
+      * Overrides: WOLFSSL_SHA3_AVX2 forces AVX2 on any vendor with it;
+@@ -419,7 +422,8 @@ WOLFSSL_LOCAL void BlockSha3(word64 *s);
+ #elif defined(WOLFSSL_SHA3_AVX2)
+     #define SHA3_USE_AVX2(f) IS_INTEL_AVX2(f)
+ #else
+-    #define SHA3_USE_AVX2(f) (IS_INTEL_AVX2(f) && IS_CPU_INTEL(f))
++    #define SHA3_USE_AVX2(f) \
++        (IS_INTEL_AVX2(f) && IS_CPU_INTEL(f) && !IS_CPU_SLOW_AVX2_SHA3(f))
+ #endif
+ 
+     WOLFSSL_LOCAL void sha3_block_n_bmi2(word64* s, const byte* data, word32 n,

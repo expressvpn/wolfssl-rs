@@ -152,6 +152,7 @@ const PATCHES: &[&str] = &[
     "Fix-AVX512-Visual-Studio-assembly-build.patch",
     "Disable-AVX512-AES-with-NO_VAES_SUPPORT.patch",
     "SHA-3-select-BMI2-ahead-of-AVX2.patch",
+    "x86_64-asm-32-bit-parameters-and-Arrow-Lake-tuning.patch",
 ];
 const OPTIONAL_FEATURES: &[&str] = &[
     "aesccm",
@@ -331,12 +332,12 @@ fn build_win(wolfssl_src: &Path) -> PathBuf {
         // USE_INTEL_SPEEDUP code paths. The macro is also defined in
         // windows/user_settings-x86_64.h so bindgen sees the same struct layouts.
         args.push("-p:WolfSSLIntelAsm=true".to_string());
-        // ml64 cannot read user_settings.h. Mirror the AVX-512/VAES opt-outs from
+        // ml64 cannot read user_settings.h. Mirror the AVX-512 opt-out from
         // windows/user_settings-x86_64.h so the assembler emits the same ISA levels the
-        // C dispatch uses (and no dead AVX-512 code). Drop this line together with the
-        // NO_AVX512_SUPPORT / NO_VAES_SUPPORT defines to turn those kernels on; the
-        // patched vcxproj then defaults to /DHAVE_INTEL_AVX512 /DHAVE_INTEL_VAES.
-        args.push("-p:WolfSSLIntelAsmDefs=/DNO_AVX512_SUPPORT /DNO_VAES_SUPPORT".to_string());
+        // C dispatch uses (and no dead AVX-512 code). Setting this property replaces the
+        // patched vcxproj's default (/DHAVE_INTEL_AVX512 /DHAVE_INTEL_VAES), so VAES has
+        // to be listed too. Drop this line with NO_AVX512_SUPPORT to turn AVX-512 on.
+        args.push("-p:WolfSSLIntelAsmDefs=/DNO_AVX512_SUPPORT /DHAVE_INTEL_VAES".to_string());
     }
 
     let args: Vec<&str> = args.iter().map(String::as_str).collect();

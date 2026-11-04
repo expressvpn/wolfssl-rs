@@ -13,16 +13,13 @@
 #undef USE_INTEL_SPEEDUP
 #define USE_INTEL_SPEEDUP
 
-/* Keep the AVX-512 and VAES kernels out of the C dispatch for now. Measured on
- * Core Ultra 7 255H (Arrow Lake, VAES without AVX-512) the VAES AES-GCM kernel
- * is ~10% slower than C and ~20% slower than the AVX2 kernel; the AVX-512
- * kernels have not been exercised on Windows yet. build.rs mirrors these to
- * ml64 (WolfSSLIntelAsmDefs) so the assembly matches. AVX1/AVX2 stay enabled. */
+/* Keep the AVX-512 kernels out of the C dispatch for now; they have not been
+ * exercised on Windows yet. build.rs mirrors this to ml64 (WolfSSLIntelAsmDefs)
+ * so the assembly matches. AVX1/AVX2 and VAES stay enabled: on Arrow Lake and
+ * Lunar Lake, where VAES AES-GCM is ~20% slower than AVX2, wolfSSL's CPUID
+ * tuning (CPUID_SLOW_VAES, wolfSSL PR #11986) skips VAES at run time. */
 #undef NO_AVX512_SUPPORT
 #define NO_AVX512_SUPPORT
-
-#undef NO_VAES_SUPPORT
-#define NO_VAES_SUPPORT
 
 /* Single precision x86_64 assembly for RSA/ECC (sp_x86_64_asm.asm). The vcxproj
  * is assembled for x64 with the SP sizes build.rs passes in WolfSSLSpAsmDefs,
