@@ -303,6 +303,14 @@ jobs:
         with:
           submodules: true
           persist-credentials: false
+      - name: Show CPU (TEMP)
+        shell: pwsh
+        run: |
+          Get-CimInstance Win32_Processor | Select-Object Name, Manufacturer, Description | Format-List
+          Add-Type -Namespace W -Name K -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool IsProcessorFeaturePresent(uint f);'
+          # 39 = AVX2, 41 = AVX-512F
+          "AVX2:     $([W.K]::IsProcessorFeaturePresent(39))"
+          "AVX-512F: $([W.K]::IsProcessorFeaturePresent(41))"
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
@@ -317,4 +325,4 @@ jobs:
       - name: Test on Windows (${{ matrix.arch }})
         # Only run tests on native architecture (x64/ARM64) since cross-compilation tests won't run
         if: matrix.target == 'x86_64-pc-windows-msvc' || matrix.target == 'aarch64-pc-windows-msvc'
-        run: cargo test --release --target ${{ matrix.target }} -v -v
+        run: cargo test --release --target ${{ matrix.target }} -v -v -- --test-threads=1
