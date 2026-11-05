@@ -21,6 +21,9 @@
 #undef NO_AVX512_SUPPORT
 #define NO_AVX512_SUPPORT
 
+#undef NO_VAES_SUPPORT
+#define NO_VAES_SUPPORT
+
 /* Single precision x86_64 assembly for RSA/ECC (sp_x86_64_asm.asm). The vcxproj
  * is assembled for x64 with the SP sizes build.rs passes in WolfSSLSpAsmDefs,
  * which must match the WOLFSSL_SP_* sizes in user_settings-common.h. This

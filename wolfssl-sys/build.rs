@@ -337,7 +337,7 @@ fn build_win(wolfssl_src: &Path) -> PathBuf {
         // C dispatch uses (and no dead AVX-512 code). Setting this property replaces the
         // patched vcxproj's default (/DHAVE_INTEL_AVX512 /DHAVE_INTEL_VAES), so VAES has
         // to be listed too. Drop this line with NO_AVX512_SUPPORT to turn AVX-512 on.
-        args.push("-p:WolfSSLIntelAsmDefs=/DNO_AVX512_SUPPORT /DHAVE_INTEL_VAES".to_string());
+        args.push("-p:WolfSSLIntelAsmDefs=/DNO_AVX512_SUPPORT /DNO_VAES_SUPPORT".to_string());
     }
 
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
