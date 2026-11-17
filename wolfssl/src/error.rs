@@ -17,7 +17,7 @@ pub enum Poll<T> {
     /// yet. A write is pending
     PendingWrite,
     /// Underlying IO operations are still ongoing. No output has been generated
-    /// yet. A write is pending
+    /// yet. A read is pending
     PendingRead,
     /// An output has been generated.
     Ready(T),
@@ -63,7 +63,7 @@ pub enum ErrorKind {
     /// CA cert not available to verify certificate
     #[error("CA cert not available to verify certificate")]
     CaCertNotAvailable,
-    /// Domain name mismatch error)
+    /// Domain name mismatch error
     #[error("Domain name mismatch")]
     DomainNameMismatch,
     /// Duplicate message error
